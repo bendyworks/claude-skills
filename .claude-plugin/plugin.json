@@ -1,0 +1,11 @@
+{
+  "name": "bendyworks",
+  "description": "Story planning, branch-quality gauntlet, Linear workflow, and project-ops skills from Bendyworks",
+  "author": {
+    "name": "Bendyworks"
+  },
+  "homepage": "https://github.com/bendyworks/claude-skills",
+  "repository": "https://github.com/bendyworks/claude-skills",
+  "license": "MIT",
+  "keywords": ["rails", "workflow", "code-quality", "linear", "planning"]
+}

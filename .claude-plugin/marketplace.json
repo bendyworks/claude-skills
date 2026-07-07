@@ -1,0 +1,15 @@
+{
+  "name": "bendyworks",
+  "owner": {
+    "name": "Bendyworks",
+    "email": "info@bendyworks.com"
+  },
+  "description": "Claude Code skills we use every day at Bendyworks",
+  "plugins": [
+    {
+      "name": "bendyworks",
+      "source": "./",
+      "description": "Story planning, branch-quality gauntlet, Linear workflow, and project-ops skills"
+    }
+  ]
+}
