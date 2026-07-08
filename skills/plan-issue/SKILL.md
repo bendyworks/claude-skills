@@ -28,9 +28,9 @@ record -- wait for the user. Likewise, do NOT auto-advance from **record**
 into **finish** -- the gap between merge and production deploy is real, and
 finish only runs once both have happened.
 
-## Rules the user's CLAUDE.md files typically already cover -- do NOT restate them in the plan
+## Rules the user's CLAUDE.md files may already cover -- do NOT restate them in the plan
 
-The user's global and project CLAUDE.md files typically already require:
+The user's global and project CLAUDE.md files may already require:
 
 - TDD by default (failing spec first for production code changes).
 - Small PRs (<300-400 lines), incremental commits.
@@ -55,7 +55,7 @@ A single succinct title is chosen up front and used as the base for
 2. The plan filename under `.claude/plans/`.
 3. The git branch name.
 
-Per CLAUDE.md guidance, target roughly 40 characters or fewer for the
+Target roughly 40 characters or fewer for the
 title -- a short verb-led phrase with one concept. Detail belongs in
 the description, not the title. **Always pull the canonical branch name
 from the issue tracker** rather than inventing a slug -- this guarantees
@@ -101,15 +101,9 @@ agreed and the branch name is known, but before creating files or the
 branch), rename the current Claude Code session to match. This makes
 the session discoverable later from a glance at the session list.
 
-The Claude Code built-in `/rename` slash command is a UI command. It
-cannot be invoked from a tool call, and writing the equivalent
-`{"type":"custom-title", ...}` JSONL record into the current session's
-transcript does NOT update the live terminal title -- the title bar is
-set by an OSC escape sequence the real `/rename` emits in-band, and a
-file write can't reach the TTY mid-session. The JSONL record only takes
-effect on the next session load.
-
-So: prompt the user to run `/rename` themselves. Pick the slug:
+The Claude Code built-in `/rename` slash command is a UI command that
+cannot be invoked from a tool call. So: prompt the user to run
+`/rename` themselves. Pick the slug:
 
 - If a Linear or Shortcut issue exists (or has just been created) and
   the canonical git branch slug has been chosen, use `<branch-slug>`
@@ -359,7 +353,7 @@ Draft a plan with:
 
    1. Run the project's full lint+test suite once, capturing complete
       output to a log file you can grep (use the project's suite-runner
-      skill if it provides one). This is the slow step
+      skill if it provides one). This is the slow step.
    2. Run the gauntlet skill (bundled in this plugin) via the Skill
       tool. The gauntlet is a multi-front quality pass that *requires*
       clean-and-green as its starting state -- it dispatches parallel
@@ -522,8 +516,8 @@ phase or to-do (your judgment on grouping):
    changed: just the affected specs are fine. You may bundle multiple
    to-dos into a single full-suite run when the time saved is worth
    the lower granularity.
-3. Commit and push that work. Use a Title-Case noun-phrase commit
-   title per CLAUDE.md guidance.
+3. Commit and push that work. Default to a Title-Case noun-phrase
+   commit title, unless the project's conventions say otherwise.
 4. Update the plan markdown: change `- [ ]` to `- [x]` for completed
    items, add any newly-discovered work. Mirror the change in the
    Task tracker via `TaskUpdate` so the Ctrl-T view stays accurate.

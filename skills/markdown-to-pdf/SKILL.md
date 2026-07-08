@@ -71,6 +71,8 @@ date/URL chrome. On Linux use `google-chrome`/`chromium`; `weasyprint` or
 ## Verify before reporting done
 
 - `file OUT.pdf` -> must say `N pages` with N > 0 (0 pages = failed render).
+  Some Linux builds of `file(1)` omit the page count entirely -- fall back to
+  `pdfinfo OUT.pdf`, or at minimum a non-zero-size check.
 - A real multi-page PDF is tens of KB+; a couple-KB file is suspect.
 - If `pdftoppm`/poppler is installed you can rasterize a page to eyeball it;
   if not, confirm the corrected/critical sections made it in by grepping the

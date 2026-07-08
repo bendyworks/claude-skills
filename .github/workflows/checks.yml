@@ -1,5 +1,8 @@
 name: checks
 
+permissions:
+  contents: read
+
 on:
   push:
     branches: [main]
@@ -14,7 +17,7 @@ jobs:
           fetch-depth: 0
       - name: Scan full history for secrets
         run: |
-          docker run --rm -v "$PWD:/repo" ghcr.io/gitleaks/gitleaks:latest \
+          docker run --rm -v "$PWD:/repo" ghcr.io/gitleaks/gitleaks:v8.30.1 \
             git --no-banner /repo
 
   identifiers:

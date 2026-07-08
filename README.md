@@ -49,6 +49,10 @@ To pick up updates later:
   variable.
 - `gauntlet` is tuned for Ruby on Rails projects (RSpec, RuboCop, Pundit).
   It runs elsewhere, but its audit prompts are Rails-flavored.
+- `gauntlet`, `dependabot-batch`, and `finished-issue-housekeeping` lean on
+  the GitHub CLI (`gh`) being installed and authenticated.
+- `markdown-to-pdf` needs a Chromium-based browser or wkhtmltopdf, plus a
+  markdown converter (kramdown gem, pandoc, or python-markdown).
 
 ## Upgrading Rails?
 

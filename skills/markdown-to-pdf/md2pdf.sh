@@ -6,8 +6,9 @@
 #   WORKDIR     defaults to a temp dir; pass your session scratchpad to keep it.
 #
 # Pipeline: md -> self-contained HTML (md2html.rb) -> PDF (Chrome headless,
-# then wkhtmltopdf-with-verification). Exits non-zero if the final PDF has 0
-# pages -- the wkhtmltopdf-on-macOS failure mode this skill exists to catch.
+# then wkhtmltopdf-with-verification, then weasyprint). Exits non-zero if
+# the final PDF has 0 pages -- the wkhtmltopdf-on-macOS failure mode this
+# skill exists to catch.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -15,6 +16,7 @@ IN="${1:?usage: md2pdf.sh INPUT.md [OUTPUT.pdf] [WORKDIR]}"
 OUT="${2:-${IN%.*}.pdf}"
 WORK="${3:-$(mktemp -d)}"
 mkdir -p "$WORK"
+WORK="$(cd "$WORK" && pwd)"
 HTML="$WORK/$(basename "${IN%.*}").html"
 
 # --- md -> HTML ---

@@ -6,7 +6,7 @@ description: Triage, verify, merge, and deploy a batch of open Dependabot PRs fo
 # Dependabot batch playbook
 
 This skill runs the repeatable workflow for clearing a batch of Dependabot PRs:
-inventory → triage → per-PR rebase/verify/merge → deploy. It gates autonomy
+inventory -> triage -> per-PR rebase/verify/merge -> deploy. It gates autonomy
 against three config files and one policy section below.
 
 ## Config files to read at start
@@ -24,6 +24,24 @@ provide one:
 Read all three before Phase 1. Reference them in later phases. When both a
 project and global file exist, the project file wins entirely (do not merge).
 
+**First run / missing config.** If a file exists in neither location, treat
+every dial it would supply as "ask the user" (the most conservative setting)
+for this run, then offer to scaffold the missing file(s) in
+`<project>/.claude/` from the user's answers. Expected keys:
+
+```yaml
+# dependabot-autonomy.yml
+merge_dev_only_with_green_ci: ask  # auto | ask
+merge_runtime_bumps: ask           # auto | ask
+compatibility_score_floor: 90      # percent; below this -> ask
+separate_flake_fix_pr: true
+verify_command: ~                  # default: project's lint+test entry point
+deploy_after_batch: ask            # auto | ask
+deploy_command: ~
+# dependabot-never-auto.yml: a YAML list of package names.
+# known-flakes.md: free-form fingerprint entries (see Flake-registry upkeep).
+```
+
 ## Hard veto (policy, not a dial)
 
 These categories **always** downgrade to "ask" regardless of dials or
@@ -38,9 +56,8 @@ compatibility score. Do not auto-merge under any circumstance:
 - Any package listed in `dependabot-never-auto.yml`
 - Any **grouped** Dependabot branch (e.g. `dependabot/<ecosystem>/multi-*` or
   similarly-named group branches) -- refuse to process and point the user at
-  their `.github/dependabot.yml` config. Per project convention, individual
-  bumps are preferred so that a single bad upgrade can be reverted in
-  isolation.
+  their `.github/dependabot.yml` config. This skill prefers individual
+  bumps so a single bad upgrade can be reverted in isolation.
 
 ## Phase 1: Inventory
 
@@ -48,9 +65,9 @@ Run `gh pr list --state open --author app/dependabot --json number,title,headRef
 
 For each PR, extract and display in a compact table:
 
-| PR | Package | From → To | Bump type | Group | CI | Compat % |
+| PR | Package | From -> To | Bump type | Group | CI | Compat % |
 
-- **Bump type:** patch / minor / major (from the "From → To" semver delta)
+- **Bump type:** patch / minor / major (from the "From -> To" semver delta)
 - **Group:** dev-only (package lives only in dev/test scope -- e.g. Ruby
   `:development` / `:development, :test` groups, npm `devDependencies`,
   Python dev-extras) vs runtime (anything else). Check against the project's
@@ -74,7 +91,7 @@ allowed and pick the method this batch will use:
 gh api "repos/{owner}/{repo}" --jq '{squash:.allow_squash_merge,merge:.allow_merge_commit,rebase:.allow_rebase_merge}'
 ```
 
-Pick the first allowed method in this priority order: **squash → merge →
+Pick the first allowed method in this priority order: **squash -> merge ->
 rebase**. Squash is preferred for clean dependency-bump history; the others
 are fallbacks when the repo disallows squash. Store the chosen flag
 (`--squash` / `--merge` / `--rebase`) and reuse it for every merge in this
@@ -92,11 +109,11 @@ process it and point the user at `.github/dependabot.yml`.
 
 - Fetch the failure trace (`gh run view <run-id> --log-failed`)
 - Match against `known-flakes.md` fingerprints
-- If **all** failing PRs match known flake patterns → per the
+- If **all** failing PRs match known flake patterns -> per the
   `separate_flake_fix_pr` dial, propose a standalone flake-fix PR first,
   stop, and wait for the user to approve/merge it. After they do, re-run the
   skill.
-- If **any** failure is not a known flake → stop, surface the trace, and ask
+- If **any** failure is not a known flake -> stop, surface the trace, and ask
   the user. Do not proceed on that PR.
 
 ## Phase 3: Merge order
@@ -175,8 +192,8 @@ Close the session with a table:
 
 | PR | Package | Bump | Outcome |
 |----|---------|------|---------|
-| #31 | foo-gem | 11.3.0 → 11.3.1 | auto-merged |
-| #29 | bar-pkg | 2.1.0 → 2.2.3 | awaiting user merge (compat N/A) |
+| #31 | foo-gem | 11.3.0 -> 11.3.1 | auto-merged |
+| #29 | bar-pkg | 2.1.0 -> 2.2.3 | awaiting user merge (compat N/A) |
 | ... | ... | ... | ... |
 
 Plus:
@@ -185,19 +202,19 @@ Plus:
 
 ## Escalation rules (short reference)
 
-- Default-branch CI red at start → stop
-- Rebase conflict → stop, surface diff
-- Grouped-branch PR present → refuse, point at config
-- CI failure with unknown fingerprint → stop, surface trace, ask
-- Lint offense not cleanly fixable in one pass → stop, ask
-- Deploy command non-zero exit → stop, surface logs
+- Default-branch CI red at start -> stop
+- Rebase conflict -> stop, surface diff
+- Grouped-branch PR present -> refuse, point at config
+- CI failure with unknown fingerprint -> stop, surface trace, ask
+- Lint offense not cleanly fixable in one pass -> stop, ask
+- Deploy command non-zero exit -> stop, surface logs
 
 ## Flake-registry upkeep
 
 When a new flake is diagnosed and fixed in the course of running this skill,
 append a new entry to the project's `.claude/known-flakes.md` (newest at
 bottom) before finishing the session. If the project does not yet have its
-own file, copy the global one to `<project>/.claude/known-flakes.md` first
-and append there -- flake fingerprints are usually project-specific and
-should not be added to the global template. Include: error signature,
+own file, create it (copying a global one if you keep one) and append
+there -- flake fingerprints are usually project-specific and should not be
+added to a global template. Include: error signature,
 typical trigger, fix pattern, first-observed date and file.

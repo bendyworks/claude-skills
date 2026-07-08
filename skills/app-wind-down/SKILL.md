@@ -92,8 +92,8 @@ dynos -- they sleep; Basic and Standard stay warm).
   - Budget-tier databases usually lose continuous protection -- schedule
     nightly logical backups explicitly.
 - **Add monitoring, because nobody is watching anymore.** A free uptime
-  ping (existing New Relic Synthetics works) alerting the responsible
-  human. Point it at the platform URL (herokuapp.com), not the custom
+  ping (an existing APM's synthetic check works, or any free uptime
+  pinger) alerting the responsible human. Point it at the platform URL (herokuapp.com), not the custom
   domain, so a DNS incident doesn't blind the app check.
 - **Verify end to end**: key pages, images from the CDN, a DB read, and a
   real delivered email. Then compute the new run-rate from live plan data.

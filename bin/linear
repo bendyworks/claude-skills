@@ -27,9 +27,14 @@ class LinearClient
     req['Authorization'] = @token
     req.body = JSON.generate(query: graphql, variables: variables)
 
-    res = Net::HTTP.start(LINEAR_API.hostname, LINEAR_API.port, use_ssl: true) do |http|
-      http.request(req)
-    end
+    res =
+      begin
+        Net::HTTP.start(LINEAR_API.hostname, LINEAR_API.port, use_ssl: true) do |http|
+          http.request(req)
+        end
+      rescue SocketError, Timeout::Error, OpenSSL::SSL::SSLError, Errno::ECONNREFUSED => e
+        abort "linear: network error: #{e.message}"
+      end
 
     abort "linear: HTTP #{res.code}: #{res.body}" unless res.code == '200'
 
@@ -43,6 +48,7 @@ class LinearClient
   def resolve_issue(identifier, fields: 'id')
     team_key, number_str = identifier.split('-', 2)
     abort "linear: identifier must look like ABC-123, got #{identifier.inspect}" if team_key.nil? || number_str.nil?
+    team_key = team_key.upcase
     number = Integer(number_str) rescue abort("linear: identifier must look like ABC-123, got #{identifier.inspect}")
 
     res = query(<<~GQL, { teamKey: team_key, number: number })
@@ -120,8 +126,16 @@ end
 def pop_option!(args, name)
   if (idx = args.index(name))
     args.delete_at(idx)
-    args.delete_at(idx)
+    value = args.delete_at(idx)
+    abort "linear: #{name} requires a value" if value.nil? || value.start_with?('--')
+    value
   end
+end
+
+def parse_limit(value)
+  Integer(value)
+rescue ArgumentError
+  abort "linear: --limit must be an integer, got #{value.inspect}"
 end
 
 ISSUE_CORE_FIELDS = <<~GQL
@@ -186,6 +200,7 @@ def cmd_get(args)
 
   client = LinearClient.new
   team_key, number_str = identifier.split('-', 2)
+  team_key = team_key&.upcase
   number = Integer(number_str) rescue abort("linear: identifier must look like ABC-123, got #{identifier.inspect}")
 
   res = client.query(<<~GQL, { teamKey: team_key, number: number })
@@ -213,6 +228,7 @@ def cmd_comments(args)
 
   client = LinearClient.new
   team_key, number_str = identifier.split('-', 2)
+  team_key = team_key&.upcase
   number = Integer(number_str) rescue abort("linear: identifier must look like ABC-123, got #{identifier.inspect}")
 
   res = client.query(<<~GQL, { teamKey: team_key, number: number })
@@ -242,7 +258,7 @@ def cmd_search(args)
   json_mode = pop_flag!(args, '--json')
   team_key = pop_option!(args, '--team')
   limit_str = pop_option!(args, '--limit')
-  limit = limit_str ? Integer(limit_str) : 25
+  limit = limit_str ? parse_limit(limit_str) : 25
   term = args.first
   abort 'Usage: linear search "phrase" [--team KEY] [--limit N] [--json]' if term.nil? || term.empty?
 
@@ -356,22 +372,7 @@ def cmd_create(args)
   end
   assignee_id = assignee ? client.resolve_user_id(assignee) : nil
 
-  project_id = nil
-  if project_name
-    proj_res = client.query(<<~GQL, { teamId: team['id'] })
-      query($teamId: String!) {
-        team(id: $teamId) { projects(first: 250) { nodes { id name } } }
-      }
-    GQL
-    projects = proj_res.dig('data', 'team', 'projects', 'nodes') || []
-    project = projects.find { |p| p['name'] == project_name }
-    project ||= projects.find { |p| p['name'].downcase.include?(project_name.downcase) }
-    unless project
-      available = projects.map { |p| p['name'] }.sort.join("\n  ")
-      abort "linear: project #{project_name.inspect} not found on team #{team_key}.\nAvailable projects:\n  #{available}"
-    end
-    project_id = project['id']
-  end
+  project_id = client.resolve_project_id(team['id'], project_name) if project_name
 
   input = { teamId: team['id'], title: title, stateId: state['id'] }
   input[:description] = description if description
@@ -459,7 +460,7 @@ def cmd_update(args)
       }
     GQL
     state = state_res.dig('data', 'workflowStates', 'nodes', 0)
-    abort "linear: state #{state_name.inspect} not found on team #{identifier.split('-').first}" unless state
+    abort "linear: state #{state_name.inspect} not found on team #{identifier.split('-').first&.upcase}" unless state
     input[:stateId] = state['id']
 
     # Moving into a started state (e.g. In Progress) requires an assignee:
@@ -766,8 +767,9 @@ def usage
 
       linear update ABC-NNN [--state NAME] [--title TITLE]
                     [--description TEXT | --description-file PATH]
-                    [--project NAME] [--parent ABC-NNN] [--assignee EMAIL|me] [--json]
-          Update state, title, description, project, parent, or assignee.
+                    [--project NAME] [--parent ABC-NNN] [--assignee EMAIL|me]
+                    [--priority none|urgent|high|medium|low] [--json]
+          Update state, title, description, project, parent, assignee, or priority.
           --project moves the issue; --parent reparents it as a sub-issue.
           Moving to a started state (e.g. In Progress) requires an assignee:
           pass --assignee, or the issue must already have one.
@@ -803,7 +805,7 @@ def cmd_list(args)
   project_name = pop_option!(args, '--project')
   since = pop_option!(args, '--since')
   limit_str = pop_option!(args, '--limit')
-  limit = limit_str ? Integer(limit_str) : 100
+  limit = limit_str ? parse_limit(limit_str) : 100
   if team_key.nil? || team_key.empty? || (project_name.nil? && since.nil?)
     abort 'Usage: linear list --team KEY (--project NAME | --since YYYY-MM-DD) [--all] [--limit N] [--json] ' \
           '(--team may be omitted when LINEAR_TEAM_KEY is set)'
@@ -857,7 +859,8 @@ def cmd_list(args)
   end
 end
 
-case ARGV.shift
+cmd = ARGV.shift
+case cmd
 when 'get'      then cmd_get(ARGV)
 when 'comments' then cmd_comments(ARGV)
 when 'search'   then cmd_search(ARGV)
@@ -872,7 +875,7 @@ when 'project-update' then cmd_project_update(ARGV)
 when 'project-list'   then cmd_project_list(ARGV)
 when nil, 'help', '--help', '-h' then usage
 else
-  warn "linear: unknown subcommand #{$PROGRAM_NAME.inspect}"
+  warn "linear: unknown subcommand #{cmd.inspect}"
   usage
   exit 1
 end

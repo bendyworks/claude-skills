@@ -1,6 +1,6 @@
 ---
 name: finished-issue-housekeeping
-description: Post-ship cleanup for a story that is merged AND live in production. Finalizes the plan file, deletes the local working branch, prunes other stale local git branches repo-wide (not just the just-finished story's), updates auto-memory (Done entry + any new tech-note or skill worth saving) and prunes MEMORY.md back within its size budget, verifies sibling-audit follow-ups got filed, stops any dev server started for verification, and clears completed tasks from the conversation task list. Use when the user says "finish up the plan", "we shipped X, clean it up", "post-ship cleanup", "we're done with X", "housekeeping for <issue>", or invokes `/finished-issue-housekeeping`. Also invoked at the end of `plan-issue`'s `finish` phase.
+description: Post-ship cleanup for a story that is merged AND live in production. Finalizes the plan file, deletes the local working branch, prunes other stale local git branches repo-wide (not just the just-finished story's), updates auto-memory (Done entry + any new tech-note or skill worth saving) and prunes MEMORY.md back within its size budget, verifies sibling-audit follow-ups got filed, stops any dev server started for verification, and clears completed tasks from the conversation task list. Use when the user says "finish up the plan", "we shipped X, clean it up", "post-ship cleanup", "we're done with X", "housekeeping for <issue>", or invokes the finished-issue-housekeeping skill. Also invoked at the end of `plan-issue`'s `finish` phase.
 ---
 
 # Finished issue housekeeping
@@ -137,7 +137,7 @@ Brief entry per issue:
 
 - Identifier + title.
 - PR numbers and the production release that shipped it.
-- One-paragraph summary of what landed -- including any `/gauntlet` must-fix items, key sibling-audit results, follow-up issues filed.
+- One-paragraph summary of what landed -- including any gauntlet must-fix items, key sibling-audit results, follow-up issues filed.
 - Link to the plan file.
 
 If the issue was in the "Active Work" section of `MEMORY.md`, remove it from there at the same time so the active section stays focused on what is actually still in flight.
