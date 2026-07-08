@@ -31,15 +31,15 @@ To pick up updates later:
 
 | Skill | What it does |
 | --- | --- |
-| `gauntlet` | Multi-front quality pass on a feature branch whose specs and lint already pass: code review, then parallel audits (cruft, idioms, test quality, validation bypass, security), consolidated into a triaged punch list. Rails-oriented. |
-| `plan-issue` | Plan a story end-to-end: interview, research, propose a plan, challenge it from a fresh perspective, record it, work the to-dos, and finish after ship. |
+| `gauntlet` | Harden the quality of a branch that already accomplishes your goal and you now want to improve. This is a Rails-oriented multi-front quality pass on a feature branch whose specs and lint already pass. True superset of Anthropic's built-in /code-review skill. Includes: code review, then parallel audits (cruft, idioms, test quality, validation bypass, security), consolidated into a triaged punch list that you guide implementing. |
+| `plan-issue` | Plan a story end-to-end: interview, research, propose a plan with steps for a full life cycle, challenge it from a fresh perspective, record it, work the to-dos, and finish after ship. |
 | `finished-issue-housekeeping` | Post-ship cleanup once a story is merged and live: finalize the plan file, prune branches, tidy memory and task lists. |
+| `architecture-survey` | Identify the biggest improvement opportunities in your application - prioritizing the largest and most daunting pain points you've been paying a large maintenance tax on already. Domain-first architectural-simplification survey of a mature codebase, producing a ranked, tracker-ready refactoring backlog. Can create an epic of fixes in your story tracker of choice. |
+| `markdown-to-pdf` | Convert Markdown files to clean, print-styled PDFs. |
 | `linear` | Read and write Linear issues via a bundled CLI (create, comment, search, transition) instead of raw GraphQL. Requires Ruby and a `LINEAR_API_TOKEN` env var. |
 | `dependabot-batch` | Triage, verify, merge, and deploy a batch of open Dependabot PRs with tuneable autonomy. |
+| `bug-cluster-ledger` | Mine a time window of tracker issues and cluster them upward to root causes per subsystem, with prevention analysis. Used by architecture-survey. |
 | `app-wind-down` | Wind down a hosted app safely and reversibly: caretaker mode first, then hibernation to ~$0 with full restore assets. |
-| `bug-cluster-ledger` | Mine a time window of tracker issues and cluster them upward to root causes per subsystem, with prevention analysis. |
-| `architecture-survey` | Domain-first architectural-simplification survey of a mature codebase, producing a ranked, tracker-ready refactoring backlog. |
-| `markdown-to-pdf` | Convert Markdown files to clean, print-styled PDFs. |
 
 ## Requirements
 
@@ -48,7 +48,7 @@ To pick up updates later:
   and Linux; on Windows use WSL) and a `LINEAR_API_TOKEN` environment
   variable.
 - `gauntlet` is tuned for Ruby on Rails projects (RSpec, RuboCop, Pundit).
-  It runs elsewhere, but its audit prompts are Rails-flavored.
+  It runs elsewhere, but its audit prompts are Rails-flavored. It would be easy to re-focus a forked copy if you wish.
 - `gauntlet`, `dependabot-batch`, and `finished-issue-housekeeping` lean on
   the GitHub CLI (`gh`) being installed and authenticated.
 - `markdown-to-pdf` needs a Chromium-based browser or wkhtmltopdf, plus a
@@ -65,6 +65,7 @@ from OmbuLabs / FastRuby.io (`rails-upgrade`, `dual-boot`,
 ```
 
 We deliberately don't republish those here -- install them from the source.
+We have our own wrapping functionality that we need to separate out cleanly before publishing here.
 
 ## License
 
