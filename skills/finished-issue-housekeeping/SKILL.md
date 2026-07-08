@@ -1,0 +1,222 @@
+---
+name: finished-issue-housekeeping
+description: Post-ship cleanup for a story that is merged AND live in production. Finalizes the plan file, deletes the local working branch, prunes other stale local git branches repo-wide (not just the just-finished story's), updates auto-memory (Done entry + any new tech-note or skill worth saving) and prunes MEMORY.md back within its size budget, verifies sibling-audit follow-ups got filed, stops any dev server started for verification, and clears completed tasks from the conversation task list. Use when the user says "finish up the plan", "we shipped X, clean it up", "post-ship cleanup", "we're done with X", "housekeeping for <issue>", or invokes `/finished-issue-housekeeping`. Also invoked at the end of `plan-issue`'s `finish` phase.
+---
+
+# Finished issue housekeeping
+
+The work is not done when the PR merges. It is done when production is running the merged code, the user has confirmed nothing is outstanding, and the working-state debris (local branch, in-flight tasks, stale plan checkboxes, unrecorded learning) has been swept up.
+
+This skill runs the cleanup steps below in order. It is invoked either:
+
+- Automatically at the end of the `finish` phase of the plan-issue skill (bundled in this plugin), OR
+- Directly by the user for ad-hoc work that did not go through the plan-issue skill (small bug fixes, one-off cleanups, work that pre-dated the plan system).
+
+## Rules already covered elsewhere -- do NOT restate
+
+- **CLAUDE.md (global and project)** -- development-time rules (clean-and-green, TDD, lint, commit conventions). Housekeeping does not touch production code, so those rules are out of scope here.
+- **plan-issue skill (bundled in this plugin)** -- owns plan creation, challenge, recording, and execution. This skill is called only for the final cleanup.
+
+---
+
+## Step 1 -- Confirm preconditions
+
+Before any cleanup, verify:
+
+1. **The PR is merged.** Run `gh pr view <PR#> --json state,mergedAt` and confirm state is `MERGED`. For stories that landed via several PRs, check the last one.
+2. **The merged code is live in production.** Check the project's deploy log:
+   - Heroku apps: `heroku releases -a <prod-app> --num 3` and confirm a release whose commit SHA descends from the merge commit.
+   - Other deploy targets: ask the user, or look at the deploy log / dashboard.
+3. **The user explicitly confirms** the work is wrapped up (they invoked this skill or said "we shipped X").
+
+If any of these is "no" -- **stop**. Do not delete anything. The branch may still be needed for a hotfix; the plan may still have post-deploy tasks.
+
+## Step 2 -- Plan file finalization
+
+If a plan file exists for this story (the plan-issue skill places them under `.claude/plans/<slug>.md`; ad-hoc plans may live elsewhere -- ask the user if unsure):
+
+**Do not blindly flip `- [ ]` to `- [x]`.** Each unchecked item must be classified before you touch it. Read every `- [ ]` line, then sort each one into one of three buckets:
+
+- **Actually done.** The conversation history, git log, PRs, or production state make it obvious the work landed. Flip to `- [x]`.
+- **Deferred to a follow-up issue.** The work was intentionally split off; a separate issue tracks it. Replace the `- [ ]` with `- [x] (deferred to <ISSUE-ID>)` so the deferral and its destination are both visible in the historical record.
+- **Genuinely not done, and unsure whether it should be.** Surface it to the user and ask: "I see `<item>` is still unchecked. Was it done, deferred, or still outstanding?" Wait for the answer.
+
+If the user identifies any item that **is still outstanding and should be finished**, **STOP the entire housekeeping pass.** The story is not actually done; finishing the housekeeping would lock that fact behind a `[x]` and lose it. Surface the outstanding work clearly, and let the user decide whether to extend the PR / open a follow-up / accept the deferral. Resume housekeeping only after the situation is resolved.
+
+Once every unchecked item has been classified and updated, add a "Shipment" section at the bottom of the plan:
+
+```
+## Shipment
+
+Shipped to production YYYY-MM-DD via <release version + commit SHA>.
+
+<one paragraph naming each PR that landed, any gauntlet must-fix items
+surfaced, and any follow-up issues that got filed>
+```
+
+Use the conversation's actual dates, PR numbers, and SHAs. Do not fabricate. If you don't know, look them up via `gh pr view`, `git log`, or the project's deploy log.
+
+If multiple plan files match the issue (e.g. a parent plan + a follow-up plan), apply the same classification process to each.
+
+If no plan file (skill invoked ad-hoc), skip this step.
+
+## Step 3 -- Local branch deletion
+
+```bash
+git checkout main          # or master / project's main branch
+git pull
+git branch -d <branch-name>
+```
+
+**Use `-d`, NOT `-D`.** If `-d` refuses with "branch is not fully merged":
+
+- Most common cause: the PR was squash-merged or rebase-merged, so the branch's commits do not appear by SHA in `main`'s history. Confirm via the merge commit on the forge (`gh pr view <PR#> --json mergeCommit`); if confirmed, `-D` is safe.
+- Less common: there is genuine unmerged work on the local branch that did not make it into the PR. **Stop and investigate before forcing.**
+
+`-d`'s refusal is the safety net for the second case. A silent `-D` would lose work.
+
+Do NOT delete the *remote* branch. GitHub's auto-delete-on-merge usually handles it, and external tooling (Linear, deploy logs, PR cross-references) may still link to the remote ref. If the user wants the remote gone, they will ask.
+
+If multiple local branches relate to the issue (parent + follow-up branches), delete each with `-d`.
+
+## Step 3b -- Prune other stale local branches (repo-wide)
+
+Shipping a story is a natural moment to sweep the whole local branch list, not just this story's branch. Stale local branches from long-finished work pile up and make `git branch` noise. Do a repo-wide prune of branches whose work has clearly landed.
+
+First refresh remote-tracking state so the "upstream gone" signal is accurate:
+
+```bash
+git fetch --prune
+```
+
+Then classify every local branch (except the current branch and `main`/`master`) into tiers. **Delete the safe tiers; surface the judgment calls; never touch the protected set.**
+
+**Tier 1 -- merged into main (safe, `-d`).** Branches whose commits are ancestors of `origin/main`:
+
+```bash
+git branch --merged origin/main | grep -vE '^[* ]*(main|master)$'
+```
+
+Delete each with `git branch -d <branch>` (it will succeed because they are merged).
+
+**Tier 2 -- upstream gone (merged via squash/rebase, then auto-deleted on the forge).** Branches whose remote-tracking ref was deleted:
+
+```bash
+git branch -vv | grep ': gone]'
+```
+
+On a team that auto-deletes the remote branch on merge, a gone upstream is a reliable "this PR merged" signal. These were pushed at some point (they once tracked a remote), so there is no unpushed local-only work at risk, and reflog recovers anything for ~90 days. Delete with `git branch -D <branch>` (squash/rebase merges leave the tip non-ancestor of main, so `-d` refuses). **Exclude the protected set below before deleting.**
+
+**Tier 3 -- no deleted upstream, not merged.** For each remaining branch, check the forge for its PR:
+
+```bash
+gh pr list --head <branch> --state all --json number,state -q '.[0] | "\(.number) \(.state)"'
+```
+
+- **PR MERGED** -> work is in main; safe to delete with `-D`.
+- **PR OPEN** -> keep. Mention it (and how stale it is) so the user can decide whether to abandon it.
+- **No PR / local-only / recently active** -> **do not auto-delete.** Surface it with its age, commits-ahead-of-main, and your read, and let the user decide. Recent un-PR'd branches are often unfinished follow-up work.
+
+**Protected set -- never auto-delete, even if a tier would otherwise catch them:**
+
+- The current branch and `main`/`master`.
+- Intentional backup branches (names ending in `-backup`, or otherwise clearly a manual safety net). Mention them, but leave them unless the user names them explicitly.
+- Any branch the user has flagged as in-progress this session.
+
+Report the prune as a small table: how many deleted (by tier) and the surviving judgment-call branches with one-line reads. The user makes the final call on Tier 3 keepers and the protected set -- do not delete those without an explicit instruction.
+
+## Step 4 -- Update auto-memory
+
+Only run if you maintain an auto-memory for this project. Indicator: a `MEMORY.md` file under the project's memory directory (the system prompt's "auto memory" section names the directory). If the project has no auto-memory set up, skip the whole step.
+
+### 4a -- Done entry in `MEMORY.md`
+
+Add the finished issue under a "Done" cluster. Match the existing project convention -- copy the cluster-header format from the most recent Done cluster already in the file, rather than inventing a new one.
+
+Brief entry per issue:
+
+- Identifier + title.
+- PR numbers and the production release that shipped it.
+- One-paragraph summary of what landed -- including any `/gauntlet` must-fix items, key sibling-audit results, follow-up issues filed.
+- Link to the plan file.
+
+If the issue was in the "Active Work" section of `MEMORY.md`, remove it from there at the same time so the active section stays focused on what is actually still in flight.
+
+### 4b -- New tech-note or skill opportunity
+
+Ask the user **literally**: "Did anything surprising or non-obvious come up during this story that's worth saving as a tech-note memory or creating a skill for the next time we work in this area?"
+
+Examples of what qualifies as a **tech-note**:
+- Hidden invariants or timing/ordering quirks discovered.
+- Library or framework gotchas whose reasoning would not be obvious from reading the code.
+- Non-obvious workarounds that future-you will not be able to derive from current-you's commit message alone.
+
+Examples of what qualifies as a **skill**:
+- A repeated multi-step workflow that you executed ad-hoc this time and would benefit from running deterministically next time.
+- A check-and-cleanup pattern that came together late and worth promoting from "we did it once" to "we do it every time."
+- Something the user *asked* you to do that you had to figure out from scratch -- and might have to re-figure-out from scratch next time without the skill.
+
+If yes:
+- Tech-note: write the memory file in the project memory directory using the standard auto-memory frontmatter, and add a one-line pointer under `MEMORY.md`'s "Technical Notes" section.
+- Skill: propose a skill name and rough scope to the user, then write `~/.claude/skills/<name>/SKILL.md` (global) or `<project>/.claude/skills/<name>/SKILL.md` (project-scoped) following the same shape as the surrounding skills.
+
+**If no -- skip.** Do NOT fabricate to fill the slot. Empty is the right answer most of the time, and bloating memory or the skills list with low-signal entries makes the high-signal ones harder to find later.
+
+### 4c -- Keep `MEMORY.md` within its size budget
+
+Adding a Done entry (4a) grows `MEMORY.md` -- and that file is the index loaded into context *every* session, so it must stay lean. After the Done entry is in, prune the file back under budget. This runs every time an issue concludes, so the file can never silently drift over the limit.
+
+- **Budget signal.** The auto-memory system surfaces a system-reminder when `MEMORY.md` exceeds its size limit (it reports current-vs-limit KB). Being at or over the limit is a hard prompt to prune *now*; even when under, opportunistically tighten while you are already here.
+- **What to prune, in priority order:**
+  1. **Old "Done" entries** -- the fastest-accreting section. A shipped issue's detail lives permanently in its plan file, git history, the PR, and any topic-memory it spawned, so its `MEMORY.md` entry only needs to be a findable pointer. Compress every Done entry except the most recent few to a single line: `**ID** Title -- shipped YYYY-MM-DD (prod <version>); plan <path>`. Drop entirely any entry whose context is fully superseded (e.g. a fix later reverted or replaced by later work).
+  2. **Multi-paragraph entries that are no longer in-flight.** Any entry that has grown to several sentences but is not *currently active* work should be reduced to a one-line pointer, with detail pushed into a topic-memory file per the auto-memory convention.
+  3. **Stale "Active Work."** Anything already shipped should have moved to Done in 4a -- double-check none lingers.
+- **Never prune:** Critical Workflow Rules, References, Project Conventions, topic-file pointers, or genuinely-current Active Work. Those are the high-signal, still-true index.
+- **Confirm** the file is back under budget before finishing. If getting under budget would require removing something whose continued relevance you are unsure about, surface it to the user rather than deleting it.
+
+## Step 5 -- Move the issue to its terminal Done state in the tracker
+
+Recording the Done entry in `MEMORY.md` (Step 4a) closes the loop for *us*; it does NOT move the issue on the project's board. Close that loop too: transition the tracker issue (Linear, Shortcut, Jira, etc.) to its terminal **Done** state.
+
+- **Mind intermediate post-merge states.** Many boards have a staging state between "in review" and "Done" -- e.g. **Deploy Queue**, "Awaiting Deploy", "On Staging", "Ready to Release". A merged-and-shipped issue often sits in one of these, and "merged" or "deployed" does NOT mean the board already says Done. Check the current state and advance it the rest of the way.
+- For Linear, use the bundled `linear` CLI (this plugin ships it on PATH; requires Ruby and `LINEAR_API_TOKEN`): `linear update <ID> --state "Done"` (the canonical terminal-state name for the team lives in the project's tracker-reference doc, if it keeps one).
+- If the terminal state has a different name on this board ("Closed", "Shipped", "Released"), use that. If you are unsure which state is terminal, **ask the user** rather than guessing -- moving an issue to the wrong column is worse than asking.
+- Skip only for ad-hoc work with no tracker issue.
+
+## Step 6 -- Sibling-audit verification
+
+If the plan called for a sibling-bug audit (spawning separate follow-up issues for variants of the same bug shape elsewhere in the codebase), verify those follow-ups were actually filed in the project's issue tracker.
+
+To verify: list the issues created in the tracker since the story's branch-cut date, and cross-reference against the plan file's "filed as ISSUE-ID" mentions, branch commit messages, and the conversation history. The API pattern for the project's tracker is usually documented in CLAUDE.md (for Linear, the bundled `linear` CLI covers this); if you do not see it there, ask the user.
+
+If anything was dropped, file it now via the project's API or surface it as a clear TODO for the user.
+
+## Step 7 -- Stop any dev server started for this work
+
+If a development server was started during this story -- most often to drive a manual browser walkthrough or otherwise verify the change in the running app -- stop it now so it does not linger across sessions holding a port.
+
+- **Identify it:** a backgrounded `rails s` / `npm run dev` / `vite` / equivalent, or an app server process started inside the project's container.
+- **Stop it:** kill the background job you launched, or terminate the process in the container. For a Dockerized Rails app, that is usually `docker exec <container> pkill -f 'rails s'`. Then **confirm it is actually gone** -- e.g. `curl` the port returns nothing, or `ps` / `docker exec <container> ps aux` shows no match.
+- If no dev server was started this session, skip.
+
+Do NOT stop the container itself or other long-running services (db, redis, sidekiq) -- only the app server you spun up for verification.
+
+## Step 8 -- Task list housekeeping
+
+Use `TaskList` to inventory tasks. Delete the ones tied to the finished issue via `TaskUpdate` with `status: "deleted"`.
+
+Keep tasks for **other ongoing work** (different issue, different plan) untouched.
+
+## Step 9 -- Summary
+
+Report in 3-5 lines what was done:
+
+- Plan file: finalized at `<path>` (or "skipped -- ad-hoc work").
+- Branch: `<name>` deleted (or "no local branch").
+- Tracker: `<ID>` moved to Done (or "no tracker issue").
+- Memory: Done entry added; N new tech-notes saved; N new skills created; MEMORY.md pruned (now <size> KB, under budget).
+- Sibling-audit: N follow-ups verified; M dropped (filed now / TODO).
+- Dev server: stopped (or "none was running").
+- Task list: N completed tasks cleared.
+
+End with "Housekeeping complete."
