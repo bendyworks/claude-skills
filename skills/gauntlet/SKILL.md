@@ -48,6 +48,10 @@ Before starting, verify:
 
 If any precondition is off, surface it and pause -- don't push forward on a broken assumption.
 
+**Non-git version control:** the commands throughout this skill assume git. If the user works in another VCS (e.g. Jujutsu colocated with git), ask them for the change range ("which revisions are the current work?") and translate the `git diff main...HEAD` commands to that tool's equivalents -- the phases themselves don't change. Don't make the user volunteer this; ask when the working-copy state looks unfamiliar.
+
+**Cost expectations:** a full run is deliberately thorough and correspondingly token-hungry -- /code-review plus five parallel audits (plus optional Phase 4) can consume a noticeable slice of a subscription session's budget. Before dispatching Phase 1, tell the user the planned agent count so they can trim (Step 4) or choose light mode; on a large diff, say explicitly that this will be an expensive pass.
+
 ### Step 2 -- Snapshot the scope
 
 Capture once, near the top of the run, and refer back to it:
