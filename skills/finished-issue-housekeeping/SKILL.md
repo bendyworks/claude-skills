@@ -162,7 +162,17 @@ If yes:
 
 **If no -- skip.** Do NOT fabricate to fill the slot. Empty is the right answer most of the time, and bloating memory or the skills list with low-signal entries makes the high-signal ones harder to find later.
 
-### 4c -- Keep `MEMORY.md` within its size budget
+### 4c -- Promotion check: rules must not decay in memory
+
+Auto-memory decays -- files get pruned, and recalls carry staleness warnings. For each memory written or touched during this story (including a tech-note just added in 4b), classify it:
+
+- **State** (active work, incident records, references, notes tied to code that may change) -- stays in memory. Most memories are state.
+- **A durable rule** ("how to behave", a standing policy, a permanent fact about the codebase or environment) -- promote it to a permanent home instead: the user's global CLAUDE.md (cross-project behavior), the project's checked-in CLAUDE.md (repo-permanent facts -- client-visible, so domain invariants yes, opinions about people or billing never), or a skill (procedures).
+- **Already covered** by a permanent home -- delete the redundant memory.
+
+After promoting a rule, keep its memory only if the incident narrative adds value the rule can't carry, and note the promotion inside it. If a rule-shaped memory can't be promoted right now, mark its frontmatter `promote: candidate` so a later sweep finds it cheaply.
+
+### 4d -- Keep `MEMORY.md` within its size budget
 
 Adding a Done entry (4a) grows `MEMORY.md` -- and that file is the index loaded into context *every* session, so it must stay lean. After the Done entry is in, prune the file back under budget. This runs every time an issue concludes, so the file can never silently drift over the limit.
 
@@ -214,7 +224,7 @@ Report in 3-5 lines what was done:
 - Plan file: finalized at `<path>` (or "skipped -- ad-hoc work").
 - Branch: `<name>` deleted (or "no local branch").
 - Tracker: `<ID>` moved to Done (or "no tracker issue").
-- Memory: Done entry added; N new tech-notes saved; N new skills created; MEMORY.md pruned (now <size> KB, under budget).
+- Memory: Done entry added; N new tech-notes saved; N new skills created; N rules promoted to permanent homes; MEMORY.md pruned (now <size> KB, under budget).
 - Sibling-audit: N follow-ups verified; M dropped (filed now / TODO).
 - Dev server: stopped (or "none was running").
 - Task list: N completed tasks cleared.
