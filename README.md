@@ -41,6 +41,16 @@ To pick up updates later:
 | `bug-cluster-ledger` | Mine a time window of tracker issues and cluster them upward to root causes per subsystem, with prevention analysis. Used by architecture-survey. |
 | `app-wind-down` | Wind down a hosted app safely and reversibly: caretaker mode first, then hibernation to ~$0 with full restore assets. |
 
+## Engineering guidance
+
+Beyond skills, [`guidance/`](guidance/README.md) holds team-neutral
+engineering guidance files -- test-driven development discipline,
+spec-writing defaults, and commit-message style -- that you can import
+into your own CLAUDE.md, vendor into a project's `.claude/rules/`, or
+fork outright. Every file defers to your project's own rules on
+conflict. See [guidance/README.md](guidance/README.md) for setup,
+overriding, and troubleshooting.
+
 ## Requirements
 
 - Claude Code with plugin support.

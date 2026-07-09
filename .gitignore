@@ -1,3 +1,6 @@
 # Claude Code session artifacts (plans, gauntlet punch lists, local
 # settings) are per-machine working state, never repo content.
 .claude/
+
+# direnv per-machine environment (e.g. ITERM_BG_COLOR); never repo content.
+.envrc
