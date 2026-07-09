@@ -13,6 +13,12 @@ description, a whole new audit lane in gauntlet.
   `/plugin marketplace update bendyworks`. Review accordingly.
 - Maintainer: Stephen Anderson (@bendycode) merges. If a PR sits for more
   than a few days, nudge him.
+- **Announce guidance changes.** A substantive change to a `guidance/`
+  file changes how a consuming teammate's Claude behaves on their next
+  `git pull` or vendoring refresh -- silently, if nobody tells them. The
+  PR description for such a change must say what behavior changes and
+  why, in wording a consuming team can relay to its own channel. Typo
+  and formatting fixes are exempt.
 
 ## Before you open a PR
 
