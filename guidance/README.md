@@ -12,6 +12,9 @@ practices apply to your work automatically.
 | [`commit-messages.md`](commit-messages.md) | Commit titles that answer WHY in 60 characters, bodies that carry the what and how, and what belongs in the PR description instead. | everything |
 | [`code-comments.md`](code-comments.md) | Comments that state permanent intent -- invariants and constraints, not debugging narration -- plus plain language: no unexplained acronyms, no insider jargon. | everything |
 | [`pull-requests.md`](pull-requests.md) | Small incremental PRs (300-line target, 400-line easy-review threshold), draft mode first, a PR owns the bugs it introduces, and per-thread review replies. | everything |
+| [`clean-and-green.md`](clean-and-green.md) | Zero lint offenses and zero test failures as the status quo, no suppression comments, and escalating to a human instead of ever calling a red suite acceptable. | everything |
+| [`verification-habits.md`](verification-habits.md) | Empiricism before assertion: verify library claims against installed source, never write unverified facts about people, check schemas and method signatures before use. | everything |
+| [`tracker-comments.md`](tracker-comments.md) | Tracker comments that survive plans falling through: intentions with owners and absolute dates, instructions the reader verifies, no relative time. | everything |
 
 Every file opens with the same precedence rule: **if it conflicts with
 your project's own CLAUDE.md, rules files, or a team agreement, your
