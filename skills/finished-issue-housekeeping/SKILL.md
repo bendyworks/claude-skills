@@ -58,6 +58,8 @@ Use the conversation's actual dates, PR numbers, and SHAs. Do not fabricate. If 
 
 If multiple plan files match the issue (e.g. a parent plan + a follow-up plan), apply the same classification process to each.
 
+On a GitHub-tracked repo, once the plan file's checkboxes are finalized, reconcile the issue-body checklist to match (fetch the current body, tick, write back -- per the plan-issue skill's fetch-modify-write sequence). The checklist is allowed to drift mid-flight but must not *end* stale; this is where that guarantee is enforced.
+
 If no plan file (skill invoked ad-hoc), skip this step.
 
 ## Step 3 -- Local branch deletion
@@ -75,7 +77,7 @@ git branch -d <branch-name>
 
 `-d`'s refusal is the safety net for the second case. A silent `-D` would lose work.
 
-Do NOT delete the *remote* branch. GitHub's auto-delete-on-merge usually handles it, and external tooling (Linear, deploy logs, PR cross-references) may still link to the remote ref. If the user wants the remote gone, they will ask.
+Do NOT delete the *remote* branch. GitHub's auto-delete-on-merge usually handles it, and external tooling (trackers, deploy logs, PR cross-references) may still link to the remote ref. If the user wants the remote gone, they will ask.
 
 If multiple local branches relate to the issue (parent + follow-up branches), delete each with `-d`.
 
@@ -190,6 +192,7 @@ Recording the Done entry in `MEMORY.md` (Step 4a) closes the loop for *us*; it d
 
 - **Mind intermediate post-merge states.** Many boards have a staging state between "in review" and "Done" -- e.g. **Deploy Queue**, "Awaiting Deploy", "On Staging", "Ready to Release". A merged-and-shipped issue often sits in one of these, and "merged" or "deployed" does NOT mean the board already says Done. Check the current state and advance it the rest of the way.
 - For Linear, use the bundled `linear` CLI (this plugin ships it on PATH; requires Ruby and `LINEAR_API_TOKEN`): `linear update <ID> --state "Done"` (the canonical terminal-state name for the team lives in the project's tracker-reference doc, if it keeps one).
+- For GitHub Issues, done means closed. If the PR carried `Closes #NNN`, verify the issue auto-closed (`gh issue view NNN --json state`); otherwise close it now with `gh issue close NNN`. Mind the timing: auto-close fires at merge to the default branch, before any production deploy -- on a team that wants done-at-deploy, the PR should have carried a plain `#NNN` reference instead, and this step is where the manual close happens.
 - If the terminal state has a different name on this board ("Closed", "Shipped", "Released"), use that. If you are unsure which state is terminal, **ask the user** rather than guessing -- moving an issue to the wrong column is worse than asking.
 - Skip only for ad-hoc work with no tracker issue.
 
@@ -197,7 +200,7 @@ Recording the Done entry in `MEMORY.md` (Step 4a) closes the loop for *us*; it d
 
 If the plan called for a sibling-bug audit (spawning separate follow-up issues for variants of the same bug shape elsewhere in the codebase), verify those follow-ups were actually filed in the project's issue tracker.
 
-To verify: list the issues created in the tracker since the story's branch-cut date, and cross-reference against the plan file's "filed as ISSUE-ID" mentions, branch commit messages, and the conversation history. The API pattern for the project's tracker is usually documented in CLAUDE.md (for Linear, the bundled `linear` CLI covers this); if you do not see it there, ask the user.
+To verify: list the issues created in the tracker since the story's branch-cut date, and cross-reference against the plan file's "filed as ISSUE-ID" mentions, branch commit messages, and the conversation history. The API pattern for the project's tracker is usually documented in CLAUDE.md (for Linear, the bundled `linear` CLI covers this; for GitHub Issues, `gh issue list --search "created:>YYYY-MM-DD"` cross-referenced against the plan file's "filed as #NNN" mentions); if you do not see it there, ask the user.
 
 If anything was dropped, file it now via the project's API or surface it as a clear TODO for the user.
 

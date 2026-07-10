@@ -1,6 +1,6 @@
 ---
 name: plan-issue
-description: Plan a story end-to-end -- interview the user about a Linear or Shortcut issue, research the code, propose a plan, optionally challenge the plan from a fresh perspective, record it as a markdown file under `.claude/plans/` and start working through the to-dos, then finish by confirming the work shipped and cleaning up the local branch. Use when the user says "let's plan a new issue", "let's work on a new issue", "plan this story", "challenge the plan", "record the plan", "write up the plan", "finish up the plan", "we shipped X, clean it up", or similar.
+description: Plan a story end-to-end -- interview the user about a tracker issue (Linear, Shortcut, or GitHub Issues), research the code, propose a plan, optionally challenge the plan from a fresh perspective, record it as a markdown file under `.claude/plans/` and start working through the to-dos, then finish by confirming the work shipped and cleaning up the local branch. Use when the user says "let's plan a new issue", "let's work on a new issue", "plan this story", "challenge the plan", "record the plan", "write up the plan", "finish up the plan", "we shipped X, clean it up", or similar.
 ---
 
 # Plan an issue
@@ -10,8 +10,8 @@ spans the whole life of a story. It has four phases. Pick the phase that
 matches the user's request:
 
 - **create** (default) -- start a new plan for an issue. Triggered by "let's
-  work on a new issue", "let's plan ...", or a Linear/Shortcut URL with no
-  other context.
+  work on a new issue", "let's plan ...", or a tracker issue URL (Linear,
+  Shortcut, or GitHub) with no other context.
 - **challenge** -- critique the current plan. Triggered by "challenge the
   plan", "poke holes in the plan", or after the user says the plan looks done.
 - **record** -- write the agreed plan to a file and start executing.
@@ -51,7 +51,7 @@ issue's why, what, and how.
 A single succinct title is chosen up front and used as the base for
 **all three** artifacts:
 
-1. The Linear (or Shortcut) issue title.
+1. The tracker issue title (Linear, Shortcut, or GitHub).
 2. The plan filename under `.claude/plans/`.
 3. The git branch name.
 
@@ -72,19 +72,32 @@ the tracker can auto-link the branch/PR to the story.
   creating the branch.
 - **Linear**: use the "Copy git branch name" action, which produces the
   slugified form (e.g. `abc-525-fix-pdf-uploads`); prefer that exact slug.
+- **GitHub Issues**: run `gh issue develop NNN --name <short-slug>
+  --checkout` -- the CLI form of GitHub's "create a branch for this
+  issue" web action. It creates a *linked branch* (visible in the
+  issue's Development section, true issue-to-branch linking) and checks
+  it out with upstream tracking already set. Pick the slug in GitHub's
+  own `NNN-title-slug` shape, shortened to roughly 40 characters (e.g.
+  `525-fix-pdf-uploads`). Caveat: this creates the branch on the remote
+  immediately; if that is unwanted, or you lack write access to the
+  repo, fall back to a local `git checkout -b` with the same
+  `NNN-title-slug` shape. The number prefix there is a readability
+  convention -- GitHub's auto-close linking comes from `Closes #NNN` in
+  the PR body (see the ship-tail steps), not from the branch name.
 
-Never hand-roll a slug like `fix-flakey-specs` when a tracker story
+Never hand-roll a slug like `fix-flakey-specs` when a tracker issue
 exists -- the SC-/ABC- style tracker prefix is what lets Shortcut/Linear
-detect the PR.
+detect the PR, and the `NNN-` prefix keeps a GitHub branch recognizably
+tied to its issue.
 
-If the existing Linear/Shortcut title is too long or restates a whole
+If the existing issue title is too long or restates a whole
 sentence, propose a rename **before** creating the plan file or branch
 so all three artifacts can match. Do not silently use a different name
 across artifacts.
 
 ### When deviation is allowed
 
-Occasionally a single Linear/Shortcut story spawns multiple plan files
+Occasionally a single tracker issue spawns multiple plan files
 (separate up-front refactor + main work, or a follow-up cluster). In
 that case, the plan filename and the corresponding git branch are
 allowed to diverge from the original story title -- they should still
@@ -105,9 +118,9 @@ The Claude Code built-in `/rename` slash command is a UI command that
 cannot be invoked from a tool call. So: prompt the user to run
 `/rename` themselves. Pick the slug:
 
-- If a Linear or Shortcut issue exists (or has just been created) and
+- If a tracker issue exists (or has just been created) and
   the canonical git branch slug has been chosen, use `<branch-slug>`
-  (e.g. `abc-525-fix-pdf-uploads`).
+  (e.g. `abc-525-fix-pdf-uploads`, `525-fix-pdf-uploads`).
 - If no issue exists and none will be created (planning-only
   exercise, exploratory spike, pure-refactor plan with no tracker),
   use the same slug that will be the plan filename under
@@ -132,8 +145,9 @@ ask the user to `/rename` again with the new slug.
 
 Ask the user:
 
-1. Is there an existing Linear or Shortcut issue? If yes, get the URL.
-2. Is this story going to use the canonical Linear/Shortcut title for
+1. Is there an existing tracker issue (Linear, Shortcut, or GitHub)?
+   If yes, get the URL or ID.
+2. Is this story going to use the canonical tracker title for
    the plan file and branch (the default), or is this a follow-up
    plan that needs its own deviating name?
 3. Are we already on a clean copy of the right branch and good to go,
@@ -141,11 +155,13 @@ Ask the user:
    this from `origin/main`'s state, `git fetch origin` -- see Step 3.)
 
 Pull the suggested branch name from Linear's "Copy git branch name"
-action (or the Shortcut equivalent). Do not invent a slug from
-scratch when the issue tracker already has one.
+action, the Shortcut equivalent, or GitHub's `gh issue develop` (see
+the canonical-title section). Do not invent a slug from scratch when
+the issue tracker already has one.
 
-If the user has no issue yet, offer to create one in Linear before
-going further. Do not proceed without an issue to anchor the plan.
+If the user has no issue yet, offer to create one in the project's
+tracker before going further. Do not proceed without an issue to
+anchor the plan.
 
 When creating any Linear issue, **ask the user which project it belongs
 to** rather than guessing from a heuristic (e.g. "bug -> maintenance").
@@ -155,6 +171,11 @@ that choice has billing consequences. Offer the likely candidates (e.g.
 the maintenance project vs. the requested-additional-work project) and
 let the user pick; do not silently default. This applies to spun-off /
 follow-up issues too.
+
+When creating a GitHub issue (`gh issue create`), there is no required
+project or team field; labels and milestone fill that interview slot.
+Offer the repo's existing labels and milestones rather than inventing
+new ones, and skip cleanly when the repo uses neither.
 
 If the existing issue title is overly long or sentence-shaped, propose
 a rename now so the plan filename and branch can share the base name.
@@ -176,6 +197,17 @@ a rename now so the plan filename and branch can share the base name.
 - **Shortcut URL** (`app.shortcut.com/...`): use the Shortcut REST API or
   ask the user for the story body if no token is configured. Refer to
   Shortcut stories as "Shortcut", never "Linear".
+- **GitHub issue URL or `#NNN`**
+  (`github.com/<org>/<repo>/issues/NNN`): use the `gh` CLI.
+  ```bash
+  gh issue view NNN --json title,body,state,labels,comments
+  ```
+  A bare `#NNN` means GitHub Issues only when the repo actually tracks
+  work there -- issues enabled on the repo, the project's CLAUDE.md
+  naming GitHub as the tracker, or existing plan-file slugs carrying
+  the `NNN-` prefix. If the project could plausibly have two trackers
+  in play, ask rather than assume. Refer to GitHub issues as "issues",
+  never "stories".
 
 Read the title, description, comments, and any linked parent or sibling
 issues. Note the current workflow state.
@@ -246,9 +278,18 @@ Confirm this story with the user (and, where the answer is theirs to
 give, flag what should be confirmed with the requesting client or
 stakeholder) *before* moving to the implementation interview.
 
-Append the agreed user story and acceptance criteria to the Linear (or
-Shortcut) issue, and carry them into the plan file (Step 6) so the
-end-user definition of done travels with the work.
+Append the agreed user story and acceptance criteria to the tracker
+issue, and carry them into the plan file (Step 6) so the end-user
+definition of done travels with the work. On GitHub, "append" is a
+read-modify-write: `gh issue edit --body-file` REPLACES the entire
+issue body. Fetch the current body to a temp file
+(`gh issue view NNN --json body -q .body > <file>`), append to it,
+then write it back (`gh issue edit NNN --body-file <file>`).
+Re-fetch immediately before every write and never write from a stale
+copy -- GitHub has no compare-and-swap, body edits notify no one, so
+clobbering a concurrent human edit is silent. Without write access to
+the repo, post the addition as a comment via `gh issue comment`
+instead.
 
 **When this step is light or N/A:** for changes with no end-user-
 observable surface -- pure refactors, infra, dev tooling, internal
@@ -310,8 +351,9 @@ Skip questions whose answers are obvious from the issue or the code.
 Continue until the picture is clear; do not stop after a single round.
 
 When the interview is done, append the resulting specification to the
-Linear (or Shortcut) issue description, so the source of truth for what
-we agreed on lives there too.
+tracker issue description (on GitHub, using the same fetch-append-write
+sequence from Step 4), so the source of truth for what we agreed on
+lives there too.
 
 ### Step 6 -- Propose the plan
 
@@ -323,7 +365,7 @@ Draft a plan with:
    This is the most easily-overlooked section when heads-down on
    details, so lead with it: the plan should open with the user-facing
    definition of done, and it must make sense to someone who has not
-   read the Linear issue.
+   read the tracker issue.
 2. **Approach** -- the strategy in plain language, not a file list.
 3. **Optional up-front refactor** -- if the existing code is shaped
    awkwardly for the change, propose a refactoring to do first (either
@@ -365,8 +407,17 @@ Draft a plan with:
       only if the user explicitly opts out for this issue.
    3. Open the draft PR. This kicks off GitHub CI checks and any
       automated reviewer (e.g. claude-code-action) that runs on
-      ready-for-review or synchronize events.
+      ready-for-review or synchronize events. On GitHub-tracked repos,
+      put `Closes #NNN` (or `Fixes #NNN`) in the PR body when this PR
+      fully resolves the issue; when the issue outlives the PR (a
+      multi-PR epic), use a plain `#NNN` reference instead. Mind the
+      timing either way: auto-close fires at merge to the default
+      branch, BEFORE any production deploy -- a team that wants the
+      issue open until deploy should use the plain reference and close
+      manually in the finish phase.
    4. Move the issue to PR Review; wait for human review and merge.
+      (GitHub Issues has no such state -- the linked PR going
+      ready-for-review is the visible signal, so nothing extra to do.)
    5. **Stakeholder change-highlights (conditional).** When the change
       alters something a client stakeholder visibly relies on -- a
       report, receipt, statement, mailer, or screen -- and the project
@@ -429,10 +480,12 @@ fresh repo and keeps the common path zero-overhead.
 
 ### Step 2 -- Pick the filename
 
-By default the plan filename **matches the canonical Linear/Shortcut
-title slug** -- the same slug used for the git branch. If Linear's
+By default the plan filename **matches the canonical tracker title
+slug** -- the same slug used for the git branch. If Linear's
 "Copy git branch name" produces `abc-525-fix-pdf-uploads`, the plan
-file is `abc-525-fix-pdf-uploads.md`.
+file is `abc-525-fix-pdf-uploads.md`; if `gh issue develop` named the
+branch `525-fix-pdf-uploads`, the plan file is
+`525-fix-pdf-uploads.md`.
 
 The only time the plan filename should diverge is when this plan is
 one of multiple spawned by a single story (a follow-up cluster, an
@@ -476,6 +529,15 @@ toggleable view of progress (Ctrl-T) alongside the markdown plan file.
   next*. Keep them in sync: when a to-do is checked off in the markdown,
   mark the corresponding task complete via `TaskUpdate`; when new work
   is discovered, append it to both.
+- **GitHub-tracked repos get a third surface: the issue-body
+  checklist.** Mirror the plan's numbered to-dos into the issue body as
+  `- [ ]` checkboxes (same fetch-append-write sequence as the create
+  phase) so progress is publicly visible on the issue, with GitHub's
+  own "x of y tasks" progress bar. It is a projection, not a peer: the
+  plan file stays the single source of truth, and the checklist syncs
+  at each commit/push boundary (Step 6), not per to-do. The finish
+  phase reconciles it, so the public surface can drift mid-flight but
+  never ends stale.
 - **Always show the task number next to each task** whenever you surface
   the task list to the user (e.g. `1. ...`, `2. ...`). The user refers to
   tasks by number, so a bare bulleted list is not enough -- every rendered
@@ -489,9 +551,11 @@ toggleable view of progress (Ctrl-T) alongside the markdown plan file.
 
 ### Step 5 -- Move the issue to In Progress (assigned)
 
-Before starting the work, transition the Linear issue out of Todo and
+Before starting the work, transition the tracker issue out of Todo and
 into the active state -- and assign it in the same call. A started state
 (In Progress) without an owner is the error this step exists to prevent.
+
+For Linear:
 
 ```bash
 linear update ABC-NNN --state "In Progress" --assignee me
@@ -501,8 +565,21 @@ linear update ABC-NNN --state "In Progress" --assignee me
 (e.g. `--assignee teammate@example.com`) if the work belongs to someone
 else. The CLI **rejects** a move into a started state with no assignee, so
 never strip the `--assignee` flag to get past that error -- supply the
-owner instead. Skip this step only for planning-only exercises with no
-tracker issue.
+owner instead.
+
+For GitHub Issues there is no started state to move to -- an issue is
+only open or closed. Assign instead:
+
+```bash
+gh issue edit NNN --add-assignee "@me"
+```
+
+If the repo visibly runs status off labels (`in progress`,
+`pr review`, ...) or a Projects board, ask the user which to update
+rather than silently doing nothing; do not invent labels the repo does
+not already use.
+
+Skip this step only for planning-only exercises with no tracker issue.
 
 ### Step 6 -- Show the to-do list and start
 
@@ -521,6 +598,10 @@ phase or to-do (your judgment on grouping):
 4. Update the plan markdown: change `- [ ]` to `- [x]` for completed
    items, add any newly-discovered work. Mirror the change in the
    Task tracker via `TaskUpdate` so the Ctrl-T view stays accurate.
+   On a GitHub-tracked repo, also tick the issue-body checklist now --
+   each commit/push boundary is its sync point -- using the same
+   fetch-modify-write sequence as the create phase (re-fetch the body,
+   tick, write back).
 5. Show the user the updated to-do list, with each task's number shown
    next to it (the user refers to tasks by number), unless there's a
    clear reason not to, e.g. a single-line trailing checkoff.
