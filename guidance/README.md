@@ -10,6 +10,8 @@ practices apply to your work automatically.
 | [`tdd.md`](tdd.md) | Test-first by default: spec first, watch it fail, then production code, then watch it pass -- and how to verify retroactively when that order slipped. | everything |
 | [`spec-writing.md`](spec-writing.md) | RSpec defaults: syntax idioms, doubles vs real factory records, setup hygiene, which specs not to write, and titles that name behavior. | `spec/**/*` (path-scoped via frontmatter) |
 | [`commit-messages.md`](commit-messages.md) | Commit titles that answer WHY in 60 characters, bodies that carry the what and how, and what belongs in the PR description instead. | everything |
+| [`code-comments.md`](code-comments.md) | Comments that state permanent intent -- invariants and constraints, not debugging narration -- plus plain language: no unexplained acronyms, no insider jargon. | everything |
+| [`pull-requests.md`](pull-requests.md) | Small incremental PRs (300-line target, 400-line easy-review threshold), draft mode first, a PR owns the bugs it introduces, and per-thread review replies. | everything |
 
 Every file opens with the same precedence rule: **if it conflicts with
 your project's own CLAUDE.md, rules files, or a team agreement, your
@@ -49,14 +51,14 @@ ln -s ~/.claude/bendyworks-guidance/guidance/spec-writing.md ~/.claude/rules/
 Updates arrive with `git pull` in the clone. Remember that a pull can
 change how your sessions behave; skim the diff.
 
-### 2. Vendor copies into your project
+### 2. Copy the files into your project
 
 Copy the files into your repo as `.claude/rules/*.md` via a normal PR
 your team reviews. Updates arrive the same way: a PR someone reads,
 amends, or rejects. Nothing changes behavior without a reviewed merge,
 and once merged the files are yours to edit.
 
-Vendoring also sidesteps every external-import mechanic below: no
+Copying also sidesteps every external-import mechanic below: no
 approval prompt, no symlink, no path variance across machines.
 
 ### 3. Fork
@@ -77,7 +79,7 @@ follows yours.
 
 Claude adheres best when a session's total guidance stays around 200
 lines; imported files count against that budget. Import only the files
-you'll actually use, and feel free to trim vendored copies -- deleting
+you'll actually use, and feel free to trim in-repo copies -- deleting
 sections your team doesn't need is customizing, not vandalism.
 
 ## Troubleshooting imports
@@ -110,5 +112,5 @@ next session.
 
 Note: that prompt only applies to imports written in a checked-in
 project CLAUDE.md. Imports in your personal `~/.claude/CLAUDE.md` (the
-clone + import setup above) are not gated by it, and vendored copies
+clone + import setup above) are not gated by it, and in-repo copies
 never leave the project root at all.

@@ -45,9 +45,9 @@ To pick up updates later:
 
 Beyond skills, [`guidance/`](guidance/README.md) holds team-neutral
 engineering guidance files -- test-driven development discipline,
-spec-writing defaults, and commit-message style -- that you can import
-into your own CLAUDE.md, vendor into a project's `.claude/rules/`, or
-fork outright. Every file defers to your project's own rules on
+commit-message style, pull-request practices, and more -- that you can
+import into your own CLAUDE.md, copy into a project's
+`.claude/rules/`, or fork outright. Every file defers to your project's own rules on
 conflict. See [guidance/README.md](guidance/README.md) for setup,
 overriding, and troubleshooting.
 
