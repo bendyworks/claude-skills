@@ -72,18 +72,23 @@ the tracker can auto-link the branch/PR to the story.
   creating the branch.
 - **Linear**: use the "Copy git branch name" action, which produces the
   slugified form (e.g. `abc-525-fix-pdf-uploads`); prefer that exact slug.
-- **GitHub Issues**: run `gh issue develop NNN --name <short-slug>
-  --checkout` -- the CLI form of GitHub's "create a branch for this
+- **GitHub Issues**: GitHub generates no slug to copy, so this is the
+  one tracker where the slug is composed rather than pulled: build it
+  from the agreed (possibly renamed) title in GitHub's own
+  `NNN-title-slug` shape, shortened to roughly 40 characters (e.g.
+  `525-fix-pdf-uploads`), and confirm it with the user along with the
+  title. Then, at branch-creation time -- only after the title and
+  slug are locked -- run `gh issue develop NNN --name <slug>
+  --checkout`, the CLI form of GitHub's "create a branch for this
   issue" web action. It creates a *linked branch* (visible in the
-  issue's Development section, true issue-to-branch linking) and checks
-  it out with upstream tracking already set. Pick the slug in GitHub's
-  own `NNN-title-slug` shape, shortened to roughly 40 characters (e.g.
-  `525-fix-pdf-uploads`). Caveat: this creates the branch on the remote
-  immediately; if that is unwanted, or you lack write access to the
-  repo, fall back to a local `git checkout -b` with the same
-  `NNN-title-slug` shape. The number prefix there is a readability
-  convention -- GitHub's auto-close linking comes from `Closes #NNN` in
-  the PR body (see the ship-tail steps), not from the branch name.
+  issue's Development section) and checks it out with upstream
+  tracking already set. Two caveats: it creates the branch on the
+  remote immediately (never run it just to preview a name), and a PR
+  opened from a linked branch AUTO-CLOSES the issue at merge
+  regardless of PR-body keywords (see the ship-tail steps for when
+  that matters and how to prevent it). If either caveat is unwanted,
+  or you lack write access to the repo, fall back to a local
+  `git checkout -b` with the same slug.
 
 Never hand-roll a slug like `fix-flakey-specs` when a tracker issue
 exists -- the SC-/ABC- style tracker prefix is what lets Shortcut/Linear
@@ -147,7 +152,7 @@ Ask the user:
 
 1. Is there an existing tracker issue (Linear, Shortcut, or GitHub)?
    If yes, get the URL or ID.
-2. Is this story going to use the canonical tracker title for
+2. Is this work going to use the canonical tracker title for
    the plan file and branch (the default), or is this a follow-up
    plan that needs its own deviating name?
 3. Are we already on a clean copy of the right branch and good to go,
@@ -155,9 +160,11 @@ Ask the user:
    this from `origin/main`'s state, `git fetch origin` -- see Step 3.)
 
 Pull the suggested branch name from Linear's "Copy git branch name"
-action, the Shortcut equivalent, or GitHub's `gh issue develop` (see
-the canonical-title section). Do not invent a slug from scratch when
-the issue tracker already has one.
+action or the Shortcut equivalent; for GitHub Issues, compose the
+`NNN-title-slug` form per the canonical-title section -- do NOT run
+`gh issue develop` during the interview, since it creates the remote
+branch immediately and the title may still be renamed. Do not invent
+a slug from scratch when the issue tracker already has one.
 
 If the user has no issue yet, offer to create one in the project's
 tracker before going further. Do not proceed without an issue to
@@ -281,10 +288,13 @@ stakeholder) *before* moving to the implementation interview.
 Append the agreed user story and acceptance criteria to the tracker
 issue, and carry them into the plan file (Step 6) so the end-user
 definition of done travels with the work. On GitHub, "append" is a
-read-modify-write: `gh issue edit --body-file` REPLACES the entire
-issue body. Fetch the current body to a temp file
-(`gh issue view NNN --json body -q .body > <file>`), append to it,
-then write it back (`gh issue edit NNN --body-file <file>`).
+read-modify-write -- the **fetch-append-write sequence**, which every
+later GitHub body edit in this skill reuses by name: `gh issue edit
+--body-file` REPLACES the entire issue body. Fetch the current body to
+a temp file (`gh issue view NNN --json body -q .body > <file>`),
+append to it (after a blank line, so a heading or checkbox never glues
+onto the body's last line), then write it back
+(`gh issue edit NNN --body-file <file>`).
 Re-fetch immediately before every write and never write from a stale
 copy -- GitHub has no compare-and-swap, body edits notify no one, so
 clobbering a concurrent human edit is silent. Without write access to
@@ -410,14 +420,23 @@ Draft a plan with:
       ready-for-review or synchronize events. On GitHub-tracked repos,
       put `Closes #NNN` (or `Fixes #NNN`) in the PR body when this PR
       fully resolves the issue; when the issue outlives the PR (a
-      multi-PR epic), use a plain `#NNN` reference instead. Mind the
-      timing either way: auto-close fires at merge to the default
-      branch, BEFORE any production deploy -- a team that wants the
-      issue open until deploy should use the plain reference and close
-      manually in the finish phase.
+      multi-PR epic), use a plain `#NNN` reference instead. Two traps:
+      auto-close fires at merge to the default branch, BEFORE any
+      production deploy; and a plain reference is NOT enough to
+      prevent it when the branch came from `gh issue develop` -- a PR
+      from a linked branch auto-closes the issue at merge with no
+      keyword at all. A team that wants the issue open past merge
+      (done-at-deploy, multi-PR epics) should disable the repo setting
+      "Auto-close issues with merged linked pull requests" (Settings >
+      General > Issues), or unlink the PR from the issue's Development
+      section before merging, and close the issue manually in the
+      finish phase.
    4. Move the issue to PR Review; wait for human review and merge.
-      (GitHub Issues has no such state -- the linked PR going
-      ready-for-review is the visible signal, so nothing extra to do.)
+      (GitHub Issues has no such state. If the repo visibly runs
+      status off labels or a Projects board, update those the same
+      way record Step 5 chose to; otherwise the linked PR going
+      ready-for-review is the visible signal and there is nothing
+      extra to do.)
    5. **Stakeholder change-highlights (conditional).** When the change
       alters something a client stakeholder visibly relies on -- a
       report, receipt, statement, mailer, or screen -- and the project
@@ -528,16 +547,21 @@ toggleable view of progress (Ctrl-T) alongside the markdown plan file.
   the approach. The Task tracker is a fast-access view of the *what's
   next*. Keep them in sync: when a to-do is checked off in the markdown,
   mark the corresponding task complete via `TaskUpdate`; when new work
-  is discovered, append it to both.
+  is discovered, append it to both (and, on GitHub-tracked repos, to
+  the issue-body checklist at its next sync -- next bullet).
 - **GitHub-tracked repos get a third surface: the issue-body
   checklist.** Mirror the plan's numbered to-dos into the issue body as
-  `- [ ]` checkboxes (same fetch-append-write sequence as the create
-  phase) so progress is publicly visible on the issue, with GitHub's
+  `- [ ]` checkboxes (via the create phase's fetch-append-write
+  sequence) so progress is publicly visible on the issue, with GitHub's
   own "x of y tasks" progress bar. It is a projection, not a peer: the
   plan file stays the single source of truth, and the checklist syncs
-  at each commit/push boundary (Step 6), not per to-do. The finish
-  phase reconciles it, so the public surface can drift mid-flight but
-  never ends stale.
+  at each commit/push boundary (Step 6), not per to-do. This bullet
+  owns the cadence. A sync covers both directions of change: tick the
+  boxes that landed AND append newly-discovered to-dos as new
+  checkboxes, keeping their plan numbers -- a tick-only sync can never
+  reconcile a checklist that is missing items. The finish phase
+  reconciles it the same way, so the public surface can drift
+  mid-flight but never ends stale.
 - **Always show the task number next to each task** whenever you surface
   the task list to the user (e.g. `1. ...`, `2. ...`). The user refers to
   tasks by number, so a bare bulleted list is not enough -- every rendered
@@ -566,6 +590,10 @@ linear update ABC-NNN --state "In Progress" --assignee me
 else. The CLI **rejects** a move into a started state with no assignee, so
 never strip the `--assignee` flag to get past that error -- supply the
 owner instead.
+
+For Shortcut, use the configured Shortcut MCP server's workflow-state
+update if one is available; otherwise ask the user to move and assign
+the story in the Shortcut UI.
 
 For GitHub Issues there is no started state to move to -- an issue is
 only open or closed. Assign instead:
@@ -598,10 +626,10 @@ phase or to-do (your judgment on grouping):
 4. Update the plan markdown: change `- [ ]` to `- [x]` for completed
    items, add any newly-discovered work. Mirror the change in the
    Task tracker via `TaskUpdate` so the Ctrl-T view stays accurate.
-   On a GitHub-tracked repo, also tick the issue-body checklist now --
-   each commit/push boundary is its sync point -- using the same
-   fetch-modify-write sequence as the create phase (re-fetch the body,
-   tick, write back).
+   On a GitHub-tracked repo, also sync the issue-body checklist now
+   (record Step 4 owns the cadence): tick the boxes that landed and
+   append any newly-discovered to-dos, via the create phase's
+   fetch-append-write sequence.
 5. Show the user the updated to-do list, with each task's number shown
    next to it (the user refers to tasks by number), unless there's a
    clear reason not to, e.g. a single-line trailing checkoff.
@@ -653,10 +681,15 @@ via the Skill tool. It will:
 - Re-verify preconditions (idempotent with Step 1).
 - Classify each unchecked plan-file item and STOP if any genuinely
   unfinished work surfaces.
+- On GitHub-tracked repos, reconcile the issue-body checklist so the
+  public surface does not end stale.
 - Add the Shipment section to the plan file.
 - Delete the local working branch with `-d` safety.
 - Add a Done entry to `MEMORY.md` and remove the issue from Active
   Work if it was there.
+- Move the tracker issue to its terminal Done state (on GitHub,
+  verify the auto-close or close manually -- the done-at-deploy
+  path's manual close happens here).
 - Ask whether anything is worth saving as a tech-note memory or
   a new skill, and create it if so.
 - Verify sibling-audit follow-ups got filed.
