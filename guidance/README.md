@@ -15,6 +15,8 @@ practices apply to your work automatically.
 | [`clean-and-green.md`](clean-and-green.md) | Zero lint offenses and zero test failures as the status quo, no suppression comments, and escalating to a human instead of ever calling a red suite acceptable. | everything |
 | [`verification-habits.md`](verification-habits.md) | Empiricism before assertion: verify library claims against installed source, never write unverified facts about people, check schemas and method signatures before use. | everything |
 | [`tracker-comments.md`](tracker-comments.md) | Tracker comments that survive plans falling through: intentions with owners and absolute dates, instructions the reader verifies, no relative time. | everything |
+| [`rails-conventions.md`](rails-conventions.md) | Rails built-ins before custom code, standard foreign-key associations, symbol-based enum usage, and avoiding ActiveRecord callbacks in new code. | Rails projects |
+| [`environments.md`](environments.md) | Staging and production are separate datasets: frame smoke tests, bug repros, and QA hand-offs in scenario shape, never by production record IDs. | everything |
 
 Every file opens with the same precedence rule: **if it conflicts with
 your project's own CLAUDE.md, rules files, or a team agreement, your
