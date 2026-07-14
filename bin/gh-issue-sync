@@ -1,0 +1,324 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+# gh-issue-sync -- GitHub issue-body read-modify-write helper.
+#
+# `gh issue edit --body-file` replaces the entire issue body, so every
+# body edit is a fetch-modify-write cycle with sharp edges: stale
+# fetches clobber concurrent edits, jq-piped fetches grow the body by a
+# trailing newline per cycle, web-UI edits switch the body to CRLF, and
+# a hand-rolled checklist sync can leave the public surface stale. This
+# tool wraps those mechanics. Auth and transport are delegated to `gh`.
+#
+# Stdlib-only (no gems). Run with no arguments for usage.
+#
+# The checklist section it owns is delimited by paired HTML-comment
+# markers (invisible on GitHub), wrapping the heading so regeneration
+# owns it too:
+#
+#   <!-- gh-issue-sync: <slug> -->
+#   ## To-dos
+#   - [x] **1.** ...
+#   <!-- /gh-issue-sync: <slug> -->
+#
+# The slug is the --plan file's basename, so several plans can share
+# one issue, each owning its own section. The section is a projection
+# of the plan file: sync regenerates it wholesale, and a box ticked on
+# GitHub that the plan lacks is surfaced as a warning (the plan wins),
+# never silently kept or silently lost.
+
+require 'json'
+require 'open3'
+require 'tempfile'
+
+module GhIssueSync
+  Error = Class.new(StandardError)
+
+  # GitHub rejects issue bodies past this many characters.
+  MAX_BODY_BYTES = 65_536
+
+  TODO_LINE = /\A- \[(x| )\] \*\*(\d+)\.\*\* (.+)\z/
+  CHECKBOX_START = /\A\s*- \[/
+  TODOS_HEADING = /\A## To-dos\b/
+
+  module_function
+
+  def normalize(text)
+    text.gsub("\r\n", "\n")
+  end
+
+  # Parses the plan file's "## To-dos" section into
+  # [{number:, checked:, text:}, ...]. Indented continuation lines fold
+  # into the preceding item's text. Any checkbox line in the section
+  # that misses the strict "- [ ] **N.** text" shape raises rather than
+  # being silently skipped -- a skipped line would go permanently stale
+  # on the issue. Checkboxes outside the section (acceptance criteria,
+  # examples) are none of our business.
+  def parse_plan_todos(plan_text)
+    section = todos_section(normalize(plan_text))
+    raise Error, "plan has no '## To-dos' section" unless section
+
+    items = []
+    section.each_line do |raw|
+      line = raw.chomp
+      if (m = TODO_LINE.match(line.strip))
+        items << { number: m[2].to_i, checked: m[1] == 'x', text: m[3] }
+      elsif CHECKBOX_START.match?(line)
+        raise Error, "malformed to-do line (expected '- [ ] **N.** text'): #{line.strip}"
+      elsif line.start_with?('  ') && !line.strip.empty? && items.any?
+        items.last[:text] = "#{items.last[:text]} #{line.strip}"
+      end
+    end
+    items
+  end
+
+  def render_section(items, slug:, heading_suffix: nil)
+    heading = heading_suffix ? "## To-dos (#{heading_suffix})" : '## To-dos'
+    lines = ["<!-- gh-issue-sync: #{slug} -->", heading]
+    items.each do |item|
+      lines << "- [#{item[:checked] ? 'x' : ' '}] **#{item[:number]}.** #{item[:text]}"
+    end
+    lines << "<!-- /gh-issue-sync: #{slug} -->"
+    lines.join("\n")
+  end
+
+  # Regenerates this slug's section in place; creates it (at the end of
+  # the body) when absent. A marker-less "## To-dos" heading left by a
+  # pre-helper flow is adopted -- replaced up to the next "##" heading --
+  # rather than duplicated.
+  def upsert_section(body, rendered, slug:)
+    body = normalize(body)
+    if section_range(body, slug)
+      body.sub(section_pattern(slug), rendered)
+    elsif (adopted = adopt_heading(body, rendered))
+      adopted
+    else
+      append_body(body, rendered)
+    end
+  end
+
+  # Reads this slug's section back out of a body, for divergence checks.
+  def section_items(body, slug:)
+    match = section_pattern(slug).match(normalize(body))
+    return [] unless match
+
+    match[0].each_line.filter_map do |line|
+      m = TODO_LINE.match(line.chomp)
+      m && { number: m[2].to_i, checked: m[1] == 'x', text: m[3] }
+    end
+  end
+
+  # A box ticked on GitHub that the plan still has unchecked is a human
+  # signal the plan file never absorbed. The plan is the source of
+  # truth, so the sync overwrites it -- but never silently.
+  def divergences(body_items, plan_items)
+    plan_by_number = plan_items.to_h { |item| [item[:number], item] }
+    body_items.filter_map do |body_item|
+      plan_item = plan_by_number[body_item[:number]]
+      next unless plan_item && body_item[:checked] && !plan_item[:checked]
+
+      "item #{body_item[:number]} is ticked on GitHub but unchecked in the plan; " \
+        'the plan wins -- absorb the tick into the plan file if it is real'
+    end
+  end
+
+  def append_body(body, addition)
+    body = normalize(body).rstrip
+    addition = normalize(addition).strip
+    return "#{addition}\n" if body.empty?
+
+    "#{body}\n\n#{addition}\n"
+  end
+
+  # The finish-phase reconcile must leave the public checklist in a
+  # final state, and a bare unchecked box is not one: every item is
+  # either done or explicitly deferred by the time an issue wraps up.
+  def assert_reconcilable!(items)
+    unchecked = items.reject { |item| item[:checked] }
+    return items if unchecked.empty?
+
+    listing = unchecked.map { |item| "  #{item[:number]}. #{item[:text]}" }.join("\n")
+    raise Error,
+          "reconcile refused: the plan still has bare unchecked to-dos -- " \
+          "finish them or mark them deferred first:\n#{listing}"
+  end
+
+  # The lines from the "## To-dos" heading to the next "##" heading (or
+  # end of file), heading excluded; nil when the plan has no such
+  # section.
+  def todos_section(text)
+    lines = text.lines
+    start = lines.index { |line| TODOS_HEADING.match?(line.chomp) }
+    return nil unless start
+
+    stop = (start + 1...lines.length).find { |i| lines[i].start_with?('## ') } || lines.length
+    lines[(start + 1)...stop].join
+  end
+
+  def check_length!(body)
+    return body if body.bytesize <= MAX_BODY_BYTES
+
+    raise Error, "new body would be #{body.bytesize} characters; GitHub's issue-body limit is #{MAX_BODY_BYTES}"
+  end
+
+  def section_pattern(slug)
+    open_marker = Regexp.escape("<!-- gh-issue-sync: #{slug} -->")
+    close_marker = Regexp.escape("<!-- /gh-issue-sync: #{slug} -->")
+    /#{open_marker}.*?#{close_marker}/m
+  end
+
+  def section_range(body, slug)
+    section_pattern(slug) =~ body
+  end
+
+  def adopt_heading(body, rendered)
+    lines = body.lines
+    start = lines.index { |line| TODOS_HEADING.match?(line.chomp) }
+    return nil unless start
+
+    stop = (start + 1...lines.length).find { |i| lines[i].start_with?('## ') } || lines.length
+    before = lines[0...start].join.rstrip
+    after = lines[stop..].join.strip
+    result = before.empty? ? '' : "#{before}\n\n"
+    result += "#{rendered.rstrip}\n"
+    result += "\n#{after}\n" unless after.empty?
+    result
+  end
+
+  USAGE = <<~TXT
+    gh-issue-sync -- GitHub issue-body read-modify-write helper (uses gh)
+
+    gh-issue-sync append NNN --file <md> [--repo owner/name]
+        Append the file's content to the issue body, separated by
+        exactly one blank line. NOT idempotent: re-running appends
+        again. For repeatable syncs use checklist/reconcile.
+
+    gh-issue-sync checklist NNN --plan <plan.md> [--heading <slug>] [--repo owner/name]
+        Regenerate the issue body's checklist section from the plan
+        file's '## To-dos' items (strict '- [ ] **N.** text' shape).
+        The section is delimited by <!-- gh-issue-sync: <slug> -->
+        markers (slug = the plan file's basename); it is created when
+        absent, and a marker-less pre-helper '## To-dos' heading is
+        adopted, not duplicated. --heading adds a visible
+        '## To-dos (<slug>)' suffix for multi-plan issues. Idempotent.
+        A box ticked on GitHub that the plan lacks is overwritten with
+        a warning: the plan file is the source of truth.
+
+    gh-issue-sync reconcile NNN --plan <plan.md> [--heading <slug>] [--repo owner/name]
+        The finish-phase sync: same regeneration, but refuses to run
+        while the plan still has bare unchecked to-dos -- every item
+        must be checked (done, or checked with a deferred-to note) so
+        the public checklist never ends stale.
+
+    The body is re-fetched immediately before every write (GitHub has
+    no compare-and-swap). Fetches go through JSON.parse, never jq -r,
+    so bodies round-trip byte-exact; CRLF from web-UI edits is
+    normalized to LF.
+  TXT
+
+  class CLI
+    def self.run(argv)
+      new.run(argv)
+    end
+
+    def run(argv)
+      command = argv.shift
+      case command
+      when 'append'    then append(argv)
+      when 'checklist' then sync(argv, reconcile: false)
+      when 'reconcile' then sync(argv, reconcile: true)
+      when nil, 'help', '--help', '-h' then puts USAGE
+      else
+        warn "gh-issue-sync: unknown subcommand #{command.inspect}"
+        warn USAGE
+        exit 1
+      end
+    rescue Error => e
+      abort "gh-issue-sync: #{e.message}"
+    end
+
+    private
+
+    def append(argv)
+      number, options = parse_args(argv, %w[--file --repo])
+      path = options['--file']
+      raise Error, 'append requires --file <md>' unless path
+      raise Error, "file not found: #{path}" unless File.exist?(path)
+
+      body = fetch_body(number, options['--repo'])
+      write_body(number, options['--repo'], GhIssueSync.append_body(body, File.read(path)))
+      puts "Appended #{path} to issue ##{number}"
+    end
+
+    def sync(argv, reconcile:)
+      number, options = parse_args(argv, %w[--plan --heading --repo])
+      plan_path = options['--plan']
+      raise Error, "#{reconcile ? 'reconcile' : 'checklist'} requires --plan <plan.md>" unless plan_path
+      raise Error, "plan file not found: #{plan_path}" unless File.exist?(plan_path)
+
+      items = GhIssueSync.parse_plan_todos(File.read(plan_path))
+      GhIssueSync.assert_reconcilable!(items) if reconcile
+      slug = File.basename(plan_path, '.md')
+      rendered = GhIssueSync.render_section(items, slug: slug, heading_suffix: options['--heading'])
+
+      body = fetch_body(number, options['--repo'])
+      GhIssueSync.divergences(GhIssueSync.section_items(body, slug: slug), items).each do |warning|
+        warn "gh-issue-sync: warning: #{warning}"
+      end
+      write_body(number, options['--repo'], GhIssueSync.upsert_section(body, rendered, slug: slug))
+
+      done = items.count { |item| item[:checked] }
+      puts "#{reconcile ? 'Reconciled' : 'Synced'} #{slug} on issue ##{number} (#{done} of #{items.length} checked)"
+    end
+
+    def parse_args(argv, allowed_options)
+      options = {}
+      positionals = []
+      until argv.empty?
+        arg = argv.shift
+        if allowed_options.include?(arg)
+          value = argv.shift
+          raise Error, "#{arg} requires a value" if value.nil? || value.start_with?('--')
+
+          options[arg] = value
+        elsif arg.start_with?('--')
+          raise Error, "unknown option #{arg}"
+        else
+          positionals << arg
+        end
+      end
+      number = positionals.first
+      raise Error, 'missing issue number' unless number
+      raise Error, "issue number must be digits, got #{number.inspect}" unless number.match?(/\A\d+\z/)
+
+      [number, options]
+    end
+
+    def fetch_body(number, repo)
+      output = gh(['issue', 'view', number, '--json', 'body'], repo)
+      GhIssueSync.normalize(JSON.parse(output)['body'].to_s)
+    end
+
+    def write_body(number, repo, body)
+      GhIssueSync.check_length!(body)
+      Tempfile.create('gh-issue-sync-body') do |file|
+        file.write(body)
+        file.flush
+        gh(['issue', 'edit', number, '--body-file', file.path], repo)
+      end
+    end
+
+    def gh(args, repo)
+      command = ['gh', *args]
+      command += ['--repo', repo] if repo
+      stdout, stderr, status = Open3.capture3(*command)
+      raise Error, "gh #{args.first(2).join(' ')} failed: #{stderr.strip}" unless status.success?
+
+      stdout
+    rescue Errno::ENOENT
+      raise Error, 'gh not found on PATH (install the GitHub CLI)'
+    end
+  end
+end
+
+GhIssueSync::CLI.run(ARGV) if $PROGRAM_NAME == __FILE__
