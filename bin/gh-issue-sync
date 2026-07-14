@@ -23,24 +23,39 @@
 #
 # The slug is the --plan file's basename, so several plans can share
 # one issue, each owning its own section. The section is a projection
-# of the plan file: sync regenerates it wholesale, and a box ticked on
-# GitHub that the plan lacks is surfaced as a warning (the plan wins),
+# of the plan file: sync regenerates it wholesale, and anything on the
+# GitHub side the plan does not carry -- a ticked box, an edited item
+# text, a hand-added item -- is surfaced as a warning (the plan wins),
 # never silently kept or silently lost.
+#
+# Known limitation: `## To-dos` headings inside fenced code blocks are
+# correctly ignored, but the sync markers themselves are assumed never
+# to appear inside a fence.
 
 require 'json'
 require 'open3'
+require 'optparse'
 require 'tempfile'
 
 module GhIssueSync
   Error = Class.new(StandardError)
 
-  # GitHub rejects issue bodies past 256 KiB (measured empirically;
-  # the widely-cited 65536 figure is the comment limit, not the body's).
+  # GitHub rejects issue bodies past 256 KiB -- measured empirically at
+  # exactly 262144 bytes with ASCII bodies (the widely-cited 65536
+  # figure is the comment limit, not the body's). If GitHub's
+  # enforcement unit turns out to be characters, this byte guard is the
+  # conservative side for multibyte bodies.
   MAX_BODY_BYTES = 262_144
 
   TODO_LINE = /\A- \[(x| )\] \*\*(\d+)\.\*\* (.+)\z/
   CHECKBOX_START = /\A\s*- \[/
   TODOS_HEADING = /\A## To-dos\b/
+  OPEN_MARKER = /\A<!-- gh-issue-sync: \S+ -->/
+  CLOSE_MARKER = %r{\A<!-- /gh-issue-sync: \S+ -->}
+
+  # Text contract: the public module functions accept CRLF or LF and
+  # normalize once on entry; the private line-scanning helpers assume
+  # LF-only input.
 
   module_function
 
@@ -50,22 +65,26 @@ module GhIssueSync
 
   # Parses the plan file's "## To-dos" section into
   # [{number:, checked:, text:}, ...]. Indented continuation lines fold
-  # into the preceding item's text. Any checkbox line in the section
-  # that misses the strict "- [ ] **N.** text" shape raises rather than
-  # being silently skipped -- a skipped line would go permanently stale
-  # on the issue. Checkboxes outside the section (acceptance criteria,
-  # examples) are none of our business.
+  # into the preceding item's text. Only top-level items are legal:
+  # any checkbox line in the section that misses the strict
+  # "- [ ] **N.** text" shape -- including an indented/nested checkbox
+  # -- raises rather than being silently skipped or promoted, because a
+  # skipped line would go permanently stale on the issue and a promoted
+  # nested item would break the stable-numbering contract. Checkboxes
+  # outside the section (acceptance criteria, examples) are none of our
+  # business.
   def parse_plan_todos(plan_text)
-    section = todos_section(normalize(plan_text))
-    raise Error, "plan has no '## To-dos' section" unless section
+    lines = normalize(plan_text).lines
+    bounds = heading_bounds(lines)
+    raise Error, "plan has no '## To-dos' section" unless bounds
 
     items = []
-    section.each_line do |raw|
+    lines[(bounds[0] + 1)...bounds[1]].each do |raw|
       line = raw.chomp
-      if (m = TODO_LINE.match(line.strip))
+      if (m = TODO_LINE.match(line))
         items << { number: m[2].to_i, checked: m[1] == 'x', text: m[3] }
       elsif CHECKBOX_START.match?(line)
-        raise Error, "malformed to-do line (expected '- [ ] **N.** text'): #{line.strip}"
+        raise Error, "malformed to-do line (expected top-level '- [ ] **N.** text'): #{line.strip}"
       elsif line.start_with?('  ') && !line.strip.empty? && items.any?
         items.last[:text] = "#{items.last[:text]} #{line.strip}"
       end
@@ -83,14 +102,34 @@ module GhIssueSync
     lines.join("\n")
   end
 
+  # The one-call sync entry point: regenerates this slug's section from
+  # the plan's items and returns [new_body, warnings], so the
+  # never-silently-overwrite guarantee travels with the overwrite
+  # instead of relying on every caller to remember the divergence
+  # check.
+  def sync_section(body, items, slug:, heading_suffix: nil)
+    body = normalize(body)
+    divs = divergences(section_items(body, slug: slug), items)
+    warnings =
+      if divs.empty?
+        []
+      else
+        ["#{divs.join('; ')} -- the plan file wins; absorb real GitHub-side changes into the plan, then re-sync"]
+      end
+    rendered = render_section(items, slug: slug, heading_suffix: heading_suffix)
+    [upsert_section(body, rendered, slug: slug), warnings]
+  end
+
   # Regenerates this slug's section in place; creates it (at the end of
   # the body) when absent. A marker-less "## To-dos" heading left by a
-  # pre-helper flow is adopted -- replaced up to the next "##" heading --
-  # rather than duplicated.
+  # pre-helper flow is adopted -- replaced up to the next "##" heading
+  # -- rather than duplicated; headings inside another slug's marker
+  # pair or inside a fenced code block are never adoption targets.
   def upsert_section(body, rendered, slug:)
     body = normalize(body)
-    if section_range(body, slug)
-      body.sub(section_pattern(slug), rendered)
+    pattern = section_pattern(slug)
+    if body.match?(pattern)
+      body.sub(pattern) { rendered }
     elsif (adopted = adopt_heading(body, rendered))
       adopted
     else
@@ -109,23 +148,31 @@ module GhIssueSync
     end
   end
 
-  # A box ticked on GitHub that the plan still has unchecked is a human
-  # signal the plan file never absorbed. The plan is the source of
-  # truth, so the sync overwrites it -- but never silently.
+  # Anything on the GitHub side the plan does not carry is a human
+  # signal the plan file never absorbed: a tick, an edited item text,
+  # or a hand-added item. The plan is the source of truth, so the sync
+  # overwrites -- but never silently.
   def divergences(body_items, plan_items)
     plan_by_number = plan_items.to_h { |item| [item[:number], item] }
     body_items.filter_map do |body_item|
       plan_item = plan_by_number[body_item[:number]]
-      next unless plan_item && body_item[:checked] && !plan_item[:checked]
-
-      "item #{body_item[:number]} is ticked on GitHub but unchecked in the plan; " \
-        'the plan wins -- absorb the tick into the plan file if it is real'
+      if plan_item.nil?
+        "item #{body_item[:number]} exists only on GitHub"
+      elsif body_item[:checked] && !plan_item[:checked]
+        "item #{body_item[:number]} is ticked on GitHub but unchecked in the plan"
+      elsif body_item[:text] != plan_item[:text]
+        "item #{body_item[:number]}'s text differs between GitHub and the plan"
+      end
     end
   end
 
+  # Joins with exactly one blank line. Leading blank lines and trailing
+  # whitespace are trimmed from the addition, but never the first
+  # line's indentation -- an appended file may open with an indented
+  # code block.
   def append_body(body, addition)
     body = normalize(body).rstrip
-    addition = normalize(addition).strip
+    addition = normalize(addition).sub(/\A(?:[ \t]*\n)+/, '').rstrip
     return "#{addition}\n" if body.empty?
 
     "#{body}\n\n#{addition}\n"
@@ -144,22 +191,11 @@ module GhIssueSync
           "finish them or mark them deferred first:\n#{listing}"
   end
 
-  # The lines from the "## To-dos" heading to the next "##" heading (or
-  # end of file), heading excluded; nil when the plan has no such
-  # section.
-  def todos_section(text)
-    lines = text.lines
-    start = lines.index { |line| TODOS_HEADING.match?(line.chomp) }
-    return nil unless start
-
-    stop = (start + 1...lines.length).find { |i| lines[i].start_with?('## ') } || lines.length
-    lines[(start + 1)...stop].join
-  end
-
   def check_length!(body)
     return body if body.bytesize <= MAX_BODY_BYTES
 
-    raise Error, "new body would be #{body.bytesize} characters; GitHub's issue-body limit is #{MAX_BODY_BYTES}"
+    raise Error,
+          "new body would be #{body.bytesize} bytes; GitHub's issue-body limit is #{MAX_BODY_BYTES} bytes (256 KiB)"
   end
 
   def section_pattern(slug)
@@ -168,16 +204,54 @@ module GhIssueSync
     /#{open_marker}.*?#{close_marker}/m
   end
 
-  def section_range(body, slug)
-    section_pattern(slug) =~ body
+  # The lines [start, stop) of the first "## To-dos" section: heading
+  # at start, body up to (not including) the next "##" heading or end
+  # of input. Skips headings inside fenced code blocks and inside any
+  # line ranges passed as exclude (marker-wrapped sections during
+  # adoption). Returns nil when no eligible heading exists.
+  def heading_bounds(lines, exclude: [])
+    in_fence = false
+    start = nil
+    lines.each_with_index do |raw, i|
+      line = raw.chomp
+      if line.lstrip.start_with?('```')
+        in_fence = !in_fence
+        next
+      end
+      next if in_fence
+
+      if start.nil?
+        start = i if TODOS_HEADING.match?(line) && exclude.none? { |range| range.cover?(i) }
+      elsif line.start_with?('## ')
+        return [start, i]
+      end
+    end
+    start && [start, lines.length]
+  end
+
+  # Line-index ranges of every marker-delimited section in the body,
+  # regardless of slug.
+  def marked_line_ranges(lines)
+    ranges = []
+    open_index = nil
+    lines.each_with_index do |raw, i|
+      line = raw.chomp
+      if open_index.nil? && OPEN_MARKER.match?(line)
+        open_index = i
+      elsif open_index && CLOSE_MARKER.match?(line)
+        ranges << (open_index..i)
+        open_index = nil
+      end
+    end
+    ranges
   end
 
   def adopt_heading(body, rendered)
     lines = body.lines
-    start = lines.index { |line| TODOS_HEADING.match?(line.chomp) }
-    return nil unless start
+    bounds = heading_bounds(lines, exclude: marked_line_ranges(lines))
+    return nil unless bounds
 
-    stop = (start + 1...lines.length).find { |i| lines[i].start_with?('## ') } || lines.length
+    start, stop = bounds
     before = lines[0...start].join.rstrip
     after = lines[stop..].join.strip
     result = before.empty? ? '' : "#{before}\n\n"
@@ -196,14 +270,16 @@ module GhIssueSync
 
     gh-issue-sync checklist NNN --plan <plan.md> [--heading <slug>] [--repo owner/name]
         Regenerate the issue body's checklist section from the plan
-        file's '## To-dos' items (strict '- [ ] **N.** text' shape).
-        The section is delimited by <!-- gh-issue-sync: <slug> -->
-        markers (slug = the plan file's basename); it is created when
-        absent, and a marker-less pre-helper '## To-dos' heading is
-        adopted, not duplicated. --heading adds a visible
-        '## To-dos (<slug>)' suffix for multi-plan issues. Idempotent.
-        A box ticked on GitHub that the plan lacks is overwritten with
-        a warning: the plan file is the source of truth.
+        file's '## To-dos' items (strict top-level '- [ ] **N.** text'
+        shape). The section is delimited by
+        <!-- gh-issue-sync: <slug> --> markers (slug = the plan file's
+        basename); it is created when absent, and a marker-less
+        pre-helper '## To-dos' heading is adopted, not duplicated.
+        --heading adds a visible '## To-dos (<slug>)' suffix for
+        multi-plan issues. Idempotent. Anything on the GitHub side the
+        plan lacks -- a tick, an edited item text, a hand-added item --
+        is overwritten with a warning: the plan file is the source of
+        truth, so absorb real GitHub-side changes into it and re-sync.
 
     gh-issue-sync reconcile NNN --plan <plan.md> [--heading <slug>] [--repo owner/name]
         The finish-phase sync: same regeneration, but refuses to run
@@ -241,58 +317,66 @@ module GhIssueSync
     private
 
     def append(argv)
-      number, options = parse_args(argv, %w[--file --repo])
-      path = options['--file']
+      options = {}
+      rest = parse_options(argv, 'append NNN --file <md> [--repo owner/name]') do |o|
+        o.on('--file PATH', 'markdown file to append') { |v| options[:file] = v }
+        o.on('--repo NAME', 'owner/name pass-through to gh') { |v| options[:repo] = v }
+      end
+      number = issue_number(rest)
+      path = options[:file]
       raise Error, 'append requires --file <md>' unless path
       raise Error, "file not found: #{path}" unless File.exist?(path)
 
-      body = fetch_body(number, options['--repo'])
-      write_body(number, options['--repo'], GhIssueSync.append_body(body, File.read(path)))
+      addition = File.read(path)
+      raise Error, "file is empty: #{path}" if addition.strip.empty?
+
+      body = fetch_body(number, options[:repo])
+      write_body(number, options[:repo], GhIssueSync.append_body(body, addition))
       puts "Appended #{path} to issue ##{number}"
     end
 
     def sync(argv, reconcile:)
-      number, options = parse_args(argv, %w[--plan --heading --repo])
-      plan_path = options['--plan']
-      raise Error, "#{reconcile ? 'reconcile' : 'checklist'} requires --plan <plan.md>" unless plan_path
+      subcommand = reconcile ? 'reconcile' : 'checklist'
+      options = {}
+      rest = parse_options(argv, "#{subcommand} NNN --plan <plan.md> [--heading <slug>] [--repo owner/name]") do |o|
+        o.on('--plan PATH', 'plan file whose To-dos drive the sync') { |v| options[:plan] = v }
+        o.on('--heading SLUG', 'visible heading suffix for multi-plan issues') { |v| options[:heading] = v }
+        o.on('--repo NAME', 'owner/name pass-through to gh') { |v| options[:repo] = v }
+      end
+      number = issue_number(rest)
+      plan_path = options[:plan]
+      raise Error, "#{subcommand} requires --plan <plan.md>" unless plan_path
       raise Error, "plan file not found: #{plan_path}" unless File.exist?(plan_path)
 
       items = GhIssueSync.parse_plan_todos(File.read(plan_path))
       GhIssueSync.assert_reconcilable!(items) if reconcile
       slug = File.basename(plan_path, '.md')
-      rendered = GhIssueSync.render_section(items, slug: slug, heading_suffix: options['--heading'])
 
-      body = fetch_body(number, options['--repo'])
-      GhIssueSync.divergences(GhIssueSync.section_items(body, slug: slug), items).each do |warning|
-        warn "gh-issue-sync: warning: #{warning}"
-      end
-      write_body(number, options['--repo'], GhIssueSync.upsert_section(body, rendered, slug: slug))
+      body = fetch_body(number, options[:repo])
+      new_body, warnings = GhIssueSync.sync_section(body, items, slug: slug, heading_suffix: options[:heading])
+      warnings.each { |warning| warn "gh-issue-sync: warning: #{warning}" }
+      write_body(number, options[:repo], new_body)
 
       done = items.count { |item| item[:checked] }
       puts "#{reconcile ? 'Reconciled' : 'Synced'} #{slug} on issue ##{number} (#{done} of #{items.length} checked)"
     end
 
-    def parse_args(argv, allowed_options)
-      options = {}
-      positionals = []
-      until argv.empty?
-        arg = argv.shift
-        if allowed_options.include?(arg)
-          value = argv.shift
-          raise Error, "#{arg} requires a value" if value.nil? || value.start_with?('--')
-
-          options[arg] = value
-        elsif arg.start_with?('--')
-          raise Error, "unknown option #{arg}"
-        else
-          positionals << arg
-        end
+    def parse_options(argv, banner)
+      parser = OptionParser.new do |o|
+        o.banner = "Usage: gh-issue-sync #{banner}"
+        yield o
       end
-      number = positionals.first
+      parser.parse(argv)
+    rescue OptionParser::ParseError => e
+      raise Error, e.message
+    end
+
+    def issue_number(rest)
+      number = rest.first
       raise Error, 'missing issue number' unless number
       raise Error, "issue number must be digits, got #{number.inspect}" unless number.match?(/\A\d+\z/)
 
-      [number, options]
+      number
     end
 
     def fetch_body(number, repo)

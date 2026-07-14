@@ -37,12 +37,13 @@ end
 class ParsePlanTodosTest < Minitest::Test
   def test_parses_numbered_items_with_state_and_text
     plan = plan_with_todos(<<~TODOS)
-      - [x] **1.** Ship the first thing
+      - [x] **1.** Ship the first thing (deferred to #99)
       - [ ] **2.** Ship the second thing
     TODOS
     items = GhIssueSync.parse_plan_todos(plan)
     assert_equal [1, 2], items.map { |i| i[:number] }
     assert_equal [true, false], items.map { |i| i[:checked] }
+    assert_equal 'Ship the first thing (deferred to #99)', items[0][:text]
     assert_equal 'Ship the second thing', items[1][:text]
   end
 
@@ -53,11 +54,6 @@ class ParsePlanTodosTest < Minitest::Test
     TODOS
     items = GhIssueSync.parse_plan_todos(plan)
     assert_equal 'A long item that wraps onto a continuation line', items[0][:text]
-  end
-
-  def test_keeps_deferred_note_verbatim
-    plan = plan_with_todos('- [x] **3.** Polish the docs (deferred to #99)')
-    assert_equal 'Polish the docs (deferred to #99)', GhIssueSync.parse_plan_todos(plan)[0][:text]
   end
 
   def test_allows_gaps_in_numbering
@@ -77,9 +73,42 @@ class ParsePlanTodosTest < Minitest::Test
     assert_match(/missing its bold number/, error.message)
   end
 
+  def test_raises_on_indented_nested_checkboxes
+    plan = plan_with_todos(<<~TODOS)
+      - [ ] **1.** Parent item
+        - [x] **9.** nested but strict-shaped
+    TODOS
+    assert_raises(GhIssueSync::Error) { GhIssueSync.parse_plan_todos(plan) }
+
+    plan = plan_with_todos(<<~TODOS)
+      - [ ] **1.** Parent item
+        - [ ] plain nested sub-step
+    TODOS
+    assert_raises(GhIssueSync::Error) { GhIssueSync.parse_plan_todos(plan) }
+  end
+
   def test_ignores_unchecked_boxes_outside_the_todos_section
     plan = plan_with_todos('- [x] **1.** Only to-do')
     assert_equal 1, GhIssueSync.parse_plan_todos(plan).length
+  end
+
+  def test_ignores_a_fenced_todos_heading_before_the_real_section
+    plan = <<~PLAN
+      # abc-nnn-sample-plan
+
+      ## Format example
+
+      ```
+      ## To-dos
+      - [ ] **7.** fenced example, not real
+      ```
+
+      ## To-dos
+
+      - [x] **1.** The real item
+    PLAN
+    items = GhIssueSync.parse_plan_todos(plan)
+    assert_equal [1], items.map { |i| i[:number] }
   end
 
   def test_raises_when_plan_has_no_todos_section
@@ -139,6 +168,14 @@ class UpsertSectionTest < Minitest::Test
     assert_equal once, GhIssueSync.upsert_section(once, rendered, slug: SLUG)
   end
 
+  def test_renders_backslash_sequences_in_item_text_literally
+    body = "Intro.\n\n#{rendered}\n"
+    tricky = rendered([{ number: 1, checked: false, text: 'Support \\& and \\1 and \\\\ escapes' }])
+    result = GhIssueSync.upsert_section(body, tricky, slug: SLUG)
+    assert_includes result, 'Support \\& and \\1 and \\\\ escapes'
+    assert_equal 1, result.scan("<!-- /gh-issue-sync: #{SLUG} -->").length
+  end
+
   def test_adopts_a_pre_helper_marker_less_todos_heading
     body = <<~BODY
       Intro.
@@ -152,6 +189,35 @@ class UpsertSectionTest < Minitest::Test
     assert_includes result, "<!-- gh-issue-sync: #{SLUG} -->"
     assert_equal 1, result.scan('## To-dos').length
     assert_includes result, '## Later heading'
+  end
+
+  def test_never_adopts_another_plans_marker_wrapped_section
+    other_slug = 'abc-nnn-other-plan'
+    other = GhIssueSync.render_section([{ number: 1, checked: false, text: 'Other plan item' }],
+                                       slug: other_slug, heading_suffix: other_slug)
+    body = "Intro.\n\n#{other}\n"
+    result = GhIssueSync.upsert_section(body, rendered, slug: SLUG)
+    assert_includes result, 'Other plan item'
+    assert_equal 1, result.scan("<!-- gh-issue-sync: #{other_slug} -->").length
+    assert_equal 1, result.scan("<!-- /gh-issue-sync: #{other_slug} -->").length
+    assert_includes result, "<!-- gh-issue-sync: #{SLUG} -->"
+    assert_includes result, "<!-- /gh-issue-sync: #{SLUG} -->"
+  end
+
+  def test_never_adopts_a_todos_heading_inside_a_code_fence
+    body = <<~BODY
+      Intro documenting the format:
+
+      ```
+      ## To-dos
+      - [ ] **1.** fenced example
+      ```
+
+      Tail prose.
+    BODY
+    result = GhIssueSync.upsert_section(body, rendered, slug: SLUG)
+    assert_includes result, "```\n## To-dos\n- [ ] **1.** fenced example\n```"
+    assert_includes result, "Tail prose.\n\n#{rendered}\n"
   end
 
   def test_only_touches_the_section_matching_the_slug
@@ -173,18 +239,54 @@ class UpsertSectionTest < Minitest::Test
 end
 
 class DivergenceTest < Minitest::Test
-  def test_warns_when_github_has_a_tick_the_plan_lacks
+  def test_reports_a_tick_the_plan_lacks
     body_items = [{ number: 1, checked: true, text: 'One' }]
     plan_items = [{ number: 1, checked: false, text: 'One' }]
-    warnings = GhIssueSync.divergences(body_items, plan_items)
-    assert_equal 1, warnings.length
-    assert_match(/item 1.*plan wins/m, warnings[0])
+    divs = GhIssueSync.divergences(body_items, plan_items)
+    assert_equal 1, divs.length
+    assert_match(/item 1.*ticked on GitHub/, divs[0])
+  end
+
+  def test_reports_a_body_item_absent_from_the_plan
+    body_items = [{ number: 15, checked: true, text: 'hotfix landed' }]
+    plan_items = [{ number: 1, checked: true, text: 'One' }]
+    divs = GhIssueSync.divergences(body_items, plan_items)
+    assert_equal 1, divs.length
+    assert_match(/item 15.*only on GitHub/, divs[0])
+  end
+
+  def test_reports_a_text_edit_made_on_github
+    body_items = [{ number: 2, checked: false, text: 'Migrate (NOT before the 15th)' }]
+    plan_items = [{ number: 2, checked: false, text: 'Migrate' }]
+    divs = GhIssueSync.divergences(body_items, plan_items)
+    assert_equal 1, divs.length
+    assert_match(/item 2.*text differs/, divs[0])
   end
 
   def test_silent_when_plan_is_ahead_of_or_equal_to_github
     body_items = [{ number: 1, checked: false, text: 'One' }, { number: 2, checked: true, text: 'Two' }]
     plan_items = [{ number: 1, checked: true, text: 'One' }, { number: 2, checked: true, text: 'Two' }]
     assert_empty GhIssueSync.divergences(body_items, plan_items)
+  end
+end
+
+class SyncSectionTest < Minitest::Test
+  def test_returns_regenerated_body_and_no_warnings_when_clean
+    items = [{ number: 1, checked: true, text: 'One' }]
+    body = "Intro.\n\n#{GhIssueSync.render_section([{ number: 1, checked: false, text: 'One' }], slug: SLUG)}\n"
+    new_body, warnings = GhIssueSync.sync_section(body, items, slug: SLUG)
+    assert_includes new_body, '- [x] **1.** One'
+    assert_empty warnings
+  end
+
+  def test_returns_one_consolidated_warning_for_all_divergences
+    items = [{ number: 1, checked: false, text: 'One' }, { number: 2, checked: false, text: 'Two' }]
+    stale = [{ number: 1, checked: true, text: 'One' }, { number: 2, checked: true, text: 'Two' }]
+    body = "Intro.\n\n#{GhIssueSync.render_section(stale, slug: SLUG)}\n"
+    new_body, warnings = GhIssueSync.sync_section(body, items, slug: SLUG)
+    assert_includes new_body, '- [ ] **1.** One'
+    assert_equal 1, warnings.length
+    assert_match(/item 1.*item 2.*plan file wins/m, warnings[0])
   end
 end
 
@@ -210,6 +312,13 @@ class AppendBodyTest < Minitest::Test
     assert_equal "Body.\n\nMore.\n", GhIssueSync.append_body('Body.', 'More.')
   end
 
+  def test_preserves_first_line_indentation_of_the_addition
+    assert_equal "Body.\n\n    code line\nprose\n",
+                 GhIssueSync.append_body("Body.\n", "    code line\nprose\n")
+    assert_equal "Body.\n\n    code line\n",
+                 GhIssueSync.append_body("Body.\n", "\n\n    code line\n")
+  end
+
   def test_empty_body_gets_no_leading_blank_line
     assert_equal "More.\n", GhIssueSync.append_body('', "More.\n")
   end
@@ -229,8 +338,9 @@ class GuardsTest < Minitest::Test
     GhIssueSync.assert_reconcilable!([{ number: 1, checked: true, text: 'Done (deferred to #99)' }])
   end
 
-  def test_length_guard_raises_past_the_github_body_limit
-    assert_raises(GhIssueSync::Error) { GhIssueSync.check_length!('a' * 262_145) }
+  def test_length_guard_raises_past_the_github_body_limit_and_reports_bytes
+    error = assert_raises(GhIssueSync::Error) { GhIssueSync.check_length!('a' * 262_145) }
+    assert_match(/bytes/, error.message)
     GhIssueSync.check_length!('a' * 262_144)
   end
 end
