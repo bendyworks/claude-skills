@@ -54,9 +54,11 @@ overriding, and troubleshooting.
 ## Requirements
 
 - Claude Code with plugin support.
-- The `linear` skill's bundled CLI requires Ruby 3.x on your PATH (macOS
-  and Linux; on Windows use WSL) and a `LINEAR_API_TOKEN` environment
-  variable.
+- The bundled CLIs (`linear`, and `gh-issue-sync` used by `plan-issue`
+  and `finished-issue-housekeeping` on GitHub-tracked repos) require
+  Ruby 3.x on your PATH (macOS and Linux; on Windows use WSL). The
+  `linear` CLI also needs a `LINEAR_API_TOKEN` environment variable;
+  `gh-issue-sync` delegates auth to the GitHub CLI (`gh`).
 - `gauntlet` is tuned for Ruby on Rails projects (RSpec, RuboCop, Pundit).
   It runs elsewhere, but its audit prompts are Rails-flavored. It would be easy to re-focus a forked copy if you wish.
 - `gauntlet`, `dependabot-batch`, `finished-issue-housekeeping`, and
