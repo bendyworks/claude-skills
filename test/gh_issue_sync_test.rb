@@ -230,7 +230,7 @@ class GuardsTest < Minitest::Test
   end
 
   def test_length_guard_raises_past_the_github_body_limit
-    assert_raises(GhIssueSync::Error) { GhIssueSync.check_length!('a' * 65_537) }
-    GhIssueSync.check_length!('a' * 65_536)
+    assert_raises(GhIssueSync::Error) { GhIssueSync.check_length!('a' * 262_145) }
+    GhIssueSync.check_length!('a' * 262_144)
   end
 end

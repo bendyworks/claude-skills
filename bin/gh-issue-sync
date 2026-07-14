@@ -34,8 +34,9 @@ require 'tempfile'
 module GhIssueSync
   Error = Class.new(StandardError)
 
-  # GitHub rejects issue bodies past this many characters.
-  MAX_BODY_BYTES = 65_536
+  # GitHub rejects issue bodies past 256 KiB (measured empirically;
+  # the widely-cited 65536 figure is the comment limit, not the body's).
+  MAX_BODY_BYTES = 262_144
 
   TODO_LINE = /\A- \[(x| )\] \*\*(\d+)\.\*\* (.+)\z/
   CHECKBOX_START = /\A\s*- \[/
