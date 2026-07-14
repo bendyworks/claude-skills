@@ -38,7 +38,7 @@ If a plan file exists for this story (the plan-issue skill places them under `.c
 **Do not blindly flip `- [ ]` to `- [x]`.** Each unchecked item must be classified before you touch it. Read every `- [ ]` line, then sort each one into one of three buckets:
 
 - **Actually done.** The conversation history, git log, PRs, or production state make it obvious the work landed. Flip to `- [x]`.
-- **Deferred to a follow-up issue.** The work was intentionally split off; a separate issue tracks it. Replace the `- [ ]` with `- [x] (deferred to <ISSUE-ID>)` so the deferral and its destination are both visible in the historical record.
+- **Deferred to a follow-up issue.** The work was intentionally split off; a separate issue tracks it. Tick the box and append the destination to the item text, keeping the item's number -- `- [x] **N.** <original text> (deferred to <ISSUE-ID>)` -- so the deferral and its destination are both visible in the historical record.
 - **Genuinely not done, and unsure whether it should be.** Surface it to the user and ask: "I see `<item>` is still unchecked. Was it done, deferred, or still outstanding?" Wait for the answer.
 
 If the user identifies any item that **is still outstanding and should be finished**, **STOP the entire housekeeping pass.** The story is not actually done; finishing the housekeeping would lock that fact behind a `[x]` and lose it. Surface the outstanding work clearly, and let the user decide whether to extend the PR / open a follow-up / accept the deferral. Resume housekeeping only after the situation is resolved.
@@ -58,7 +58,7 @@ Use the conversation's actual dates, PR numbers, and SHAs. Do not fabricate. If 
 
 If multiple plan files match the issue (e.g. a parent plan + a follow-up plan), apply the same classification process to each.
 
-On a GitHub-tracked repo, once the plan file's checkboxes are finalized, reconcile the issue-body checklist so it exactly mirrors the finalized plan: fetch the current body, tick the completed items, append any plan to-dos the checklist is missing carrying their FINAL plan state (`- [x]`, or `- [x] (deferred to #NNN)` -- never a bare `- [ ]`, which would end the checklist stale on exactly the item that drifted), and write back -- per the plan-issue skill's fetch-append-write sequence (defined in its create phase, Step 4). The checklist is allowed to drift mid-flight but must not *end* stale; this is where that guarantee is enforced.
+On a GitHub-tracked repo, once the plan file's checkboxes are finalized, reconcile the issue-body checklist so it exactly mirrors the finalized plan, using the `gh-issue-sync` CLI bundled in this plugin: `gh-issue-sync reconcile NNN --plan .claude/plans/<slug>.md`. It regenerates the checklist section from the plan and refuses to run while the plan still has a bare unchecked `- [ ]` in its to-dos -- every item must end `- [x]`, or `- [x] ... (deferred to #NNN)` -- so an abort here means the classification above was skipped, never a reason to work around the tool. The checklist is allowed to drift mid-flight but must not *end* stale; this is where that guarantee is enforced.
 
 If no plan file (skill invoked ad-hoc), skip this step.
 
