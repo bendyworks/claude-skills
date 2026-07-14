@@ -21,16 +21,18 @@
 #   - [x] **1.** ...
 #   <!-- /gh-issue-sync: <slug> -->
 #
-# The slug is the --plan file's basename, so several plans can share
-# one issue, each owning its own section. The section is a projection
+# The slug is the --plan file's basename without its .md extension, so
+# several plans can share one issue, each owning its own section. The section is a projection
 # of the plan file: sync regenerates it wholesale, and anything on the
 # GitHub side the plan does not carry -- a ticked box, an edited item
 # text, a hand-added item -- is surfaced as a warning (the plan wins),
 # never silently kept or silently lost.
 #
-# Known limitation: `## To-dos` headings inside fenced code blocks are
-# correctly ignored, but the sync markers themselves are assumed never
-# to appear inside a fence.
+# Known limitations around fenced code blocks: `## To-dos` headings
+# inside a fence are correctly ignored, but the sync markers themselves
+# are assumed never to start a line inside one, a fence INSIDE the
+# plan's To-dos section may still trip the strict line parser, and only
+# triple-backtick fences are recognized (not ~~~ or longer runs).
 
 require 'json'
 require 'open3'
@@ -48,7 +50,9 @@ module GhIssueSync
   MAX_BODY_BYTES = 262_144
 
   TODO_LINE = /\A- \[(x| )\] \*\*(\d+)\.\*\* (.+)\z/
-  CHECKBOX_START = /\A\s*- \[/
+  # Checkbox-shaped only: a markdown link bullet ("- [text](url)") must
+  # not read as a malformed checkbox.
+  CHECKBOX_START = /\A\s*- \[[ xX]?\]/
   TODOS_HEADING = /\A## To-dos\b/
   OPEN_MARKER = /\A<!-- gh-issue-sync: \S+ -->/
   CLOSE_MARKER = %r{\A<!-- /gh-issue-sync: \S+ -->}
@@ -109,7 +113,12 @@ module GhIssueSync
   # check.
   def sync_section(body, items, slug:, heading_suffix: nil)
     body = normalize(body)
-    divs = divergences(section_items(body, slug: slug), items)
+    body_items = section_items(body, slug: slug)
+    # First-ever sync on a pre-helper issue: the checklist about to be
+    # adopted has no markers, and its hand-maintained state deserves
+    # the same divergence warnings as a marked section's.
+    body_items = adoption_items(body) if body_items.empty?
+    divs = divergences(body_items, items)
     warnings =
       if divs.empty?
         []
@@ -198,10 +207,22 @@ module GhIssueSync
           "new body would be #{body.bytesize} bytes; GitHub's issue-body limit is #{MAX_BODY_BYTES} bytes (256 KiB)"
   end
 
+  # Anchored to whole lines: markers are always rendered as full lines,
+  # and an item text merely MENTIONING a marker string must not end the
+  # match mid-line.
   def section_pattern(slug)
     open_marker = Regexp.escape("<!-- gh-issue-sync: #{slug} -->")
     close_marker = Regexp.escape("<!-- /gh-issue-sync: #{slug} -->")
-    /#{open_marker}.*?#{close_marker}/m
+    /^#{open_marker}$.*?^#{close_marker}$/m
+  end
+
+  # Slugs are embedded in the marker lines, whose scanners split on
+  # whitespace; a slug containing whitespace would render markers they
+  # can never re-recognize.
+  def assert_valid_slug!(slug)
+    return slug if slug.match?(/\A\S+\z/)
+
+    raise Error, "slug must contain no whitespace, got #{slug.inspect} (rename the plan file)"
   end
 
   # The lines [start, stop) of the first "## To-dos" section: heading
@@ -222,7 +243,7 @@ module GhIssueSync
 
       if start.nil?
         start = i if TODOS_HEADING.match?(line) && exclude.none? { |range| range.cover?(i) }
-      elsif line.start_with?('## ')
+      elsif line.start_with?('## ') || exclude.any? { |range| range.cover?(i) }
         return [start, i]
       end
     end
@@ -244,6 +265,19 @@ module GhIssueSync
       end
     end
     ranges
+  end
+
+  # Items in the marker-less section adoption would target, read
+  # leniently (non-matching lines are not this side's to police).
+  def adoption_items(body)
+    lines = normalize(body).lines
+    bounds = heading_bounds(lines, exclude: marked_line_ranges(lines))
+    return [] unless bounds
+
+    lines[(bounds[0] + 1)...bounds[1]].filter_map do |raw|
+      m = TODO_LINE.match(raw.chomp)
+      m && { number: m[2].to_i, checked: m[1] == 'x', text: m[3] }
+    end
   end
 
   def adopt_heading(body, rendered)
@@ -273,7 +307,7 @@ module GhIssueSync
         file's '## To-dos' items (strict top-level '- [ ] **N.** text'
         shape). The section is delimited by
         <!-- gh-issue-sync: <slug> --> markers (slug = the plan file's
-        basename); it is created when absent, and a marker-less
+        basename minus .md); it is created when absent, and a marker-less
         pre-helper '## To-dos' heading is adopted, not duplicated.
         --heading adds a visible '## To-dos (<slug>)' suffix for
         multi-plan issues. Idempotent. Anything on the GitHub side the
@@ -349,8 +383,10 @@ module GhIssueSync
       raise Error, "plan file not found: #{plan_path}" unless File.exist?(plan_path)
 
       items = GhIssueSync.parse_plan_todos(File.read(plan_path))
+      raise Error, "the plan's To-dos section has no items: #{plan_path}" if items.empty?
+
       GhIssueSync.assert_reconcilable!(items) if reconcile
-      slug = File.basename(plan_path, '.md')
+      slug = GhIssueSync.assert_valid_slug!(File.basename(plan_path, '.md'))
 
       body = fetch_body(number, options[:repo])
       new_body, warnings = GhIssueSync.sync_section(body, items, slug: slug, heading_suffix: options[:heading])

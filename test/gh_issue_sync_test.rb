@@ -92,6 +92,15 @@ class ParsePlanTodosTest < Minitest::Test
     assert_equal 1, GhIssueSync.parse_plan_todos(plan).length
   end
 
+  def test_ignores_markdown_link_bullets_in_the_todos_section
+    plan = plan_with_todos(<<~TODOS)
+      - [ ] **1.** Real item
+      - [see the RFC](https://example.com/rfc) for background
+    TODOS
+    items = GhIssueSync.parse_plan_todos(plan)
+    assert_equal [1], items.map { |i| i[:number] }
+  end
+
   def test_ignores_a_fenced_todos_heading_before_the_real_section
     plan = <<~PLAN
       # abc-nnn-sample-plan
@@ -204,6 +213,35 @@ class UpsertSectionTest < Minitest::Test
     assert_includes result, "<!-- /gh-issue-sync: #{SLUG} -->"
   end
 
+  def test_adoption_stops_before_a_neighboring_marker_section
+    other_slug = 'abc-nnn-other-plan'
+    other = GhIssueSync.render_section([{ number: 1, checked: false, text: 'Other item' }],
+                                       slug: other_slug, heading_suffix: other_slug)
+    body = <<~BODY
+      Intro.
+
+      ## To-dos
+      - [ ] **1.** pre-helper item
+
+      #{other}
+    BODY
+    result = GhIssueSync.upsert_section(body, rendered, slug: SLUG)
+    assert_equal 1, result.scan("<!-- gh-issue-sync: #{other_slug} -->").length
+    assert_equal 1, result.scan("<!-- /gh-issue-sync: #{other_slug} -->").length
+    assert_includes result, 'Other item'
+    assert_includes result, "<!-- gh-issue-sync: #{SLUG} -->"
+    refute_includes result, 'pre-helper item'
+  end
+
+  def test_stays_idempotent_when_item_text_mentions_a_marker
+    tricky = rendered([{ number: 1, checked: false,
+                         text: "documents the <!-- /gh-issue-sync: #{SLUG} --> close marker" }])
+    body = "Intro.\n\n#{tricky}\n"
+    once = GhIssueSync.upsert_section(body, tricky, slug: SLUG)
+    assert_equal once, GhIssueSync.upsert_section(once, tricky, slug: SLUG)
+    assert_equal 1, once.scan(/^<!-- \/gh-issue-sync: #{SLUG} -->$/).length
+  end
+
   def test_never_adopts_a_todos_heading_inside_a_code_fence
     body = <<~BODY
       Intro documenting the format:
@@ -288,6 +326,20 @@ class SyncSectionTest < Minitest::Test
     assert_equal 1, warnings.length
     assert_match(/item 1.*item 2.*plan file wins/m, warnings[0])
   end
+
+  def test_warns_about_state_in_an_adopted_pre_helper_section
+    body = <<~BODY
+      Intro.
+
+      ## To-dos
+      - [x] **1.** hand-ticked before the helper existed
+    BODY
+    items = [{ number: 1, checked: false, text: 'hand-ticked before the helper existed' }]
+    new_body, warnings = GhIssueSync.sync_section(body, items, slug: SLUG)
+    assert_includes new_body, "<!-- gh-issue-sync: #{SLUG} -->"
+    assert_equal 1, warnings.length
+    assert_match(/item 1.*ticked on GitHub/, warnings[0])
+  end
 end
 
 class SectionItemsTest < Minitest::Test
@@ -336,6 +388,11 @@ class GuardsTest < Minitest::Test
 
   def test_reconcile_guard_passes_when_every_item_is_checked
     GhIssueSync.assert_reconcilable!([{ number: 1, checked: true, text: 'Done (deferred to #99)' }])
+  end
+
+  def test_slug_guard_rejects_whitespace_slugs
+    assert_raises(GhIssueSync::Error) { GhIssueSync.assert_valid_slug!('my plan') }
+    GhIssueSync.assert_valid_slug!('16-gh-issue-sync-helper')
   end
 
   def test_length_guard_raises_past_the_github_body_limit_and_reports_bytes

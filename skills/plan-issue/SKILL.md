@@ -574,9 +574,9 @@ toggleable view of progress (Ctrl-T) alongside the markdown plan file.
   duplicating it), so every sync covers both directions of change at
   once: ticked boxes land AND newly-discovered to-dos appear, keeping
   their plan numbers. When several plans share one issue (the
-  deviation case above), each plan file's basename keys its own
-  section; pass `--heading <slug>` to also name the plan in the
-  visible heading. A box someone ticks directly on GitHub that the
+  deviation case above), each plan file's basename (minus `.md`) keys
+  its own section; pass `--heading <slug>` to also name the plan in
+  the visible heading. A box someone ticks directly on GitHub that the
   plan lacks gets overwritten with a warning -- absorb real ticks into
   the plan file, the single source of truth. Without write access to
   the repo, skip this surface entirely -- the comment fallback suits
