@@ -67,6 +67,14 @@ reference survives plugin namespacing.
 
 Executables go in `bin/` (added to PATH when the plugin is enabled) and
 must not require configuration beyond documented environment variables.
+Err on the side of keeping them stdlib-only Ruby (no gems, no Gemfile)
+so installers need nothing beyond a Ruby on their PATH. When a helper has logic worth
+testing (see `bin/gh-issue-sync`), structure it as a pure module whose
+functions raise a custom error, plus a thin CLI class that talks to the
+outside world and rescues to `abort`, dispatched behind
+`if $PROGRAM_NAME == __FILE__` -- the test file under `test/` can then
+`load` the bin file without executing the CLI, and CI runs it with a
+bare `ruby test/<name>_test.rb`.
 
 ## Proposing without building
 

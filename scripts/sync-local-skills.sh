@@ -11,9 +11,9 @@
 #   scripts/sync-local-skills.sh --check   # show drift, change nothing
 #   scripts/sync-local-skills.sh           # copy repo -> ~/.claude/skills
 #
-# Also updates $HOME/.claude/bin/linear from bin/linear when that file
+# Also updates $HOME/.claude/bin/<name> from each bin/ executable that
 # already exists locally (created the first time you opt in by copying
-# it yourself).
+# it yourself; a bin file you never copied is never synced).
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -42,14 +42,17 @@ for dir in skills/*/; do
   fi
 done
 
-if [ -f "$HOME/.claude/bin/linear" ] && ! diff -q bin/linear "$HOME/.claude/bin/linear" >/dev/null 2>&1; then
-  echo "drift: bin/linear"
-  drift=1
-  if [ "$CHECK_ONLY" -eq 0 ]; then
-    cp -p bin/linear "$HOME/.claude/bin/linear"
-    echo "  -> synced from repo"
+for tool in bin/*; do
+  name="$(basename "$tool")"
+  if [ -f "$HOME/.claude/bin/$name" ] && ! diff -q "$tool" "$HOME/.claude/bin/$name" >/dev/null 2>&1; then
+    echo "drift: bin/$name"
+    drift=1
+    if [ "$CHECK_ONLY" -eq 0 ]; then
+      cp -p "$tool" "$HOME/.claude/bin/$name"
+      echo "  -> synced from repo"
+    fi
   fi
-fi
+done
 
 if [ "$drift" -eq 0 ]; then
   echo "sync-local-skills: no drift"

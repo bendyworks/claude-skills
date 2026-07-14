@@ -7,7 +7,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-SCAN="skills bin scripts guidance README.md CONTRIBUTING.md .github .claude-plugin"
+SCAN="skills bin scripts test guidance README.md CONTRIBUTING.md .github .claude-plugin"
 
 fail=0
 

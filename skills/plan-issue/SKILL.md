@@ -288,19 +288,28 @@ stakeholder) *before* moving to the implementation interview.
 Append the agreed user story and acceptance criteria to the tracker
 issue, and carry them into the plan file (Step 6) so the end-user
 definition of done travels with the work. On GitHub, "append" is a
-read-modify-write -- the **fetch-append-write sequence**, which every
-later GitHub body edit in this skill reuses by name: `gh issue edit
---body-file` REPLACES the entire issue body. Fetch the current body to
-a temp file (`gh issue view NNN --json body -q .body > <file>`),
-edit it as the step requires -- append new content (after a blank
-line, so a heading or checkbox never glues onto the body's last line)
-and/or tick existing checkboxes in place -- then write it back
-(`gh issue edit NNN --body-file <file>`).
-Re-fetch immediately before every write and never write from a stale
-copy -- GitHub has no compare-and-swap, body edits notify no one, so
-clobbering a concurrent human edit is silent. Without write access to
-the repo, post the addition as a comment via `gh issue comment`
-instead.
+read-modify-write (`gh issue edit --body-file` REPLACES the entire
+issue body), so never hand-roll it: use the `gh-issue-sync` CLI
+bundled with this plugin (on PATH when the plugin is installed;
+requires Ruby, like the linear CLI):
+
+```bash
+gh-issue-sync append NNN --file <md>
+```
+
+The helper owns the mechanics every GitHub body edit in this skill
+needs: it fetches fresh immediately before writing (GitHub has no
+compare-and-swap and body edits notify no one, so writing from a stale
+copy silently clobbers a concurrent human edit), guards the blank line
+so appended content never glues onto the body's last line, round-trips
+the body exactly, normalizes CRLF from web-UI edits, and enforces
+GitHub's body-length limit. Note that `append` is not idempotent:
+re-running it appends again. For the rare body edit that is neither an
+append nor a checklist sync (e.g. amending an already-appended
+section), fetch fresh with `gh issue view NNN --json body` parsed as
+JSON (never `-q .body`, which grows a trailing newline per cycle),
+edit, and write back immediately. Without write access to the repo,
+post the addition as a comment via `gh issue comment` instead.
 
 **When this step is light or N/A:** for changes with no end-user-
 observable surface -- pure refactors, infra, dev tooling, internal
@@ -362,9 +371,9 @@ Skip questions whose answers are obvious from the issue or the code.
 Continue until the picture is clear; do not stop after a single round.
 
 When the interview is done, append the resulting specification to the
-tracker issue description (on GitHub, using the same fetch-append-write
-sequence from Step 4), so the source of truth for what we agreed on
-lives there too.
+tracker issue description (on GitHub, via the bundled helper's
+`gh-issue-sync append`, per Step 4), so the source of truth for what
+we agreed on lives there too.
 
 ### Step 6 -- Propose the plan
 
@@ -551,30 +560,36 @@ toggleable view of progress (Ctrl-T) alongside the markdown plan file.
   is discovered, append it to both (and, on GitHub-tracked repos, to
   the issue-body checklist at its next sync -- next bullet).
 - **GitHub-tracked repos get a third surface: the issue-body
-  checklist.** Mirror the plan's numbered to-dos into the issue body as
-  `- [ ]` checkboxes (via the create phase's fetch-append-write
-  sequence) so progress is publicly visible on the issue, with GitHub's
-  own "x of y tasks" progress bar. The mirror is an upsert: if this
-  plan's checklist is already in the body (a re-run record phase),
-  update it in place rather than appending a duplicate; and when
-  several plans share one issue (the deviation case above), put a
-  heading with each plan's slug above its checklist so every sync and
-  the finish reconcile can target the right section. Without write
-  access to the repo, skip this surface entirely -- the comment
-  fallback suits one-shot appends, not a per-commit sync, and the plan
-  file and Task tracker remain the two surfaces. It is a projection,
-  not a peer: the
-  plan file stays the single source of truth, and the checklist syncs
-  at each commit/push boundary (Step 6), not per to-do. This bullet
-  owns the cadence. A sync covers both directions of change: tick the
-  boxes that landed AND append newly-discovered to-dos as new
-  checkboxes, keeping their plan numbers -- a tick-only sync can never
-  reconcile a checklist that is missing items. The finish phase's
-  reconcile is stronger than a sync: it copies final state, appending
-  any missing items with the state the finalized plan gives them
-  (`- [x]`, or `- [x] (deferred to #NNN)`, never a bare `- [ ]`), so
-  the checklist ends as an exact mirror of the plan -- the public
-  surface may drift mid-flight but never ends stale.
+  checklist.** Mirror the plan's numbered to-dos into the issue body
+  with the bundled helper:
+
+  ```bash
+  gh-issue-sync checklist NNN --plan .claude/plans/<slug>.md
+  ```
+
+  Progress becomes publicly visible on the issue, with GitHub's own
+  "x of y tasks" progress bar. The helper regenerates a
+  marker-delimited section from the plan file (creating it when
+  absent, adopting a pre-helper `## To-dos` heading rather than
+  duplicating it), so every sync covers both directions of change at
+  once: ticked boxes land AND newly-discovered to-dos appear, keeping
+  their plan numbers. When several plans share one issue (the
+  deviation case above), each plan file's basename (minus `.md`) keys
+  its own section; pass `--heading <slug>` to also name the plan in
+  the visible heading. A box someone ticks directly on GitHub that the
+  plan lacks gets overwritten with a warning -- absorb real ticks into
+  the plan file, the single source of truth. Without write access to
+  the repo, skip this surface entirely -- the comment fallback suits
+  one-shot appends, not a per-commit sync, and the plan file and Task
+  tracker remain the two surfaces. The checklist is a projection, not
+  a peer: it syncs at each commit/push boundary (Step 6), not per
+  to-do. This bullet owns the cadence. The finish phase's reconcile
+  (`gh-issue-sync reconcile`) is stronger than a sync: it refuses to
+  run while the plan still has bare unchecked `- [ ]` items, so the
+  checklist ends as an exact mirror of the finalized plan (every item
+  `- [x] **N.** <text>`, deferred ones with a trailing
+  `(deferred to #NNN)` note) -- the public surface may drift
+  mid-flight but never ends stale.
 - **Always show the task number next to each task** whenever you surface
   the task list to the user (e.g. `1. ...`, `2. ...`). The user refers to
   tasks by number, so a bare bulleted list is not enough -- every rendered
@@ -640,9 +655,8 @@ phase or to-do (your judgment on grouping):
    items, add any newly-discovered work. Mirror the change in the
    Task tracker via `TaskUpdate` so the Ctrl-T view stays accurate.
    On a GitHub-tracked repo, also sync the issue-body checklist now
-   (record Step 4 owns the cadence): tick the boxes that landed and
-   append any newly-discovered to-dos, via the create phase's
-   fetch-append-write sequence.
+   (record Step 4 owns the cadence):
+   `gh-issue-sync checklist NNN --plan .claude/plans/<slug>.md`.
 5. Show the user the updated to-do list, with each task's number shown
    next to it (the user refers to tasks by number), unless there's a
    clear reason not to, e.g. a single-line trailing checkoff.
@@ -695,8 +709,9 @@ via the Skill tool. It will:
 - Classify each unchecked plan-file item and STOP if any genuinely
   unfinished work surfaces.
 - Add the Shipment section to the plan file.
-- On GitHub-tracked repos, reconcile the issue-body checklist so the
-  public surface does not end stale.
+- On GitHub-tracked repos, reconcile the issue-body checklist
+  (`gh-issue-sync reconcile`) so the public surface does not end
+  stale.
 - Delete the local working branch with `-d` safety.
 - Add a Done entry to `MEMORY.md` and remove the issue from Active
   Work if it was there.
