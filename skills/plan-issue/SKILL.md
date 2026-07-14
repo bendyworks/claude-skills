@@ -304,8 +304,12 @@ copy silently clobbers a concurrent human edit), guards the blank line
 so appended content never glues onto the body's last line, round-trips
 the body exactly, normalizes CRLF from web-UI edits, and enforces
 GitHub's body-length limit. Note that `append` is not idempotent:
-re-running it appends again. Without write access to the repo, post
-the addition as a comment via `gh issue comment` instead.
+re-running it appends again. For the rare body edit that is neither an
+append nor a checklist sync (e.g. amending an already-appended
+section), fetch fresh with `gh issue view NNN --json body` parsed as
+JSON (never `-q .body`, which grows a trailing newline per cycle),
+edit, and write back immediately. Without write access to the repo,
+post the addition as a comment via `gh issue comment` instead.
 
 **When this step is light or N/A:** for changes with no end-user-
 observable surface -- pure refactors, infra, dev tooling, internal
@@ -582,8 +586,9 @@ toggleable view of progress (Ctrl-T) alongside the markdown plan file.
   to-do. This bullet owns the cadence. The finish phase's reconcile
   (`gh-issue-sync reconcile`) is stronger than a sync: it refuses to
   run while the plan still has bare unchecked `- [ ]` items, so the
-  checklist ends as an exact mirror of the finalized plan (`- [x]`,
-  or `- [x] (deferred to #NNN)`) -- the public surface may drift
+  checklist ends as an exact mirror of the finalized plan (every item
+  `- [x] **N.** <text>`, deferred ones with a trailing
+  `(deferred to #NNN)` note) -- the public surface may drift
   mid-flight but never ends stale.
 - **Always show the task number next to each task** whenever you surface
   the task list to the user (e.g. `1. ...`, `2. ...`). The user refers to
