@@ -292,8 +292,9 @@ read-modify-write -- the **fetch-append-write sequence**, which every
 later GitHub body edit in this skill reuses by name: `gh issue edit
 --body-file` REPLACES the entire issue body. Fetch the current body to
 a temp file (`gh issue view NNN --json body -q .body > <file>`),
-append to it (after a blank line, so a heading or checkbox never glues
-onto the body's last line), then write it back
+edit it as the step requires -- append new content (after a blank
+line, so a heading or checkbox never glues onto the body's last line)
+and/or tick existing checkboxes in place -- then write it back
 (`gh issue edit NNN --body-file <file>`).
 Re-fetch immediately before every write and never write from a stale
 copy -- GitHub has no compare-and-swap, body edits notify no one, so
@@ -553,15 +554,27 @@ toggleable view of progress (Ctrl-T) alongside the markdown plan file.
   checklist.** Mirror the plan's numbered to-dos into the issue body as
   `- [ ]` checkboxes (via the create phase's fetch-append-write
   sequence) so progress is publicly visible on the issue, with GitHub's
-  own "x of y tasks" progress bar. It is a projection, not a peer: the
+  own "x of y tasks" progress bar. The mirror is an upsert: if this
+  plan's checklist is already in the body (a re-run record phase),
+  update it in place rather than appending a duplicate; and when
+  several plans share one issue (the deviation case above), put a
+  heading with each plan's slug above its checklist so every sync and
+  the finish reconcile can target the right section. Without write
+  access to the repo, skip this surface entirely -- the comment
+  fallback suits one-shot appends, not a per-commit sync, and the plan
+  file and Task tracker remain the two surfaces. It is a projection,
+  not a peer: the
   plan file stays the single source of truth, and the checklist syncs
   at each commit/push boundary (Step 6), not per to-do. This bullet
   owns the cadence. A sync covers both directions of change: tick the
   boxes that landed AND append newly-discovered to-dos as new
   checkboxes, keeping their plan numbers -- a tick-only sync can never
-  reconcile a checklist that is missing items. The finish phase
-  reconciles it the same way, so the public surface can drift
-  mid-flight but never ends stale.
+  reconcile a checklist that is missing items. The finish phase's
+  reconcile is stronger than a sync: it copies final state, appending
+  any missing items with the state the finalized plan gives them
+  (`- [x]`, or `- [x] (deferred to #NNN)`, never a bare `- [ ]`), so
+  the checklist ends as an exact mirror of the plan -- the public
+  surface may drift mid-flight but never ends stale.
 - **Always show the task number next to each task** whenever you surface
   the task list to the user (e.g. `1. ...`, `2. ...`). The user refers to
   tasks by number, so a bare bulleted list is not enough -- every rendered
@@ -681,9 +694,9 @@ via the Skill tool. It will:
 - Re-verify preconditions (idempotent with Step 1).
 - Classify each unchecked plan-file item and STOP if any genuinely
   unfinished work surfaces.
+- Add the Shipment section to the plan file.
 - On GitHub-tracked repos, reconcile the issue-body checklist so the
   public surface does not end stale.
-- Add the Shipment section to the plan file.
 - Delete the local working branch with `-d` safety.
 - Add a Done entry to `MEMORY.md` and remove the issue from Active
   Work if it was there.
