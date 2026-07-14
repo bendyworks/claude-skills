@@ -59,8 +59,9 @@ overriding, and troubleshooting.
   variable.
 - `gauntlet` is tuned for Ruby on Rails projects (RSpec, RuboCop, Pundit).
   It runs elsewhere, but its audit prompts are Rails-flavored. It would be easy to re-focus a forked copy if you wish.
-- `gauntlet`, `dependabot-batch`, and `finished-issue-housekeeping` lean on
-  the GitHub CLI (`gh`) being installed and authenticated.
+- `gauntlet`, `dependabot-batch`, `finished-issue-housekeeping`, and
+  `plan-issue` lean on the GitHub CLI (`gh`) being installed and
+  authenticated.
 - `markdown-to-pdf` needs a Chromium-based browser or wkhtmltopdf, plus a
   markdown converter (kramdown gem, pandoc, or python-markdown).
 
