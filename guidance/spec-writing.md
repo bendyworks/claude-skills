@@ -76,14 +76,15 @@ don't have to ask twice.
   needed.
 - Everything beyond the minimum lives in traits (`:expired`,
   `:with_billing_plan`, ...), so each test declares exactly the state
-  it needs.
+  it needs. Reach for a trait when the state recurs across specs; a
+  one-off association can just be passed inline.
 - A softer suggestion for the calling side: let the factory call sing
   to the reader -- pass only the attributes the example actually
-  cares about, so the call names what's being created and the state
-  that matters. Traits usually serve both rules at once. When they
-  pull apart, the minimal-base rule wins: never fatten a base factory
-  just to shorten call sites, because unneeded records damage more
-  than extra text in a spec file.
+  cares about, so the call names the state that matters. Traits
+  usually serve both concerns at once. When they conflict, the
+  minimal-base rule wins: never fatten a base factory just to shorten
+  call sites, because unneeded records cost more than extra text in a
+  spec file.
 
 ## Describe-block hygiene
 
