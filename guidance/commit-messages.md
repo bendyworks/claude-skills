@@ -10,7 +10,7 @@ Commit messages follow one shape, adapted from
 ```
 type(scope): Title Case Outcome Description
 
-Body: the WHAT and the HOW, in as many paragraphs as needed.
+The WHAT and the HOW, in as many paragraphs as needed.
 
 BREAKING CHANGE: what breaks, when something does
 Refs: ABC-123
@@ -47,7 +47,9 @@ descriptions are just two words.
 - Prefer Title Case noun phrases or a leading OUTCOME verb (`Limit`,
   `Prevent`, `Stop`, `Speed up`) over mechanism verbs (`Add`,
   `Update`, `Move`). The type already carries the mechanism category,
-  which frees the description to carry the point of the change.
+  which frees the description to carry the point of the change. In an
+  unprefixed title, an outcome verb like `Fix` or `Prevent` does the
+  type's job.
   - Strong: `feat(marketplace): Limit Public Search to Intended Fields`
   - Weak: `feat(marketplace): Add ransackable_attributes allowlists`
 - Don't repeat the type as the description's leading verb.
@@ -65,10 +67,10 @@ descriptions are just two words.
   the description needs an "and", it should usually be two commits; if
   the change genuinely can't be split, the description still names the
   single user-facing outcome and the body explains the rest.
-- Keep the whole first line to roughly 72 characters. An unprefixed
-  title keeps the old 60-character skim target; with a prefix, keep
-  the description proportionally shorter. A description that can't fit
-  is a smell that the scope is too long or the commit too big.
+- Keep the whole first line to roughly 72 characters; an unprefixed
+  title should fit a tighter ~60-character skim target. A description
+  that can't fit is a smell that the scope is too long or the commit
+  too big.
 - Read it aloud before committing: if a teammate couldn't tell what
   changed and why it matters, rewrite it.
 
@@ -88,15 +90,15 @@ descriptions are just two words.
 
 ## Footers
 
-Footers are git trailers -- `Token: value`, one per line, after a
-blank line following the body:
+Footers are git trailers -- `Token: value` lines after a blank line
+following the body (a value may wrap onto continuation lines):
 
 - `Refs: <issue-id>` names the tracker issue the commit serves, in
   that tracker's native form: `Refs: ABC-123`, `Refs: SC-123`,
-  `Refs: #123`. Use `Refs:`, never `Fixes`/`Closes` -- GitHub closes
-  the referenced issue the moment a `Fixes`/`Closes` commit reaches
-  the default branch, so reserve those for the rare commit where that
-  is the intent.
+  `Refs: #123`. Use `Refs:` rather than `Fixes`/`Closes` -- GitHub
+  closes the referenced issue the moment a `Fixes`/`Closes` commit
+  reaches the default branch, so reserve those for the rare commit
+  where auto-close is the intent.
 - `BREAKING CHANGE: <description>` (uppercase, per the spec) marks a
   breaking change. The spec also offers a `!` shorthand
   (`feat(api)!:`), but prefer the explicit footer: with a bare `!` and
@@ -111,5 +113,5 @@ blank line following the body:
   commit represents one logical change. A commit that seems to need
   two types is the same smell wearing a prefix: split it.
 - Generated messages are exempt from this shape: merge commits,
-  `git revert` defaults, and bot commits keep their tools' formats.
+  revert commits, and bot commits keep their generators' formats.
 - Never amend or rewrite pushed commits without an explicit request.
