@@ -65,6 +65,26 @@ don't have to ask twice.
   documents the record's role in the scenario, so a reader knows why
   the row exists without reverse-engineering the setup.
 
+## Minimal base factories, traits for the rest
+
+- A base factory sets only the minimally required attributes for a
+  valid record (required `belongs_to` associations are part of that
+  minimum) -- and no optional associations. Anything more rides along
+  invisibly into every test that uses the factory, slowing the suite
+  and surprising the test writer with records they never asked for.
+  Treat factory defaults like permissions: give nothing unless it is
+  needed.
+- Everything beyond the minimum lives in traits (`:expired`,
+  `:with_billing_plan`, ...), so each test declares exactly the state
+  it needs.
+- A softer suggestion for the calling side: let the factory call sing
+  to the reader -- pass only the attributes the example actually
+  cares about, so the call names what's being created and the state
+  that matters. Traits usually serve both rules at once. When they
+  pull apart, the minimal-base rule wins: never fatten a base factory
+  just to shorten call sites, because unneeded records damage more
+  than extra text in a spec file.
+
 ## Describe-block hygiene
 
 - Don't wrap method describes in a "scopes" / "class methods" parent
