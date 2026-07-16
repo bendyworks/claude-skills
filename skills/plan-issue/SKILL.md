@@ -416,7 +416,14 @@ Draft a plan with:
 
    1. Run the project's full lint+test suite once, capturing complete
       output to a log file you can grep (use the project's suite-runner
-      skill if it provides one). This is the slow step.
+      skill if it provides one). This is the slow step in Full
+      Verification Mode. In Targeted Spec Verification Mode (declared
+      in the project's CLAUDE.md or rules files -- see the
+      clean-and-green guidance), run the targeted-specs skill (bundled
+      in this plugin) instead and act on its verdict line; if the
+      final per-to-do checkpoint already ran on a tree unchanged since
+      (apart from plan and doc edits), its verdict stands -- don't
+      repeat the run.
    2. Run the gauntlet skill (bundled in this plugin) via the Skill
       tool. The gauntlet is a multi-front quality pass that *requires*
       clean-and-green as its starting state -- it dispatches parallel
@@ -443,6 +450,13 @@ Draft a plan with:
       section before merging, and close the issue manually in the
       finish phase.
    4. Move the issue to PR Review; wait for human review and merge.
+      In Targeted Spec Verification Mode, CI's full-suite run on the
+      PR is the full gate: confirm it is green before marking the PR
+      ready for review or moving the issue, and own a red run exactly
+      like a red local full run (see the clean-and-green guidance). A
+      MISSING full-suite CI run -- a new repo, a deleted or narrowed
+      job -- is owned the same way: fall back to a local full gate
+      rather than proceeding on no evidence.
       (GitHub Issues has no such state. If the repo visibly runs
       status off labels or a Projects board, update those the same
       way record Step 5 chose to; otherwise the linked PR going
@@ -548,9 +562,10 @@ toggleable view of progress (Ctrl-T) alongside the markdown plan file.
   split it. "Full test suite and gauntlet and draft PR" is three tasks, not
   one -- each is independently substantial and independently checkable.
 - The trailing ship-the-work steps are each their **own** task, not a single
-  bundled one: full suite, the gauntlet skill, open draft PR, and move to
-  PR Review are separate tasks so the toggle view shows the whole arc and
-  each completes on its own. When the change is stakeholder-visible (a report,
+  bundled one: the suite gate (full or targeted per the project's mode),
+  the gauntlet skill, open draft PR, and move to PR Review are separate
+  tasks so the toggle view shows the whole arc and each completes on
+  its own. When the change is stakeholder-visible (a report,
   receipt, statement, mailer, or screen a client stakeholder relies on) and
   the project provides a change-highlights-style skill, add a further own
   task for the before/after summary and its communication to the stakeholder.
@@ -646,10 +661,12 @@ phase or to-do (your judgment on grouping):
 1. Run rubocop (or standardrb) and fix all failures.
 2. If production code changed: run the project's full lint+test suite
    once, capturing complete output to a log file you can grep (use the
-   project's suite-runner skill if it provides one). If only tests
-   changed: just the affected specs are fine. You may bundle multiple
-   to-dos into a single full-suite run when the time saved is worth
-   the lower granularity.
+   project's suite-runner skill if it provides one; in Targeted Spec
+   Verification Mode, a run of the targeted-specs skill (bundled in
+   this plugin) stands in here -- act on its verdict line). If only
+   tests changed: just the affected specs are fine. You may bundle
+   multiple to-dos into a single suite run (full or targeted) when
+   the time saved is worth the lower granularity.
 3. Commit and push that work. Default to the Conventional Commits
    shape with a Title Case outcome description
    (`type(scope): Title Case Outcome Description`), unless the

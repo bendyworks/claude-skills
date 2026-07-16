@@ -43,7 +43,7 @@ Before starting, verify:
 
 1. **We're on a feature branch.** Not `main` / `master`. Run `git branch --show-current`.
 2. **The branch has changes vs main.** Run `git diff main...HEAD --stat`. If the diff is empty, ask the user what they actually want to gauntlet.
-3. **Specs and lint already pass.** Ask the user to confirm, or run the project's full lint+test gate yourself, capturing the complete output to a log file you can grep afterward. (If the project provides its own suite-runner skill, use that instead of hand-typing the command.) The gauntlet is a *quality* pass, not a *rescue* pass -- if the branch is red, fix that first, separately.
+3. **Specs and lint already pass.** Ask the user to confirm, or run the project's full lint+test gate yourself, capturing the complete output to a log file you can grep afterward. (If the project provides its own suite-runner skill, use that instead of hand-typing the command.) A suite-gate result -- full or targeted -- already obtained on a since-unchanged tree satisfies this precondition; don't re-run it. If the project may be in Targeted Spec Verification Mode, run the targeted-specs skill (bundled in this plugin) instead, with coverage on -- it confirms the mode is authorized itself and ends with a verdict line; act on that verdict per the skill's contract, remembering that a PASSED whose announcement listed named gaps does not establish this precondition (a 0-spec-file PASSED with no named gaps, e.g. a docs-only branch, does). The gauntlet is a *quality* pass, not a *rescue* pass -- if the branch is red, fix that first, separately.
 4. **Working tree is clean, or close to it.** Uncommitted scratch changes muddle the diff. Ask the user to stash or commit first.
 
 If any precondition is off, surface it and pause -- don't push forward on a broken assumption.
@@ -87,7 +87,7 @@ If the user explicitly asked to skip something ("gauntlet but skip security") or
 
 Reviewers and CI (Codecov, etc.) flag **patch coverage**: lines *added by this branch* that no test executes. The Phase 1 audits reason about test *quality*, not line coverage, so an untested new line slips past them -- catch it here mechanically instead of in a review round-trip.
 
-The clean-and-green gate in Step 1 already runs the suite; run it (or the relevant suites) **with coverage on** and capture the artifacts, then intersect added lines with uncovered lines:
+The clean-and-green gate in Step 1 already runs the suite; run it (or the relevant suites) **with coverage on** and capture the artifacts. In Targeted Spec Verification Mode, Step 1's coverage artifacts are reusable only if /code-review changed nothing -- its Step 3 edits land between the two steps, and stale artifacts pair the current diff's line numbers against a tree that no longer exists. After /code-review edits, run the targeted-specs skill with coverage on again at this step; if Step 1's run ESCALATED, the full gate ran and full-mode behavior applies. Subset coverage is not ground truth: one-hop selection can miss a spec that covers an added line transitively, so treat a subset-uncovered added line as a candidate to verify (or defer to CI's full-run patch coverage) rather than an automatic finding. Then intersect added lines with uncovered lines:
 
 1. **Added lines** -- `git diff main...HEAD --unified=0` (or parse `+` hunks) gives the new-file line numbers per file.
 2. **Uncovered lines** -- from the coverage run's machine-readable output:
@@ -259,7 +259,7 @@ For each accepted finding:
 
 After all accepted findings are addressed:
 
-1. Run the project's full lint+test gate again (via the project's suite-runner skill if it has one), **with coverage on**, and re-run the Step 5 patch-coverage check -- the fixes added lines too, and those should be covered before the branch leaves draft.
+1. Run the project's full lint+test gate again (via the project's suite-runner skill if it has one), **with coverage on**, and re-run the Step 5 patch-coverage check -- the fixes added lines too, and those should be covered before the branch leaves draft. In Targeted Spec Verification Mode, re-run the targeted-specs skill (bundled in this plugin) with coverage on instead and act on its verdict line.
 2. Report the PR size in lines changed across files, and whether it's over or under the 400-line easy-review threshold.
 3. Offer Phase 4 -- ask the user, "Want to run a 'find the bug' pass? Recommended for larger or riskier PRs." Phrase it as a real option, not a default.
 4. If the user declines Phase 4, tell them the gauntlet is complete and the branch is ready for human review.
