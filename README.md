@@ -40,6 +40,7 @@ To pick up updates later:
 | `dependabot-batch` | Triage, verify, merge, and deploy a batch of open Dependabot PRs with tuneable autonomy. |
 | `bug-cluster-ledger` | Mine a time window of tracker issues and cluster them upward to root causes per subsystem, with prevention analysis. Used by architecture-survey. |
 | `app-wind-down` | Wind down a hosted app safely and reversibly: caretaker mode first, then hibernation to ~$0 with full restore assets. |
+| `targeted-specs` | Run just the specs a feature branch plausibly affects instead of the full local suite, leaning on CI for the full run. Recomputes scope from the branch diff every run, escalates to "this branch needs a full run" when blast-radius files are touched, announces the subset for your veto, and always lints the whole project. Rails/RSpec-first. |
 
 ## Engineering guidance
 
