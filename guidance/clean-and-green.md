@@ -66,8 +66,8 @@ mode.)
 Before adopting the mode -- or recommending it -- confirm the premise
 it rests on: CI actually runs the full suite on every push. The
 declaration asserts it, so someone must verify it against the CI
-config once, because with the mode active nothing else runs the full
-suite. When a Full Verification Mode project's runs keep exceeding
+config once: with the mode active, the full suite runs only in CI and
+in local escalation runs. When a Full Verification Mode project's runs keep exceeding
 the guide above and its CI covers the full suite, recommend this
 declaration to the team unprompted.
 

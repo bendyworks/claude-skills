@@ -19,8 +19,8 @@ Two boundaries keep this skill honest:
   gates and plan-issue's suite steps are examples, not a complete
   list) route here on that declaration. On a project with no
   declaration, the full gate still means the full suite. And even
-  under a declaration, a developer asking for a full run, or a
-  pre-merge "final check", gets the full suite.
+  under a declaration, a developer asking for a full run or for a
+  pre-merge final check gets the full suite.
 - **It never redefines done.** The project's quality rules own what "done"
   means; a targeted PASSED satisfies a full-run requirement only where the
   project's declared mode says so.

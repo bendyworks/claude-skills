@@ -416,13 +416,14 @@ Draft a plan with:
 
    1. Run the project's full lint+test suite once, capturing complete
       output to a log file you can grep (use the project's suite-runner
-      skill if it provides one). This is the slow step. In Targeted
-      Spec Verification Mode (declared in the project's CLAUDE.md or
-      rules files -- see the clean-and-green guidance), run the
-      targeted-specs skill (bundled in this plugin) instead and act
-      on its verdict line; if the final per-to-do checkpoint already
-      ran on an identical tree, its verdict stands -- don't repeat
-      the run.
+      skill if it provides one). This is the slow step in Full
+      Verification Mode. In Targeted Spec Verification Mode (declared
+      in the project's CLAUDE.md or rules files -- see the
+      clean-and-green guidance), run the targeted-specs skill (bundled
+      in this plugin) instead and act on its verdict line; if the
+      final per-to-do checkpoint already ran on a tree unchanged since
+      (apart from plan and doc edits), its verdict stands -- don't
+      repeat the run.
    2. Run the gauntlet skill (bundled in this plugin) via the Skill
       tool. The gauntlet is a multi-front quality pass that *requires*
       clean-and-green as its starting state -- it dispatches parallel
@@ -452,7 +453,10 @@ Draft a plan with:
       In Targeted Spec Verification Mode, CI's full-suite run on the
       PR is the full gate: confirm it is green before marking the PR
       ready for review or moving the issue, and own a red run exactly
-      like a red local full run (see the clean-and-green guidance).
+      like a red local full run (see the clean-and-green guidance). A
+      MISSING full-suite CI run -- a new repo, a deleted or narrowed
+      job -- is owned the same way: fall back to a local full gate
+      rather than proceeding on no evidence.
       (GitHub Issues has no such state. If the repo visibly runs
       status off labels or a Projects board, update those the same
       way record Step 5 chose to; otherwise the linked PR going
