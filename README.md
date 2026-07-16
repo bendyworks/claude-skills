@@ -40,7 +40,7 @@ To pick up updates later:
 | `dependabot-batch` | Triage, verify, merge, and deploy a batch of open Dependabot PRs with tuneable autonomy. |
 | `bug-cluster-ledger` | Mine a time window of tracker issues and cluster them upward to root causes per subsystem, with prevention analysis. Used by architecture-survey. |
 | `app-wind-down` | Wind down a hosted app safely and reversibly: caretaker mode first, then hibernation to ~$0 with full restore assets. |
-| `targeted-specs` | Run just the specs a feature branch plausibly affects instead of the full local suite, leaning on CI for the full run. Recomputes scope from the branch diff every run, escalates to "this branch needs a full run" when blast-radius files are touched, announces the subset for your veto, and always lints the whole project. Rails/RSpec-first. |
+| `targeted-specs` | Run just the specs a feature branch plausibly affects instead of the full local suite, leaning on CI for the full run. Escalates to "this branch needs a full run" when blast-radius files are touched, announces the subset for your veto, and never subsets lint. Rails/RSpec-first. |
 
 ## Engineering guidance
 
@@ -64,7 +64,8 @@ overriding, and troubleshooting.
   It runs elsewhere, but its audit prompts are Rails-flavored. It would be easy to re-focus a forked copy if you wish.
 - `gauntlet`, `dependabot-batch`, `finished-issue-housekeeping`, and
   `plan-issue` lean on the GitHub CLI (`gh`) being installed and
-  authenticated.
+  authenticated. `targeted-specs` uses it only as a fallback when
+  resolving a repo's default branch.
 - `markdown-to-pdf` needs a Chromium-based browser or wkhtmltopdf, plus a
   markdown converter (kramdown gem, pandoc, or python-markdown).
 
