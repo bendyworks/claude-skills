@@ -8,7 +8,7 @@ practices apply to your work automatically.
 | File | What it covers | Applies to |
 | --- | --- | --- |
 | [`tdd.md`](tdd.md) | Test-first by default: spec first, watch it fail, then production code, then watch it pass -- and how to verify retroactively when that order slipped. | everything |
-| [`spec-writing.md`](spec-writing.md) | RSpec defaults: syntax idioms, doubles vs real factory records, setup hygiene, which specs not to write, and titles that name behavior. | `spec/**/*` (path-scoped via frontmatter) |
+| [`spec-writing.md`](spec-writing.md) | RSpec defaults: syntax idioms, doubles vs real factory records, setup hygiene, minimal base factories with traits, which specs not to write, and titles that name behavior. | `spec/**/*` (path-scoped via frontmatter) |
 | [`commit-messages.md`](commit-messages.md) | Conventional Commits shape (`type(scope):` prefix, trailer footers) with Title Case outcome descriptions that answer WHY, bodies that carry the what and how, and what belongs in the PR description instead. | everything |
 | [`code-comments.md`](code-comments.md) | Comments that state permanent intent -- invariants and constraints, not debugging narration -- plus plain language: no unexplained acronyms, no insider jargon. | everything |
 | [`pull-requests.md`](pull-requests.md) | Small incremental PRs (300-line target, 400-line easy-review threshold), draft mode first, a PR owns the bugs it introduces, and per-thread review replies. | everything |
