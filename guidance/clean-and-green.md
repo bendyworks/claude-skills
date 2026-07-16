@@ -56,21 +56,27 @@ Some suites are too slow for the local edit-verify loop -- as a rough
 guide, a full run over about seven minutes, though the threshold is
 each team's call. Such a project may declare Targeted Spec
 Verification Mode: local verification runs whole-project lint plus a
-targeted subset of specs selected from the branch's diff (the
-`targeted-specs` skill, bundled in the bendyworks plugin, owns the
-selection), and CI runs the full suite on every push.
+targeted subset of specs selected from the branch's diff, and CI runs
+the full suite on every push. (Teams using the bendyworks plugin get
+the selection, escalation, and verdict mechanics from its
+targeted-specs skill; a team without the plugin needs its own
+documented procedure for the same mechanics before adopting the
+mode.)
 
-When a Full Verification Mode project's runs keep exceeding that
-guide and its CI runs the full suite on every push, proactively
-recommend this declaration to the team rather than waiting to be
-asked.
+Before adopting the mode -- or recommending it -- confirm the premise
+it rests on: CI actually runs the full suite on every push. The
+declaration asserts it, so someone must verify it against the CI
+config once, because with the mode active nothing else runs the full
+suite. When a Full Verification Mode project's runs keep exceeding
+the guide above and its CI covers the full suite, recommend this
+declaration to the team unprompted.
 
 To opt in, a project adds a declaration like this to its CLAUDE.md or
 a rules file:
 
 > This project uses Targeted Spec Verification Mode: local
-> verification runs whole-project lint plus targeted specs (the
-> targeted-specs skill); CI owns the full suite.
+> verification runs whole-project lint plus a targeted subset of
+> specs selected from the branch's diff; CI owns the full suite.
 
 The mode lives in the project's checked-in rules -- never an
 environment variable or a per-developer preference -- so every session
@@ -79,12 +85,10 @@ and every teammate verifies the same way.
 What targeted mode does NOT change:
 
 - **The definition of done.** CI's full-suite run is the full gate. A
-  red full-suite CI run is owned exactly like a red local rake: the
-  branch is not done until it is fixed, no matter how green the local
-  targeted run was.
-- **Lint.** Whole-project lint runs locally in both modes; only the
-  spec set is targeted.
-- **Escalation.** When a branch touches blast-radius files (shared
-  test infrastructure, dependency manifests, schema), the
-  targeted-specs skill escalates -- declaring that this branch needs
-  the full suite locally, just as in Full Verification Mode.
+  red full-suite CI run is owned exactly like a red local run of the
+  full gate: the branch is not done until it is fixed, no matter how
+  green the local targeted run was.
+- **Escalation.** When a change's blast radius cannot be predicted
+  from its diff, the targeted procedure escalates -- declaring that
+  this branch needs the full suite locally, just as in Full
+  Verification Mode.

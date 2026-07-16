@@ -71,9 +71,11 @@ post-merge `scripts/sync-local-skills.sh` flow), a headless session
 loads both those copies and the `--plugin-dir` working tree -- and can
 silently follow the stale local text instead of your branch's. Before
 dry-running a change to an existing skill, move the affected
-`~/.claude/skills/<name>` directories aside, run the test, then move
-them back. The tell that a run was contaminated: it cites skill
-wording that matches main rather than your branch.
+`~/.claude/skills/<name>` directories out of `~/.claude/skills`
+entirely (a scratch directory works; a rename in place does not --
+discovery keys off SKILL.md frontmatter, not the directory name), run
+the test, then move them back. The tell that a run was contaminated:
+it cites skill wording that matches main rather than your branch.
 
 **Trigger injection.** To force a specific code path (an escalation
 rule, an edge case), plant an untracked dummy file that matches the

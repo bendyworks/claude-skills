@@ -15,10 +15,12 @@ Two boundaries keep this skill honest:
 - **It is not the project's full-suite runner.** Where another skill or
   rule calls for "the project's suite-runner skill" or the full gate,
   this skill substitutes only where the project's declared targeted
-  mode says a subset may stand in. The mode-aware callers (the
-  gauntlet's pre-flight and post-fix re-run, plan-issue's suite steps)
-  route here exactly when that declaration exists; on a project with
-  no declaration, the full gate still means the full suite.
+  mode says a subset may stand in -- mode-aware callers (the gauntlet's
+  gates and plan-issue's suite steps are examples, not a complete
+  list) route here on that declaration. On a project with no
+  declaration, the full gate still means the full suite. And even
+  under a declaration, a developer asking for a full run, or a
+  pre-merge "final check", gets the full suite.
 - **It never redefines done.** The project's quality rules own what "done"
   means; a targeted PASSED satisfies a full-run requirement only where the
   project's declared mode says so.
@@ -285,8 +287,12 @@ bundle exec rspec <selected files> 2>&1 | tee -a "$LOG"
    the full gate would run it.
 2. **One spec invocation over the whole subset**, appended to the same
    log. Adapt both commands to the project's usual runners (container,
-   binstub, parallel runner). Grep the captured log for details; never
-   re-run the subset just to re-read its output.
+   binstub, parallel runner). A caller standing in for a
+   coverage-bearing gate (e.g. the gauntlet) may ask for this
+   invocation with coverage instrumentation on; keep the coverage
+   artifacts alongside the log for the caller to consume. Grep the
+   captured log for details; never re-run the subset just to re-read
+   its output.
 3. An **empty subset skips the spec invocation entirely, however it got
    empty** -- only no-spec-impact files, only named gaps, only deleted
    specs, and no pins. Lint alone decides, and the verdict reports 0 spec
@@ -314,6 +320,16 @@ Calling skills key off these lines to decide what happens next (hand off
 to the full gate, proceed to ship steps, or stop on failures), so their
 shape is not editable in passing -- treat any change as a breaking change
 for the skills that consume them.
+
+For a caller standing in for a full-gate step, the verdicts mean:
+**ESCALATED** -- run the full gate; no targeted run happened.
+**FAILED** -- the branch is red (lint or specs); fix before
+proceeding, exactly as with a red full gate. **PASSED** -- the
+targeted check passed. One caveat: a PASSED reporting 0 spec files
+means lint alone ran; when the announcement listed named gaps
+(changed code with no covering spec), that PASSED does not establish
+a "specs pass" precondition -- surface the gaps or fall back to the
+full gate instead of treating the branch as verified.
 
 ## Other stacks (reduced depth)
 
