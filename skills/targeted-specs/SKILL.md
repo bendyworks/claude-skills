@@ -13,10 +13,12 @@ verdict. CI owns the full suite.
 Two boundaries keep this skill honest:
 
 - **It is not the project's full-suite runner.** Where another skill or
-  rule calls for "the project's suite-runner skill" or the full gate --
-  the gauntlet's pre-flight, plan-issue's ship steps, a pre-merge check --
-  that still means the full suite. This skill substitutes only where the
-  project's declared targeted mode says a subset may stand in.
+  rule calls for "the project's suite-runner skill" or the full gate,
+  this skill substitutes only where the project's declared targeted
+  mode says a subset may stand in. The mode-aware callers (the
+  gauntlet's pre-flight and post-fix re-run, plan-issue's suite steps)
+  route here exactly when that declaration exists; on a project with
+  no declaration, the full gate still means the full suite.
 - **It never redefines done.** The project's quality rules own what "done"
   means; a targeted PASSED satisfies a full-run requirement only where the
   project's declared mode says so.

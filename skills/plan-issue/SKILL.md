@@ -416,7 +416,13 @@ Draft a plan with:
 
    1. Run the project's full lint+test suite once, capturing complete
       output to a log file you can grep (use the project's suite-runner
-      skill if it provides one). This is the slow step.
+      skill if it provides one). This is the slow step. In Targeted
+      Spec Verification Mode (declared in the project's CLAUDE.md or
+      rules files -- see the clean-and-green guidance), run the
+      targeted-specs skill (bundled in this plugin) instead and key
+      off its verdict line: ESCALATED hands back to the full gate,
+      and a red full-suite CI run on the PR is owned exactly like a
+      red local rake.
    2. Run the gauntlet skill (bundled in this plugin) via the Skill
       tool. The gauntlet is a multi-front quality pass that *requires*
       clean-and-green as its starting state -- it dispatches parallel
@@ -646,7 +652,9 @@ phase or to-do (your judgment on grouping):
 1. Run rubocop (or standardrb) and fix all failures.
 2. If production code changed: run the project's full lint+test suite
    once, capturing complete output to a log file you can grep (use the
-   project's suite-runner skill if it provides one). If only tests
+   project's suite-runner skill if it provides one; in Targeted Spec
+   Verification Mode, a targeted-specs run stands in here, with
+   ESCALATED handing back to the full gate). If only tests
    changed: just the affected specs are fine. You may bundle multiple
    to-dos into a single full-suite run when the time saved is worth
    the lower granularity.
