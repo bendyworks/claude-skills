@@ -56,12 +56,23 @@ ref:
 ```bash
 git remote set-head origin --auto                  # refresh origin/HEAD; fetch never updates it, so default-branch renames go stale without this
 git symbolic-ref --short refs/remotes/origin/HEAD  # the trunk, e.g. origin/main
-git fetch origin <trunk-branch>                    # scoped fetch; the trunk is the only ref scope needs
+git fetch origin <trunk-branch>                    # scoped fetch; bare branch name (main, not origin/main)
 ```
 
 If `origin/HEAD` cannot be resolved, fall back to
 `gh repo view --json defaultBranchRef` (requires the GitHub CLI) or ask
 the user. Never hardcode `origin/main`.
+
+`git remote set-head origin --auto` needs the network; right after a
+default-branch rename it can print a benign `Not a valid ref` error (the
+symref is still updated, and the scoped fetch heals the dangling ref).
+Offline, proceed with the existing `origin/HEAD` -- the three-dot diff
+uses the merge base, so a stale trunk does not inflate scope.
+
+All paths in this skill are relative to the **app root** -- the directory
+holding the `Gemfile` and `spec/`, which may be a subdirectory of the
+repository (a monorepo app). Run every count and grep below from that
+root, or the escalation globs and the Step 5 denominator silently miss.
 
 1. **Stacked branches diff against their base.** If this branch was cut
    from another feature branch rather than the trunk, diff against that
@@ -106,8 +117,10 @@ trigger, and recommend the full gate.
 - Locales: wholesale `config/locales/**` restructuring (files moved,
   split, or renamed) escalates; individual key edits map in Step 3
 - Routes: a `config/routes.rb` hunk that modifies or deletes existing
-  route lines escalates; add-only hunks map in Step 3 to the touched
-  controllers' request specs
+  route lines escalates -- as does an add-only hunk that can shadow routes
+  it does not touch (a wildcard or catch-all, a broad `match`, or a line
+  inserted above existing entries it could intercept). Plain add-only
+  hunks map in Step 3 to the touched controllers' request specs
 - **Fan-in rule** (concerns and callbacks): when the diff changes a
   concern, or adds or modifies an ActiveRecord callback or a `touch:`,
   `counter_cache`, or `dependent:` option -- damage that reaches specs
@@ -133,10 +146,12 @@ the file in the escalation: incidental local drift (a regenerated
 cleaned up and the skill re-invoked, while real story work keeps the
 escalation.
 
-**Coarse width pre-gate:** before any mapping, if the changed code-file
-count alone already exceeds the Step 5 ceiling fraction of the suite's
-spec-file count, escalate now (trigger `subset too wide`) rather than
-paying for per-file mapping Step 5 would throw away.
+**Coarse width pre-gate:** before any mapping, set aside the obvious
+no-spec-impact files (docs, images, build outputs -- Step 3's ignore
+bucket); if the remaining changed code-file count alone already exceeds
+the Step 5 ceiling fraction of the suite's spec-file count, escalate now
+(trigger `subset too wide`) rather than paying for per-file mapping Step 5
+would throw away.
 
 The trigger list is where the full-run habit's value is preserved; do not
 talk yourself past it because the subset "looks fine".
@@ -152,7 +167,9 @@ meaningful.
 **The generic rule:** every remaining changed code file gets, at minimum,
 its convention-mirrored spec (`app/anything/foo.rb` ->
 `spec/anything/foo_spec.rb`) plus one grep hop for callers, whose specs
-join the subset. The bullets below instantiate that rule for common Rails
+join the subset. Only spec paths that exist in the working tree join it --
+a mirrored spec deleted alongside its code belongs to the deleted-coverage
+finding (Step 1), not to the subset and not to the gap label. The bullets below instantiate that rule for common Rails
 shapes; a shape not listed (a GraphQL resolver, an ActionCable channel, a
 ViewComponent, a custom validator) follows the same rule -- it does not
 skip to the gap label.
@@ -177,8 +194,11 @@ output.
   the specs of callers found by grep
 - Policies -> the policy spec plus the resource's request/system specs
 - Individual locale-key changes -> one batched alternation grep for all
-  changed keys (`git grep -E 'key_a|key_b' app spec`), never one grep per
-  key
+  changed keys (`git grep -E 'key_a|key_b' app lib spec`), never one grep
+  per key. Lazy lookup hides keys from that grep (`t('.title')` in a view
+  resolves to `users.show.title` without the literal string appearing), so
+  for keys under view-shaped namespaces also map the matching view's
+  system/request specs
 - `lib/` -> matching lib specs; `lib/tasks/**/*.rake` -> task specs, or a
   named gap when none exist
 - Add-only route changes -> request specs for the touched controllers
@@ -186,7 +206,8 @@ output.
   that replay it
 - `app/admin/**` (ActiveAdmin and kin) -> matching admin request/feature
   specs
-- Changed spec files themselves -> always included
+- Changed spec files themselves -> always included (deleted spec files
+  excepted -- they are the deleted-coverage finding, never a subset entry)
 
 **Ripple depth is one hop.** Follow callers found by grep once; do not
 chase transitive chains. Err inclusive at that one hop.
@@ -253,7 +274,7 @@ Create the log first; both runs write to it, so the verdict's log path
 exists even when no specs run:
 
 ```bash
-LOG="/tmp/targeted-specs-$(date +%s).log"
+LOG="/tmp/targeted-specs-$(date +%s)-$$.log"
 <whole-project lint command> 2>&1 | tee "$LOG"
 bundle exec rspec <selected files> 2>&1 | tee -a "$LOG"
 ```
@@ -264,10 +285,12 @@ bundle exec rspec <selected files> 2>&1 | tee -a "$LOG"
    log. Adapt both commands to the project's usual runners (container,
    binstub, parallel runner). Grep the captured log for details; never
    re-run the subset just to re-read its output.
-3. An **empty subset** (every changed file landed in the "no spec impact"
-   bucket and there are no pins) skips the spec invocation entirely: lint
-   alone decides, and the verdict reports 0 spec files with the lint log
-   as its log path.
+3. An **empty subset skips the spec invocation entirely, however it got
+   empty** -- only no-spec-impact files, only named gaps, only deleted
+   specs, and no pins. Lint alone decides, and the verdict reports 0 spec
+   files with the lint log as its log path. Never invoke the spec runner
+   with an empty file list: bare `rspec` runs the entire suite, the exact
+   run this skill exists to avoid.
 4. Summarize pass/fail from the log and end with the verdict line. **Lint
    offenses make the run FAILED** even when every selected spec passes --
    `<f>` counts failing spec examples, so name the lint failure in the
