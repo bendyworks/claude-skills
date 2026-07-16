@@ -189,6 +189,10 @@ blocking prompt, so unattended callers work.
    Adapt the command to the project's usual spec runner (container, binstub,
    parallel runner). Grep the captured log for details; never re-run the
    subset just to re-read its output.
+
+   An **empty subset** (every changed file landed in the "no spec impact"
+   bucket and there are no pins) skips the spec invocation entirely: lint
+   alone decides, and the verdict line reports 0 spec files.
 3. Summarize pass/fail per the log and end with the verdict line.
 
 ## The verdict line -- a load-bearing contract
