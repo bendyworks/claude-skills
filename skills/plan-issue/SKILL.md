@@ -40,7 +40,8 @@ The user's global and project CLAUDE.md files may already require:
 - Use the bundled `linear` CLI for Linear access rather than raw GraphQL
   curl calls.
 - No emdashes in user-facing prose.
-- Title-case noun-phrase commit titles, not mechanism verbs.
+- Conventional Commits shape with a Title Case outcome description
+  (`type(scope): Title Case Outcome Description`).
 
 The plan should *behave* consistently with these rules but should not
 duplicate the rules themselves. Keep the plan focused on this specific
@@ -649,8 +650,10 @@ phase or to-do (your judgment on grouping):
    changed: just the affected specs are fine. You may bundle multiple
    to-dos into a single full-suite run when the time saved is worth
    the lower granularity.
-3. Commit and push that work. Default to a Title-Case noun-phrase
-   commit title, unless the project's conventions say otherwise.
+3. Commit and push that work. Default to the Conventional Commits
+   shape with a Title Case outcome description
+   (`type(scope): Title Case Outcome Description`), unless the
+   project's conventions say otherwise.
 4. Update the plan markdown: change `- [ ]` to `- [x]` for completed
    items, add any newly-discovered work. Mirror the change in the
    Task tracker via `TaskUpdate` so the Ctrl-T view stays accurate.
