@@ -36,10 +36,51 @@ description, a whole new audit lane in gauntlet.
    for anything a pattern can't catch (a client's name in prose, a
    real-world anecdote that identifies a project).
 3. **Test the skill you changed.** Invoke it through Claude Code against
-   a real (or toy) project and confirm the changed behavior. For a new
-   skill, run `claude --plugin-dir .` so the plugin loads from your
-   working tree.
+   a real (or toy) project and confirm the changed behavior. The
+   "Dry-running a skill" section below has the mechanics that make this
+   cheap; for a new skill it is the whole test plan.
 4. No trailing whitespace, no emdashes (use `--`).
+
+## Dry-running a skill
+
+The cheapest faithful test of a skill is a headless Claude session run
+against a real project, with the plugin loaded from your working tree.
+Three techniques cover most skills:
+
+**Invocation.** Run from the target project's directory and point
+`--plugin-dir` at your clone of this repo. Headless (`-p`) sessions
+cannot answer permission prompts, so pre-approve the tools the skill
+needs:
+
+```bash
+cd path/to/target-project
+claude --plugin-dir path/to/claude-skills \
+  -p "Invoke the <name> skill from the bendyworks plugin on the current
+      branch, following it exactly. Report what it produces." \
+  --allowedTools "Bash,Read,Grep,Glob"
+```
+
+Keep the prompt neutral -- do not tell the session what outcome you
+expect, or the run stops being a test. Decide the expected answer
+beforehand from your own reading of the project's state, then grade the
+output against it.
+
+**Trigger injection.** To force a specific code path (an escalation
+rule, an edge case), plant an untracked dummy file that matches the
+trigger instead of mutating anything real -- e.g.
+`touch spec/factories/zz_dry_run.rb` to trip a rule keyed on
+`spec/factories/**`. It exercises the genuine path end to end, risks
+nothing in the target repo, and one `rm` reverts it. When the skill
+claims to produce an artifact (a log file, a report), verify it exists
+on disk.
+
+**Selection-only paper runs.** For judgment-heavy rules that would be
+slow or side-effectful to execute, prompt the session to apply the
+skill's rules against real code but run nothing: stipulate a
+hypothetical diff ("pretend the branch diff were exactly: ..."), tell it
+to substitute real files when a stipulated one does not exist and say
+so, and require the full decision output. This validates heuristics in
+one pass without paying for their execution.
 
 ## Writing a new skill
 
