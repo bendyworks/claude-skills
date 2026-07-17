@@ -720,8 +720,7 @@ running the merged code AND the user has confirmed nothing is
 outstanding. This phase's role is to gate the handoff to the
 housekeeping skill: confirm preconditions, then delegate. The
 finished-issue-housekeeping skill (bundled in this plugin) owns the
-actual cleanup work (plan-file finalization, branch deletion, memory
-updates, sibling-audit verification, task list housekeeping).
+actual cleanup work -- see that skill's steps.
 
 Do NOT auto-advance into this phase from `record`. The gap between
 "PR merged to main" and "shipped to production" is real, and so is
@@ -768,9 +767,9 @@ via the Skill tool. It will:
   a new skill, and create it if so.
 - Verify sibling-audit follow-ups got filed.
 - Clear completed tasks from the conversation task list.
-- Offer an approval-gated permission-prompt sweep (via the
-  /fewer-permission-prompts built-in, when available), leaving any
-  approved `.claude/settings.json` additions uncommitted.
+- Run a permission-prompt sweep (via the /fewer-permission-prompts
+  built-in, when available), gating any settings-file write on the
+  user's approval.
 
 Relay the housekeeping skill's summary to the user when it finishes.
 
