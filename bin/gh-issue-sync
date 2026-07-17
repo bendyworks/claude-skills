@@ -122,7 +122,7 @@ module GhIssueSync
   # check.
   def sync_section(body, items, slug:, heading_suffix: nil)
     body = normalize(body)
-    existing = section_pattern(slug).match(body)
+    existing = matched_section!(body, slug)
     if existing && !checklist_section?(existing[0])
       raise Error, "section '#{slug}' holds arbitrary content, not a checklist; rename the plan file"
     end
@@ -189,6 +189,34 @@ module GhIssueSync
     end
   end
 
+  # The one spelling of the marker-line format; render and matching
+  # both derive from these so they can never drift apart.
+  def open_marker_line(slug)
+    "<!-- gh-issue-sync: #{slug} -->"
+  end
+
+  def close_marker_line(slug)
+    "<!-- /gh-issue-sync: #{slug} -->"
+  end
+
+  # Finds this slug's section and returns its MatchData (nil when the
+  # body has none) -- refusing to proceed when the slug's markers do
+  # not form exactly the matched pair. A marker orphaned by a hand
+  # edit would otherwise make the next write append a duplicate
+  # section, and the run after that swallow every line between the
+  # orphan and a later close marker.
+  def matched_section!(body, slug)
+    opens = body.lines.count { |line| line.chomp == open_marker_line(slug) }
+    closes = body.lines.count { |line| line.chomp == close_marker_line(slug) }
+    match = section_pattern(slug).match(body)
+    valid = match ? opens == 1 && closes == 1 : opens.zero? && closes.zero?
+    unless valid
+      raise Error, "issue body has unpaired '#{slug}' section markers " \
+                   "(#{opens} open, #{closes} close); repair the body by hand first"
+    end
+    match
+  end
+
   # Wraps arbitrary file content in this slug's marker pair, verbatim:
   # no generated heading (the content carries its own) and no item
   # parsing. Leading blank lines and trailing whitespace are trimmed,
@@ -215,7 +243,7 @@ module GhIssueSync
     assert_not_checklist_shaped!(content)
     body = normalize(body)
     rendered = render_content_section(content, slug: slug)
-    existing = section_pattern(slug).match(body)
+    existing = matched_section!(body, slug)
     return [append_body(body, rendered), :created] unless existing
 
     if checklist_section?(existing[0])

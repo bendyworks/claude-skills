@@ -521,6 +521,17 @@ class UpsertContentSectionTest < Minitest::Test
     assert_raises(GhIssueSync::Error) { upsert("Intro.\n", STORY, slug: 'x-->') }
   end
 
+  def test_refuses_a_body_with_an_unpaired_open_marker_for_the_slug
+    body = "Intro.\n\n<!-- gh-issue-sync: user-story -->\nOld story\nUnrelated prose.\n"
+    error = assert_raises(GhIssueSync::Error) { upsert(body) }
+    assert_match(/unpaired/, error.message)
+  end
+
+  def test_refuses_a_body_with_an_orphan_close_marker_for_the_slug
+    body = "Intro.\n\nOld tail.\n<!-- /gh-issue-sync: user-story -->\n"
+    assert_raises(GhIssueSync::Error) { upsert(body) }
+  end
+
   def test_normalizes_crlf_bodies
     new_body, = upsert("Intro.\r\n")
     refute_includes new_body, "\r"
@@ -542,6 +553,13 @@ class ChecklistCoexistenceTest < Minitest::Test
     new_body, _warnings = GhIssueSync.sync_section(body, [{ number: 1, checked: true, text: 'One' }], slug: SLUG)
     assert_includes new_body, '- [x] **1.** One'
     refute_includes new_body, "-->\n\n## To-dos"
+  end
+
+  def test_checklist_sync_refuses_a_body_with_an_unpaired_marker_for_its_slug
+    body = "Intro.\n\n<!-- gh-issue-sync: #{SLUG} -->\n- [ ] **1.** One\n"
+    items = [{ number: 1, checked: false, text: 'One' }]
+    error = assert_raises(GhIssueSync::Error) { GhIssueSync.sync_section(body, items, slug: SLUG) }
+    assert_match(/unpaired/, error.message)
   end
 
   def test_checklist_adoption_ignores_todo_shaped_lines_inside_content_sections
