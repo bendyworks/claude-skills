@@ -375,11 +375,6 @@ module GhIssueSync
   USAGE = <<~TXT
     gh-issue-sync -- GitHub issue-body read-modify-write helper (uses gh)
 
-    gh-issue-sync append NNN --file <md> [--repo owner/name]
-        Append the file's content to the issue body, separated by
-        exactly one blank line. NOT idempotent: re-running appends
-        again. For repeatable syncs use checklist/reconcile.
-
     gh-issue-sync section NNN --file <md> --slug <key> [--repo owner/name]
         Upsert the file's content, verbatim, into its own
         marker-delimited section of the issue body, keyed by --slug:
@@ -423,7 +418,8 @@ module GhIssueSync
     def run(argv)
       command = argv.shift
       case command
-      when 'append'    then append(argv)
+      when 'append'
+        raise Error, "append was replaced by the idempotent 'section NNN --file <md> --slug <key>'"
       when 'section'   then section(argv)
       when 'checklist' then sync(argv, reconcile: false)
       when 'reconcile' then sync(argv, reconcile: true)
@@ -438,25 +434,6 @@ module GhIssueSync
     end
 
     private
-
-    def append(argv)
-      options = {}
-      rest = parse_options(argv, 'append NNN --file <md> [--repo owner/name]') do |o|
-        o.on('--file PATH', 'markdown file to append') { |v| options[:file] = v }
-        o.on('--repo NAME', 'owner/name pass-through to gh') { |v| options[:repo] = v }
-      end
-      number = issue_number(rest)
-      path = options[:file]
-      raise Error, 'append requires --file <md>' unless path
-      raise Error, "file not found: #{path}" unless File.exist?(path)
-
-      addition = File.read(path)
-      raise Error, "file is empty: #{path}" if addition.strip.empty?
-
-      body = fetch_body(number, options[:repo])
-      write_body(number, options[:repo], GhIssueSync.append_body(body, addition))
-      puts "Appended #{path} to issue ##{number}"
-    end
 
     def section(argv)
       options = {}
