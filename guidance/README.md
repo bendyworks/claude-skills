@@ -8,11 +8,11 @@ practices apply to your work automatically.
 | File | What it covers | Applies to |
 | --- | --- | --- |
 | [`tdd.md`](tdd.md) | Test-first by default: spec first, watch it fail, then production code, then watch it pass -- and how to verify retroactively when that order slipped. | everything |
-| [`spec-writing.md`](spec-writing.md) | RSpec defaults: syntax idioms, doubles vs real factory records, setup hygiene, which specs not to write, and titles that name behavior. | `spec/**/*` (path-scoped via frontmatter) |
-| [`commit-messages.md`](commit-messages.md) | Commit titles that answer WHY in 60 characters, bodies that carry the what and how, and what belongs in the PR description instead. | everything |
+| [`spec-writing.md`](spec-writing.md) | RSpec defaults: syntax idioms, doubles vs real factory records, setup hygiene, minimal base factories with traits, which specs not to write, and titles that name behavior. | `spec/**/*` (path-scoped via frontmatter) |
+| [`commit-messages.md`](commit-messages.md) | Conventional Commits shape (`type(scope):` prefix, trailer footers) with Title Case outcome descriptions that answer WHY, bodies that carry the what and how, and what belongs in the PR description instead. | everything |
 | [`code-comments.md`](code-comments.md) | Comments that state permanent intent -- invariants and constraints, not debugging narration -- plus plain language: no unexplained acronyms, no insider jargon. | everything |
 | [`pull-requests.md`](pull-requests.md) | Small incremental PRs (300-line target, 400-line easy-review threshold), draft mode first, descriptions that link outside resources, a PR owns the bugs it introduces, and per-thread review replies. | everything |
-| [`clean-and-green.md`](clean-and-green.md) | Zero lint offenses and zero test failures as the status quo, no suppression comments, and escalating to a human instead of ever calling a red suite acceptable. | everything |
+| [`clean-and-green.md`](clean-and-green.md) | Zero lint offenses and zero test failures as the status quo, no suppression comments, and escalating to a human instead of ever calling a red suite acceptable; defines Full Verification Mode (the default) and opt-in Targeted Spec Verification Mode for where the full suite runs. | everything |
 | [`verification-habits.md`](verification-habits.md) | Empiricism before assertion: verify library claims against installed source, never write unverified facts about people, check schemas and method signatures before use. | everything |
 | [`tracker-comments.md`](tracker-comments.md) | Tracker comments that survive plans falling through: intentions with owners and absolute dates, instructions the reader verifies, no relative time. | everything |
 | [`rails-conventions.md`](rails-conventions.md) | Rails built-ins before custom code, standard foreign-key associations, symbol-based enum usage, and avoiding ActiveRecord callbacks in new code. | Rails projects |
