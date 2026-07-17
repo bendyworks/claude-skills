@@ -68,8 +68,12 @@ module GhIssueSync
 
   module_function
 
+  # CRLF and lone CR both become LF: GitHub's web UI submits CRLF, and
+  # a lone CR left un-normalized would smuggle line starts (marker
+  # lines included) past every LF-splitting scanner, only to become
+  # real lines after the next web-UI edit re-encodes them.
   def normalize(text)
-    text.gsub("\r\n", "\n")
+    text.gsub(/\r\n?/, "\n")
   end
 
   # Parses the plan file's "## To-dos" section into

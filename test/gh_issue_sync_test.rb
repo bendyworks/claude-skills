@@ -482,6 +482,11 @@ class UpsertContentSectionTest < Minitest::Test
     assert_raises(GhIssueSync::Error) { upsert("Intro.\n", content) }
   end
 
+  def test_rejects_marker_lines_hidden_behind_lone_cr
+    content = "Story.\r<!-- gh-issue-sync: demo -->\r"
+    assert_raises(GhIssueSync::Error) { upsert("Intro.\n", content) }
+  end
+
   def test_allows_mid_line_marker_mentions
     content = "Discusses the <!-- gh-issue-sync: demo --> marker format mid-line.\n"
     new_body, outcome = upsert("Intro.\n", content)
