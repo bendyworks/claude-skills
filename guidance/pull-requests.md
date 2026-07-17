@@ -22,6 +22,13 @@ keeping it small before it drifts large.
 Always create PRs in draft mode first. Mark ready for review only once
 lint and tests pass and the PR is genuinely ready for a human.
 
+## Write descriptions for the reader
+
+When a PR description mentions an outside resource -- a spec, a
+library's docs, a standard, an article -- turn its first mention into
+a link. Readers unfamiliar with the resource get the source; familiar
+readers get the convenience of a click.
+
 ## A PR owns the bugs it introduces
 
 A PR is responsible for fixing bugs and consequences it introduces,
