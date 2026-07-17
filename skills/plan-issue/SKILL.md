@@ -470,6 +470,25 @@ Draft a plan with:
       to the stakeholder so they can review each change visually with
       a clear, explained example. Skip only for purely internal changes
       with no stakeholder-visible surface (refactors, infra, dev tooling).
+   6. **Confirm shipped (PR merged, live in production).** The finish
+      phase's entry gate, listed as its own to-do so post-ship work is
+      visibly pending instead of remembered informally. Keep the plan
+      item's wording short -- "Confirm shipped (PR merged, live in
+      production)" -- because the full rule lives in this skill's
+      phase rules, not in the checkbox: never auto-advance into this
+      item; it waits for the user to trigger the finish phase. On
+      repos where the PR auto-closes the issue (a `Closes #NNN` body
+      or a linked branch), the issue closes at merge with this item
+      and the next still unchecked, and the finish phase's reconcile
+      later edits the closed issue's body. That is correct behavior,
+      not a bug for a later session to fix.
+   7. **Run the finished-issue-housekeeping skill.** The last to-do of
+      every plan; suggested wording "Run finished-issue-housekeeping
+      (finish phase, user-triggered)". The housekeeping pass itself
+      checks this item and the previous one off -- its plan-file
+      classification step treats the plan's own finish-tail items as
+      completed by the pass, so the issue-body reconcile never aborts
+      over them.
 
 Present the plan inline for the user to discuss and refine. Do not
 write it to disk yet -- that happens in the **record** phase.
@@ -563,9 +582,12 @@ toggleable view of progress (Ctrl-T) alongside the markdown plan file.
   one -- each is independently substantial and independently checkable.
 - The trailing ship-the-work steps are each their **own** task, not a single
   bundled one: the suite gate (full or targeted per the project's mode),
-  the gauntlet skill, open draft PR, and move to PR Review are separate
-  tasks so the toggle view shows the whole arc and each completes on
-  its own. When the change is stakeholder-visible (a report,
+  the gauntlet skill, open draft PR, move to PR Review, confirm shipped
+  (PR merged, live in production), and run finished-issue-housekeeping
+  are separate tasks so the toggle view shows the whole arc and each
+  completes on its own. The last two stay pending until the user
+  triggers the finish phase -- listing them never licenses
+  auto-advancing into it. When the change is stakeholder-visible (a report,
   receipt, statement, mailer, or screen a client stakeholder relies on) and
   the project provides a change-highlights-style skill, add a further own
   task for the before/after summary and its communication to the stakeholder.
@@ -604,8 +626,9 @@ toggleable view of progress (Ctrl-T) alongside the markdown plan file.
   run while the plan still has bare unchecked `- [ ]` items, so the
   checklist ends as an exact mirror of the finalized plan (every item
   `- [x] **N.** <text>`, deferred ones with a trailing
-  `(deferred to #NNN)` note) -- the public surface may drift
-  mid-flight but never ends stale.
+  `(deferred to #NNN)` note; the two finish-tail items are checked
+  off by the housekeeping pass itself before it reconciles) -- the
+  public surface may drift mid-flight but never ends stale.
 - **Always show the task number next to each task** whenever you surface
   the task list to the user (e.g. `1. ...`, `2. ...`). The user refers to
   tasks by number, so a bare bulleted list is not enough -- every rendered
@@ -727,7 +750,9 @@ via the Skill tool. It will:
 
 - Re-verify preconditions (idempotent with Step 1).
 - Classify each unchecked plan-file item and STOP if any genuinely
-  unfinished work surfaces.
+  unfinished work surfaces. (The plan's own two finish-tail items
+  never trigger STOP -- the pass itself completes them and checks
+  them off.)
 - Add the Shipment section to the plan file.
 - On GitHub-tracked repos, reconcile the issue-body checklist
   (`gh-issue-sync reconcile`) so the public surface does not end
