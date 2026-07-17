@@ -208,6 +208,7 @@ module GhIssueSync
     raise Error, 'refusing to write an empty section (the content file is blank)' if content.strip.empty?
 
     assert_no_marker_lines!(content)
+    assert_not_checklist_shaped!(content)
     body = normalize(body)
     rendered = render_content_section(content, slug: slug)
     existing = section_pattern(slug).match(body)
@@ -221,12 +222,28 @@ module GhIssueSync
     [body.sub(section_pattern(slug)) { rendered }, :replaced]
   end
 
-  # A section's kind is readable from its first content line: checklist
-  # renders always put the '## To-dos' heading directly under the open
-  # marker; content sections carry the file's own first line there.
+  # A section's kind is readable from its first non-blank content
+  # line: checklist renders put the '## To-dos' heading directly under
+  # the open marker, and content sections can never start with that
+  # heading (assert_not_checklist_shaped! refuses it). Skipping blank
+  # lines keeps the kind stable when a hand edit reflows whitespace
+  # under the marker.
   def checklist_section?(section)
-    first_content_line = section.lines[1]&.chomp
-    first_content_line ? TODOS_HEADING.match?(first_content_line) : false
+    first_content_line = section.each_line.lazy.drop(1).find { |line| !line.strip.empty? }
+    first_content_line ? TODOS_HEADING.match?(first_content_line.chomp) : false
+  end
+
+  # The section kinds are told apart by their first non-blank line, so
+  # content that opens with the checklist heading would be
+  # misclassified on every later read -- locked against its own
+  # re-runs and overwritable by a same-slug checklist sync. Refused
+  # loudly instead, like the marker guard.
+  def assert_not_checklist_shaped!(content)
+    first_line = normalize(content).lines.find { |line| !line.strip.empty? }
+    return content unless first_line && TODOS_HEADING.match?(first_line.chomp)
+
+    raise Error, "content opens with a '## To-dos' heading, which marks checklist sections; " \
+                 'reword its first line'
   end
 
   # Content is written verbatim, so a line shaped like either marker --

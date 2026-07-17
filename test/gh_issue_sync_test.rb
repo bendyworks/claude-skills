@@ -496,6 +496,22 @@ class UpsertContentSectionTest < Minitest::Test
     assert_raises(GhIssueSync::Error) { upsert("Intro.\n", "  \n\n") }
   end
 
+  def test_rejects_content_opening_with_a_todos_heading
+    error = assert_raises(GhIssueSync::Error) { upsert("Intro.\n", "## To-dos\nquoted example\n") }
+    assert_match(/To-dos/, error.message)
+  end
+
+  def test_rejects_a_todos_heading_behind_leading_blank_lines
+    assert_raises(GhIssueSync::Error) { upsert("Intro.\n", "\n\n## To-dos and scope\nbody\n") }
+  end
+
+  def test_treats_a_checklist_with_a_stray_blank_line_after_its_marker_as_a_checklist
+    checklist = GhIssueSync.render_section([{ number: 1, checked: false, text: 'One' }], slug: SLUG)
+    body = "Intro.\n\n#{checklist.sub("-->\n## To-dos", "-->\n\n## To-dos")}\n"
+    error = assert_raises(GhIssueSync::Error) { upsert(body, STORY, slug: SLUG) }
+    assert_match(/is a checklist section/, error.message)
+  end
+
   def test_rejects_slugs_outside_the_tight_charset
     assert_raises(GhIssueSync::Error) { upsert("Intro.\n", STORY, slug: 'x-->') }
   end
@@ -513,6 +529,14 @@ class ChecklistCoexistenceTest < Minitest::Test
     items = [{ number: 1, checked: false, text: 'One' }]
     error = assert_raises(GhIssueSync::Error) { GhIssueSync.sync_section(body, items, slug: SLUG) }
     assert_match(/checklist/, error.message)
+  end
+
+  def test_checklist_sync_repairs_a_stray_blank_line_after_its_own_marker
+    checklist = GhIssueSync.render_section([{ number: 1, checked: false, text: 'One' }], slug: SLUG)
+    body = "Intro.\n\n#{checklist.sub("-->\n## To-dos", "-->\n\n## To-dos")}\n"
+    new_body, _warnings = GhIssueSync.sync_section(body, [{ number: 1, checked: true, text: 'One' }], slug: SLUG)
+    assert_includes new_body, '- [x] **1.** One'
+    refute_includes new_body, "-->\n\n## To-dos"
   end
 
   def test_checklist_adoption_ignores_todo_shaped_lines_inside_content_sections
