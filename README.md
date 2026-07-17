@@ -33,7 +33,7 @@ To pick up updates later:
 | --- | --- |
 | `gauntlet` | Harden the quality of a branch that already accomplishes your goal and you now want to improve. This is a Rails-oriented multi-front quality pass on a feature branch whose specs and lint already pass. True superset of Anthropic's built-in /code-review skill. Includes: code review, then parallel audits (cruft, idioms, test quality, validation bypass, security), consolidated into a triaged punch list that you guide implementing. |
 | `plan-issue` | Plan a story end-to-end: interview, research, propose a plan with steps for a full life cycle, challenge it from a fresh perspective, record it, work the to-dos, and finish after ship. |
-| `finished-issue-housekeeping` | Post-ship cleanup once a story is merged and live: finalize the plan file, prune branches, tidy memory and task lists. |
+| `finished-issue-housekeeping` | Post-ship cleanup once a story is merged and live: finalize the plan file, prune branches, tidy memory and task lists, and run an approval-gated permission-prompt sweep that can propose additions to the project's `.claude/settings.json`. |
 | `architecture-survey` | Identify the biggest improvement opportunities in your application - prioritizing the largest and most daunting pain points you've been paying a large maintenance tax on already. Domain-first architectural-simplification survey of a mature codebase, producing a ranked, tracker-ready refactoring backlog. Can create an epic of fixes in your story tracker of choice. |
 | `markdown-to-pdf` | Convert Markdown files to clean, print-styled PDFs. |
 | `linear` | Read and write Linear issues via a bundled CLI (create, comment, search, transition) instead of raw GraphQL. Requires Ruby and a `LINEAR_API_TOKEN` env var. |
