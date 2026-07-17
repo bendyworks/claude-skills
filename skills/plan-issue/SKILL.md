@@ -470,6 +470,22 @@ Draft a plan with:
       to the stakeholder so they can review each change visually with
       a clear, explained example. Skip only for purely internal changes
       with no stakeholder-visible surface (refactors, infra, dev tooling).
+   6. **Confirm shipped (PR merged, live in production).** The finish
+      phase's entry gate, listed as its own to-do so post-ship work is
+      visibly pending instead of remembered informally. Use that
+      short wording verbatim. Never auto-advance into this item -- it
+      waits for the user to trigger the finish phase, whose Step 1
+      checks are what complete it; do not run separate merge or
+      deploy checks just for the checkbox. If the issue auto-closes
+      at merge (see the traps in step 3), it closes with this item
+      and the next still unchecked -- correct, not a bug; the finish
+      phase's reconcile edits the closed issue's body later.
+   7. **Run finished-issue-housekeeping (finish phase,
+      user-triggered).** The final ship-tail entry; use that wording
+      verbatim. Newly-discovered work may append after it by number
+      -- its role, not its list position, is what marks it. The
+      housekeeping pass itself checks this item and the previous one
+      off.
 
 Present the plan inline for the user to discuss and refine. Do not
 write it to disk yet -- that happens in the **record** phase.
@@ -563,12 +579,17 @@ toggleable view of progress (Ctrl-T) alongside the markdown plan file.
   one -- each is independently substantial and independently checkable.
 - The trailing ship-the-work steps are each their **own** task, not a single
   bundled one: the suite gate (full or targeted per the project's mode),
-  the gauntlet skill, open draft PR, and move to PR Review are separate
-  tasks so the toggle view shows the whole arc and each completes on
-  its own. When the change is stakeholder-visible (a report,
+  the gauntlet skill, open draft PR, move to PR Review, confirm shipped
+  (PR merged, live in production), and run finished-issue-housekeeping
+  are separate tasks so the toggle view shows the whole arc and each
+  completes on its own. The finish-tail tasks stay pending until the
+  user triggers the finish phase; the housekeeping pass completes
+  them itself, mirroring its plan-file flips via `TaskUpdate` before
+  its task-cleanup step deletes them. When the change is stakeholder-visible (a report,
   receipt, statement, mailer, or screen a client stakeholder relies on) and
   the project provides a change-highlights-style skill, add a further own
-  task for the before/after summary and its communication to the stakeholder.
+  task for the before/after summary and its communication to the
+  stakeholder, ordered before the finish-tail pair as in the ship tail.
 - The markdown plan file remains the source of truth for the *why* and
   the approach. The Task tracker is a fast-access view of the *what's
   next*. Keep them in sync: when a to-do is checked off in the markdown,
@@ -594,7 +615,10 @@ toggleable view of progress (Ctrl-T) alongside the markdown plan file.
   its own section; pass `--heading <slug>` to also name the plan in
   the visible heading. A box someone ticks directly on GitHub that the
   plan lacks gets overwritten with a warning -- absorb real ticks into
-  the plan file, the single source of truth. Without write access to
+  the plan file, the single source of truth. The finish-tail items are
+  the exception: a premature GitHub-side tick on one of those is
+  surfaced to the user ("the finish phase completes this one"), never
+  absorbed. Without write access to
   the repo, skip this surface entirely -- the comment fallback suits
   one-shot appends, not a per-commit sync, and the plan file and Task
   tracker remain the two surfaces. The checklist is a projection, not
@@ -604,7 +628,8 @@ toggleable view of progress (Ctrl-T) alongside the markdown plan file.
   run while the plan still has bare unchecked `- [ ]` items, so the
   checklist ends as an exact mirror of the finalized plan (every item
   `- [x] **N.** <text>`, deferred ones with a trailing
-  `(deferred to #NNN)` note) -- the public surface may drift
+  `(deferred to #NNN)` note; the finish-tail items are checked off
+  by the housekeeping pass itself) -- the public surface may drift
   mid-flight but never ends stale.
 - **Always show the task number next to each task** whenever you surface
   the task list to the user (e.g. `1. ...`, `2. ...`). The user refers to
@@ -727,7 +752,8 @@ via the Skill tool. It will:
 
 - Re-verify preconditions (idempotent with Step 1).
 - Classify each unchecked plan-file item and STOP if any genuinely
-  unfinished work surfaces.
+  unfinished work surfaces (the plan's own finish-tail items don't
+  trigger STOP -- the pass completes them itself).
 - Add the Shipment section to the plan file.
 - On GitHub-tracked repos, reconcile the issue-body checklist
   (`gh-issue-sync reconcile`) so the public surface does not end
