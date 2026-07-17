@@ -397,6 +397,12 @@ class RenderContentSectionTest < Minitest::Test
   def test_normalizes_crlf_content
     section = GhIssueSync.render_content_section("## Story\r\n\r\nWindows text.\r\n", slug: 'user-story')
     refute_includes section, "\r"
+    assert_includes section, "## Story\n\nWindows text."
+  end
+
+  def test_trims_leading_blank_lines_and_trailing_whitespace
+    section = GhIssueSync.render_content_section("\n  \n## Story\nBody text.  \n\n", slug: 'user-story')
+    assert_includes section, "-->\n## Story\nBody text.\n<!--"
   end
 
   def test_preserves_first_line_indentation
@@ -424,12 +430,9 @@ class UpsertContentSectionTest < Minitest::Test
     story = GhIssueSync.render_content_section(STORY, slug: 'user-story')
     body = "Intro.\n\n#{story}\n\n#{checklist}\n\nTail prose.\n"
     new_body, outcome = upsert(body, "## User story\n\nEdited story.\n")
+    edited = GhIssueSync.render_content_section("## User story\n\nEdited story.\n", slug: 'user-story')
     assert_equal :replaced, outcome
-    assert_includes new_body, 'Edited story.'
-    refute_includes new_body, 'Repeatable writes.'
-    assert_includes new_body, checklist
-    assert_includes new_body, "Intro.\n"
-    assert_includes new_body, "Tail prose.\n"
+    assert_equal "Intro.\n\n#{edited}\n\n#{checklist}\n\nTail prose.\n", new_body
   end
 
   def test_rerunning_with_the_same_content_is_byte_identical_and_reports_unchanged
@@ -457,7 +460,7 @@ class UpsertContentSectionTest < Minitest::Test
     checklist = GhIssueSync.render_section([{ number: 1, checked: false, text: 'One' }], slug: SLUG)
     body = "Intro.\n\n#{checklist}\n"
     error = assert_raises(GhIssueSync::Error) { upsert(body, STORY, slug: SLUG) }
-    assert_match(/checklist/, error.message)
+    assert_match(/is a checklist section/, error.message)
   end
 
   def test_rejects_content_containing_an_open_marker_line_for_any_slug
@@ -533,8 +536,9 @@ class UpsertContentSectionTest < Minitest::Test
   end
 
   def test_normalizes_crlf_bodies
+    rendered = GhIssueSync.render_content_section(STORY, slug: 'user-story')
     new_body, = upsert("Intro.\r\n")
-    refute_includes new_body, "\r"
+    assert_equal "Intro.\n\n#{rendered}\n", new_body
   end
 end
 
@@ -544,7 +548,7 @@ class ChecklistCoexistenceTest < Minitest::Test
     body = "Intro.\n\n#{content}\n"
     items = [{ number: 1, checked: false, text: 'One' }]
     error = assert_raises(GhIssueSync::Error) { GhIssueSync.sync_section(body, items, slug: SLUG) }
-    assert_match(/checklist/, error.message)
+    assert_match(/holds arbitrary content/, error.message)
   end
 
   def test_checklist_sync_repairs_a_stray_blank_line_after_its_own_marker
@@ -576,11 +580,14 @@ class ChecklistCoexistenceTest < Minitest::Test
 end
 
 class ContentSectionSlugGuardTest < Minitest::Test
-  def test_enforces_a_tight_charset_with_a_flag_appropriate_message
-    error = assert_raises(GhIssueSync::Error) { GhIssueSync.assert_valid_section_slug!('x-->') }
-    assert_match(/--slug/, error.message)
-    assert_raises(GhIssueSync::Error) { GhIssueSync.assert_valid_section_slug!('a b') }
-    assert_raises(GhIssueSync::Error) { GhIssueSync.assert_valid_section_slug!('') }
+  def test_rejects_slugs_outside_the_tight_charset_with_a_flag_appropriate_message
+    ['x-->', 'a b', ''].each do |slug|
+      error = assert_raises(GhIssueSync::Error, slug.inspect) { GhIssueSync.assert_valid_section_slug!(slug) }
+      assert_match(/--slug/, error.message)
+    end
+  end
+
+  def test_accepts_slugs_within_the_tight_charset
     GhIssueSync.assert_valid_section_slug!('user-story')
     GhIssueSync.assert_valid_section_slug!('18-keyed.Body_section')
   end
