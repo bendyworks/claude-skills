@@ -768,6 +768,9 @@ via the Skill tool. It will:
   a new skill, and create it if so.
 - Verify sibling-audit follow-ups got filed.
 - Clear completed tasks from the conversation task list.
+- Offer an approval-gated permission-prompt sweep (via the
+  /fewer-permission-prompts built-in, when available), leaving any
+  approved `.claude/settings.json` additions uncommitted.
 
 Relay the housekeeping skill's summary to the user when it finishes.
 

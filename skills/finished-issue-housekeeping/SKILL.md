@@ -1,6 +1,6 @@
 ---
 name: finished-issue-housekeeping
-description: Post-ship cleanup for a story that is merged AND live in production. Finalizes the plan file, deletes the local working branch, prunes other stale local git branches repo-wide (not just the just-finished story's), updates auto-memory (Done entry + any new tech-note or skill worth saving) and prunes MEMORY.md back within its size budget, verifies sibling-audit follow-ups got filed, stops any dev server started for verification, and clears completed tasks from the conversation task list. Use when the user says "finish up the plan", "we shipped X, clean it up", "post-ship cleanup", "we're done with X", "housekeeping for <issue>", or invokes the finished-issue-housekeeping skill. Also invoked at the end of `plan-issue`'s `finish` phase.
+description: Post-ship cleanup for a story that is merged AND live in production. Finalizes the plan file, deletes the local working branch, prunes other stale local git branches repo-wide (not just the just-finished story's), updates auto-memory (Done entry + any new tech-note or skill worth saving) and prunes MEMORY.md back within its size budget, verifies sibling-audit follow-ups got filed, stops any dev server started for verification, clears completed tasks from the conversation task list, and ends with an approval-gated permission-prompt sweep (via the /fewer-permission-prompts built-in, when available). Use when the user says "finish up the plan", "we shipped X, clean it up", "post-ship cleanup", "we're done with X", "housekeeping for <issue>", or invokes the finished-issue-housekeeping skill. Also invoked at the end of `plan-issue`'s `finish` phase.
 ---
 
 # Finished issue housekeeping
@@ -221,7 +221,44 @@ Use `TaskList` to inventory tasks. First mark the plan's finish-tail tasks compl
 
 Keep tasks for **other ongoing work** (different issue, different plan) untouched.
 
-## Step 9 -- Summary
+## Step 9 -- Permission-prompt sweep
+
+A just-shipped story is the natural moment to trim future permission
+prompts: the transcripts still hold the prompts answered while doing
+the work, so allowlist proposals are fresh and every later story in
+this repo prompts less. Run the sweep with the
+/fewer-permission-prompts skill (a Claude Code built-in, not part of
+this plugin).
+
+- **Availability.** The built-in appears in the session's
+  available-skills listing when the environment provides it. If it is
+  not listed, skip with a one-line note ("Permission-prompt sweep
+  skipped -- /fewer-permission-prompts not available here") and move
+  on. If invoking it fails despite being listed, treat that the same
+  way -- this step never aborts the housekeeping pass.
+- **Invoke it via the Skill tool, with args that scope and gate it.**
+  Pass instructions to (a) scan only the current project's
+  transcripts (its default scan is cross-project, which could propose
+  approvals from unrelated projects into this project's checked-in
+  file), and (b) present the prioritized proposals and stop for the
+  user's explicit approval before editing any settings file, merging
+  only the approved entries. The built-in's own flow writes
+  immediately after presenting its list, so the args -- not this
+  skill's prose -- are what enforce approval-first. Example args:
+  "Scan only this project's transcripts. Present the proposed
+  allowlist and stop for my explicit approval before editing
+  .claude/settings.json; merge only the entries I approve."
+- **Declining is a supported outcome.** If the user approves nothing,
+  report that the sweep ran with no additions and move on.
+- **Report loudly where changes landed.** Approved additions go into
+  the project's checked-in `.claude/settings.json` -- a team-visible
+  file -- and this is the one housekeeping step that can end the pass
+  with an uncommitted diff. Say so plainly in the Step 10 summary;
+  committing the change (through the project's normal flow, possibly
+  a PR) stays with the user. Never commit or push it as part of this
+  pass.
+
+## Step 10 -- Summary
 
 Report in 3-5 lines what was done:
 
@@ -232,5 +269,8 @@ Report in 3-5 lines what was done:
 - Sibling-audit: N follow-ups verified; M dropped (filed now / TODO).
 - Dev server: stopped (or "none was running").
 - Task list: N completed tasks cleared.
+- Permission-prompt sweep: N additions approved into the checked-in
+  `.claude/settings.json`, **left uncommitted** (or "nothing
+  approved", or "skipped -- built-in unavailable").
 
 End with "Housekeeping complete."
