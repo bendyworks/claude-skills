@@ -113,6 +113,11 @@ module GhIssueSync
   # check.
   def sync_section(body, items, slug:, heading_suffix: nil)
     body = normalize(body)
+    existing = section_pattern(slug).match(body)
+    if existing && !checklist_section?(existing[0])
+      raise Error, "section '#{slug}' holds arbitrary content, not a checklist; rename the plan file"
+    end
+
     body_items = section_items(body, slug: slug)
     # First-ever sync on a pre-helper issue: the checklist about to be
     # adopted has no markers, and its hand-maintained state deserves
@@ -173,6 +178,74 @@ module GhIssueSync
         "item #{body_item[:number]}'s text differs between GitHub and the plan"
       end
     end
+  end
+
+  # Wraps arbitrary file content in this slug's marker pair, verbatim:
+  # no generated heading (the content carries its own) and no item
+  # parsing. Leading blank lines and trailing whitespace are trimmed,
+  # first-line indentation is preserved, and the close marker always
+  # lands on its own line.
+  def render_content_section(content, slug:)
+    content = normalize(content).sub(/\A(?:[ \t]*\n)+/, '').rstrip
+    ["<!-- gh-issue-sync: #{slug} -->", content, "<!-- /gh-issue-sync: #{slug} -->"].join("\n")
+  end
+
+  # The idempotent replacement for the removed `append` subcommand:
+  # regenerates this slug's content section in place, or creates it at
+  # the end of the body when absent. Returns [new_body, outcome] where
+  # outcome is :created, :replaced, or :unchanged. Never adopts a
+  # marker-less '## To-dos' heading -- adoption is checklist-only --
+  # and refuses to overwrite a checklist section, so a content slug
+  # colliding with a plan basename fails loudly instead of corrupting
+  # the checklist.
+  def upsert_content_section(body, content, slug:)
+    assert_valid_section_slug!(slug)
+    raise Error, 'refusing to write an empty section (the content file is blank)' if content.strip.empty?
+
+    assert_no_marker_lines!(content)
+    body = normalize(body)
+    rendered = render_content_section(content, slug: slug)
+    existing = section_pattern(slug).match(body)
+    return [append_body(body, rendered), :created] unless existing
+
+    if checklist_section?(existing[0])
+      raise Error, "section '#{slug}' is a checklist section; use checklist/reconcile, or pick another --slug"
+    end
+    return [body, :unchanged] if existing[0] == rendered
+
+    [body.sub(section_pattern(slug)) { rendered }, :replaced]
+  end
+
+  # A section's kind is readable from its first content line: checklist
+  # renders always put the '## To-dos' heading directly under the open
+  # marker; content sections carry the file's own first line there.
+  def checklist_section?(section)
+    first_content_line = section.lines[1]&.chomp
+    first_content_line ? TODOS_HEADING.match?(first_content_line) : false
+  end
+
+  # Content is written verbatim, so a line shaped like either marker --
+  # for ANY slug, even inside a fenced code block -- would corrupt
+  # section detection body-wide. Line-anchored like the marker
+  # scanners; mid-line mentions are legal.
+  def assert_no_marker_lines!(content)
+    normalize(content).each_line do |raw|
+      line = raw.chomp
+      next unless OPEN_MARKER.match?(line) || CLOSE_MARKER.match?(line)
+
+      raise Error, "content contains a gh-issue-sync marker line (#{line.strip}); " \
+                   'mention markers mid-line or indent them instead'
+    end
+    content
+  end
+
+  # Stricter than the checklist path's whitespace-only slug guard: a
+  # typed --slug containing '>' (e.g. 'x-->') would close the HTML
+  # comment early and leak into the rendered body.
+  def assert_valid_section_slug!(slug)
+    return slug if slug.match?(/\A[A-Za-z0-9._-]+\z/)
+
+    raise Error, "--slug must contain only letters, digits, dots, underscores, and dashes, got #{slug.inspect}"
   end
 
   # Joins with exactly one blank line. Leading blank lines and trailing
