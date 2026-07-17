@@ -293,11 +293,12 @@ module GhIssueSync
     content
   end
 
-  # Stricter than the checklist path's whitespace-only slug guard: a
-  # typed --slug containing '>' (e.g. 'x-->') would close the HTML
-  # comment early and leak into the rendered body.
+  # The one charset both slug origins (typed --slug, plan basename)
+  # are held to; see assert_valid_slug! for why it is this tight.
+  SLUG_CHARSET = /\A[A-Za-z0-9._-]+\z/
+
   def assert_valid_section_slug!(slug)
-    return slug if slug.match?(/\A[A-Za-z0-9._-]+\z/)
+    return slug if slug.match?(SLUG_CHARSET)
 
     raise Error, "--slug must contain only letters, digits, dots, underscores, and dashes, got #{slug.inspect}"
   end
@@ -343,13 +344,15 @@ module GhIssueSync
     /^#{open_marker}$.*?^#{close_marker}$/m
   end
 
-  # Slugs are embedded in the marker lines, whose scanners split on
-  # whitespace; a slug containing whitespace would render markers they
-  # can never re-recognize.
+  # Slugs are embedded in the marker lines: whitespace breaks the
+  # scanners' tokenizing, and '>' (as in 'x-->') closes the HTML
+  # comment early, leaking text into the rendered body. Same charset
+  # as the typed --slug guard, plan-file phrasing.
   def assert_valid_slug!(slug)
-    return slug if slug.match?(/\A\S+\z/)
+    return slug if slug.match?(SLUG_CHARSET)
 
-    raise Error, "slug must contain no whitespace, got #{slug.inspect} (rename the plan file)"
+    raise Error, "slug must contain only letters, digits, dots, underscores, and dashes, " \
+                 "got #{slug.inspect} (rename the plan file)"
   end
 
   # The lines [start, stop) of the first "## To-dos" section: heading

@@ -605,6 +605,11 @@ class GuardsTest < Minitest::Test
     GhIssueSync.assert_valid_slug!('16-gh-issue-sync-helper')
   end
 
+  def test_slug_guard_rejects_marker_breaking_characters_in_plan_basenames
+    error = assert_raises(GhIssueSync::Error) { GhIssueSync.assert_valid_slug!('notes-->') }
+    assert_match(/rename the plan file/, error.message)
+  end
+
   def test_length_guard_raises_past_the_github_body_limit_and_reports_bytes
     error = assert_raises(GhIssueSync::Error) { GhIssueSync.check_length!('a' * 262_145) }
     assert_match(/bytes/, error.message)
