@@ -12,27 +12,32 @@
 #
 # Stdlib-only (no gems). Run with no arguments for usage.
 #
-# The checklist section it owns is delimited by paired HTML-comment
-# markers (invisible on GitHub), wrapping the heading so regeneration
-# owns it too:
+# The sections it owns are delimited by paired HTML-comment markers
+# (invisible on GitHub), each keyed by a slug, and come in two kinds.
+# Checklist sections wrap a heading and items regenerated from a plan
+# file's To-dos (slug = the --plan file's basename minus .md):
 #
 #   <!-- gh-issue-sync: <slug> -->
 #   ## To-dos
 #   - [x] **1.** ...
 #   <!-- /gh-issue-sync: <slug> -->
 #
-# The slug is the --plan file's basename without its .md extension, so
-# several plans can share one issue, each owning its own section. The section is a projection
-# of the plan file: sync regenerates it wholesale, and anything on the
-# GitHub side the plan does not carry -- a ticked box, an edited item
-# text, a hand-added item -- is surfaced as a warning (the plan wins),
-# never silently kept or silently lost.
+# Content sections wrap an arbitrary file's content verbatim (slug =
+# the typed --slug). Both are projections of their source file:
+# regeneration replaces them wholesale. For checklists, anything on
+# the GitHub side the plan does not carry -- a ticked box, an edited
+# item text, a hand-added item -- is surfaced as a warning (the plan
+# wins), never silently kept or silently lost; for content sections
+# the file simply wins, as the usage text says. The two kinds refuse
+# to overwrite each other.
 #
 # Known limitations around fenced code blocks: `## To-dos` headings
 # inside a fence are correctly ignored, but the sync markers themselves
-# are assumed never to start a line inside one, a fence INSIDE the
-# plan's To-dos section may still trip the strict line parser, and only
-# triple-backtick fences are recognized (not ~~~ or longer runs).
+# are assumed never to start a line inside one (the content-section
+# guard refuses such content outright, keeping the assumption true), a
+# fence INSIDE the plan's To-dos section may still trip the strict
+# line parser, and only triple-backtick fences are recognized (not ~~~
+# or longer runs).
 
 require 'json'
 require 'open3'
@@ -375,6 +380,16 @@ module GhIssueSync
         exactly one blank line. NOT idempotent: re-running appends
         again. For repeatable syncs use checklist/reconcile.
 
+    gh-issue-sync section NNN --file <md> --slug <key> [--repo owner/name]
+        Upsert the file's content, verbatim, into its own
+        marker-delimited section of the issue body, keyed by --slug:
+        created at the end of the body when absent, replaced in place
+        on re-run. Idempotent. The file is the source of truth --
+        hand-edits inside the section are overwritten without warning.
+        Refused: empty files, content containing a line shaped like a
+        sync marker (mention markers mid-line instead), and a --slug
+        that names an existing checklist section.
+
     gh-issue-sync checklist NNN --plan <plan.md> [--heading <slug>] [--repo owner/name]
         Regenerate the issue body's checklist section from the plan
         file's '## To-dos' items (strict top-level '- [ ] **N.** text'
@@ -409,6 +424,7 @@ module GhIssueSync
       command = argv.shift
       case command
       when 'append'    then append(argv)
+      when 'section'   then section(argv)
       when 'checklist' then sync(argv, reconcile: false)
       when 'reconcile' then sync(argv, reconcile: true)
       when nil, 'help', '--help', '-h' then puts USAGE
@@ -440,6 +456,29 @@ module GhIssueSync
       body = fetch_body(number, options[:repo])
       write_body(number, options[:repo], GhIssueSync.append_body(body, addition))
       puts "Appended #{path} to issue ##{number}"
+    end
+
+    def section(argv)
+      options = {}
+      rest = parse_options(argv, 'section NNN --file <md> --slug <key> [--repo owner/name]') do |o|
+        o.on('--file PATH', 'markdown file whose content fills the section') { |v| options[:file] = v }
+        o.on('--slug KEY', 'key naming the marker-delimited section') { |v| options[:slug] = v }
+        o.on('--repo NAME', 'owner/name pass-through to gh') { |v| options[:repo] = v }
+      end
+      number = issue_number(rest)
+      path = options[:file]
+      raise Error, 'section requires --file <md>' unless path
+      raise Error, 'section requires --slug <key>' unless options[:slug]
+      raise Error, "file not found: #{path}" unless File.exist?(path)
+
+      body = fetch_body(number, options[:repo])
+      new_body, outcome = GhIssueSync.upsert_content_section(body, File.read(path), slug: options[:slug])
+      if outcome == :unchanged
+        puts "Section #{options[:slug]} on issue ##{number} is already up to date (nothing written)"
+      else
+        write_body(number, options[:repo], new_body)
+        puts "#{outcome == :created ? 'Created' : 'Replaced'} section #{options[:slug]} on issue ##{number}"
+      end
     end
 
     def sync(argv, reconcile:)
