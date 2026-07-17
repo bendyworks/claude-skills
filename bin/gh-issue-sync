@@ -107,11 +107,11 @@ module GhIssueSync
 
   def render_section(items, slug:, heading_suffix: nil)
     heading = heading_suffix ? "## To-dos (#{heading_suffix})" : '## To-dos'
-    lines = ["<!-- gh-issue-sync: #{slug} -->", heading]
+    lines = [open_marker_line(slug), heading]
     items.each do |item|
       lines << "- [#{item[:checked] ? 'x' : ' '}] **#{item[:number]}.** #{item[:text]}"
     end
-    lines << "<!-- /gh-issue-sync: #{slug} -->"
+    lines << close_marker_line(slug)
     lines.join("\n")
   end
 
@@ -127,11 +127,10 @@ module GhIssueSync
       raise Error, "section '#{slug}' holds arbitrary content, not a checklist; rename the plan file"
     end
 
-    body_items = section_items(body, slug: slug)
     # First-ever sync on a pre-helper issue: the checklist about to be
     # adopted has no markers, and its hand-maintained state deserves
     # the same divergence warnings as a marked section's.
-    body_items = adoption_items(body) if body_items.empty?
+    body_items = existing ? items_in(existing[0]) : adoption_items(body)
     divs = divergences(body_items, items)
     warnings =
       if divs.empty?
@@ -140,7 +139,8 @@ module GhIssueSync
         ["#{divs.join('; ')} -- the plan file wins; absorb real GitHub-side changes into the plan, then re-sync"]
       end
     rendered = render_section(items, slug: slug, heading_suffix: heading_suffix)
-    [upsert_section(body, rendered, slug: slug), warnings]
+    new_body = existing ? replace_section(existing, rendered) : upsert_section(body, rendered, slug: slug)
+    [new_body, warnings]
   end
 
   # Regenerates this slug's section in place; creates it (at the end of
@@ -163,9 +163,12 @@ module GhIssueSync
   # Reads this slug's section back out of a body, for divergence checks.
   def section_items(body, slug:)
     match = section_pattern(slug).match(normalize(body))
-    return [] unless match
+    match ? items_in(match[0]) : []
+  end
 
-    match[0].each_line.filter_map do |line|
+  # The checkbox items inside an already-extracted section's text.
+  def items_in(section_text)
+    section_text.each_line.filter_map do |line|
       m = TODO_LINE.match(line.chomp)
       m && { number: m[2].to_i, checked: m[1] == 'x', text: m[3] }
     end
@@ -223,8 +226,7 @@ module GhIssueSync
   # first-line indentation is preserved, and the close marker always
   # lands on its own line.
   def render_content_section(content, slug:)
-    content = normalize(content).sub(/\A(?:[ \t]*\n)+/, '').rstrip
-    ["<!-- gh-issue-sync: #{slug} -->", content, "<!-- /gh-issue-sync: #{slug} -->"].join("\n")
+    [open_marker_line(slug), trim_addition(content), close_marker_line(slug)].join("\n")
   end
 
   # The idempotent replacement for the removed `append` subcommand:
@@ -251,7 +253,14 @@ module GhIssueSync
     end
     return [body, :unchanged] if existing[0] == rendered
 
-    [body.sub(section_pattern(slug)) { rendered }, :replaced]
+    [replace_section(existing, rendered), :replaced]
+  end
+
+  # Splices a rendered section over the span its MatchData covers --
+  # the one replacement mechanism both section kinds share, immune to
+  # String#sub's backslash-sequence interpretation.
+  def replace_section(match, rendered)
+    "#{match.pre_match}#{rendered}#{match.post_match}"
   end
 
   # A section's kind is readable from its first non-blank content
@@ -303,13 +312,18 @@ module GhIssueSync
     raise Error, "--slug must contain only letters, digits, dots, underscores, and dashes, got #{slug.inspect}"
   end
 
-  # Joins with exactly one blank line. Leading blank lines and trailing
-  # whitespace are trimmed from the addition, but never the first
-  # line's indentation -- an appended file may open with an indented
-  # code block.
+  # Trims leading blank lines and trailing whitespace, but never the
+  # first line's indentation -- content may open with an indented code
+  # block. The one trim both the render and append paths share, so a
+  # rendered section always byte-matches what a re-render produces.
+  def trim_addition(text)
+    normalize(text).sub(/\A(?:[ \t]*\n)+/, '').rstrip
+  end
+
+  # Joins with exactly one blank line.
   def append_body(body, addition)
     body = normalize(body).rstrip
-    addition = normalize(addition).sub(/\A(?:[ \t]*\n)+/, '').rstrip
+    addition = trim_addition(addition)
     return "#{addition}\n" if body.empty?
 
     "#{body}\n\n#{addition}\n"
@@ -339,9 +353,7 @@ module GhIssueSync
   # and an item text merely MENTIONING a marker string must not end the
   # match mid-line.
   def section_pattern(slug)
-    open_marker = Regexp.escape("<!-- gh-issue-sync: #{slug} -->")
-    close_marker = Regexp.escape("<!-- /gh-issue-sync: #{slug} -->")
-    /^#{open_marker}$.*?^#{close_marker}$/m
+    /^#{Regexp.escape(open_marker_line(slug))}$.*?^#{Regexp.escape(close_marker_line(slug))}$/m
   end
 
   # Slugs are embedded in the marker lines: whitespace breaks the
