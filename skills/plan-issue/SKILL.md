@@ -308,10 +308,9 @@ enforces GitHub's body-length limit. The write is idempotent:
 re-running replaces the section in place, so amending the story is
 just editing the file and re-running the command. The file is the
 source of truth -- hand-edits inside the marked section are
-overwritten. One transition caveat: a story or spec block written
-before this subcommand existed (by the retired `append`) is
-marker-less, so `section` cannot see it -- delete the old block from
-the issue body once, then use `section` from there on. In the
+overwritten. (Transition note: a block written by the long-retired
+`append` subcommand is marker-less -- delete it from the body once
+before the first `section` run, or it will be duplicated.) In the
 multi-plan deviation case (one issue, several plans), prefix the slug
 with the plan slug (e.g. `--slug <plan-slug>-user-story`) and make
 sure the file's own heading names the plan -- the markers are
@@ -386,8 +385,10 @@ Continue until the picture is clear; do not stop after a single round.
 
 When the interview is done, write the resulting specification into
 the tracker issue description (on GitHub, via the bundled helper --
-`gh-issue-sync section NNN --file <md> --slug spec`, per Step 4), so
-the source of truth for what we agreed on lives there too.
+`gh-issue-sync section NNN --file <md> --slug spec`, or
+`--slug <plan-slug>-spec` in the multi-plan deviation case, per
+Step 4), so the source of truth for what we agreed on lives there
+too.
 
 ### Step 6 -- Propose the plan
 

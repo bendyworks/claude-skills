@@ -27,8 +27,8 @@
 # regeneration replaces them wholesale. For checklists, anything on
 # the GitHub side the plan does not carry -- a ticked box, an edited
 # item text, a hand-added item -- is surfaced as a warning (the plan
-# wins), never silently kept or silently lost; for content sections
-# the file simply wins, as the usage text says. The two kinds refuse
+# wins), never silently kept or silently lost; content-section
+# overwrite semantics live in the usage text. The two kinds refuse
 # to overwrite each other.
 #
 # Known limitations around fenced code blocks: `## To-dos` headings
@@ -229,14 +229,14 @@ module GhIssueSync
     [open_marker_line(slug), trim_addition(content), close_marker_line(slug)].join("\n")
   end
 
-  # The idempotent replacement for the removed `append` subcommand:
-  # regenerates this slug's content section in place, or creates it at
-  # the end of the body when absent. Returns [new_body, outcome] where
-  # outcome is :created, :replaced, or :unchanged. Never adopts a
-  # marker-less '## To-dos' heading -- adoption is checklist-only --
-  # and refuses to overwrite a checklist section, so a content slug
-  # colliding with a plan basename fails loudly instead of corrupting
-  # the checklist.
+  # Idempotently upserts arbitrary content into this slug's
+  # marker-delimited section: regenerated in place when present,
+  # created at the end of the body when absent. Returns
+  # [new_body, outcome] where outcome is :created, :replaced, or
+  # :unchanged. Never adopts a marker-less '## To-dos' heading --
+  # adoption is checklist-only -- and refuses to overwrite a checklist
+  # section, so a content slug colliding with a plan basename fails
+  # loudly instead of corrupting the checklist.
   def upsert_content_section(body, content, slug:)
     assert_valid_section_slug!(slug)
     raise Error, 'refusing to write an empty section (the content file is blank)' if content.strip.empty?
