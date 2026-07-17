@@ -615,7 +615,10 @@ toggleable view of progress (Ctrl-T) alongside the markdown plan file.
   its own section; pass `--heading <slug>` to also name the plan in
   the visible heading. A box someone ticks directly on GitHub that the
   plan lacks gets overwritten with a warning -- absorb real ticks into
-  the plan file, the single source of truth. Without write access to
+  the plan file, the single source of truth. The finish-tail items are
+  the exception: a premature GitHub-side tick on one of those is
+  surfaced to the user ("the finish phase completes this one"), never
+  absorbed. Without write access to
   the repo, skip this surface entirely -- the comment fallback suits
   one-shot appends, not a per-commit sync, and the plan file and Task
   tracker remain the two surfaces. The checklist is a projection, not
