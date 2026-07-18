@@ -600,8 +600,11 @@ module GhIssueSync
         puts "Section #{options[:slug]} on issue ##{number} is already absent (nothing written)"
       else
         write_body(number, options[:repo], new_body)
-        puts "Deleted section #{options[:slug]} on issue ##{number}"
+        # Recovery copy before the success line: stderr and a piped,
+        # block-buffered stdout interleave unpredictably, and this
+        # order keeps the success line from landing inside the blob.
         warn "gh-issue-sync: removed content follows (GitHub also keeps issue-body edit history):\n#{removed}"
+        puts "Deleted section #{options[:slug]} on issue ##{number}"
       end
     end
 
