@@ -528,6 +528,8 @@ module GhIssueSync
       raise Error, 'section requires --slug <key>' unless options[:slug]
       raise Error, "file not found: #{path}" unless File.exist?(path)
 
+      # upsert_content_section re-runs these guards; the copies here
+      # exist to fail on local input before the network fetch.
       GhIssueSync.assert_valid_section_slug!(options[:slug])
       content = File.read(path)
       raise Error, "content file is blank: #{path}" if content.strip.empty?
