@@ -29,7 +29,8 @@
 # item text, a hand-added item -- is surfaced as a warning (the plan
 # wins), never silently kept or silently lost; content-section
 # overwrite semantics live in the usage text. The two kinds refuse
-# to overwrite each other.
+# to overwrite each other. Either kind is removed wholesale with
+# `section --delete`, keyed by the same slug.
 #
 # Known limitations around fenced code blocks: `## To-dos` headings
 # inside a fence are correctly ignored, but the sync markers themselves
@@ -126,7 +127,8 @@ module GhIssueSync
     body = normalize(body)
     existing = matched_section!(body, slug)
     if existing && !checklist_section?(existing[0])
-      raise Error, "section '#{slug}' holds arbitrary content, not a checklist; rename the plan file " \
+      raise Error, "section '#{slug}' holds arbitrary content, not a checklist; rename the plan file, " \
+                   "or move the content to another slug and run 'section NNN --slug #{slug} --delete' " \
                    "(or, if a hand edit removed the section's '## To-dos' heading, restore it)"
     end
 
@@ -264,7 +266,8 @@ module GhIssueSync
     return [append_body(body, rendered), :created] unless existing
 
     if checklist_section?(existing[0])
-      raise Error, "section '#{slug}' is a checklist section; use checklist/reconcile, or pick another --slug"
+      raise Error, "section '#{slug}' is a checklist section; use checklist/reconcile, pick another " \
+                   '--slug, or remove an obsolete checklist with --delete'
     end
     return [body, :unchanged] if existing[0] == rendered
 
@@ -400,7 +403,8 @@ module GhIssueSync
     raise Error, "slug must contain only letters, digits, dots, underscores, and dashes, " \
                  "got #{slug.inspect} (rename the plan file; if an older sync already wrote a " \
                  'section under this name, delete that section from the issue body by hand -- ' \
-                 'a renamed slug never adopts its old section)'
+                 "'section --delete' cannot target a slug outside the charset, and a renamed " \
+                 'slug never adopts its old section)'
   end
 
   # The lines [start, stop) of the first "## To-dos" section: heading
@@ -475,8 +479,8 @@ module GhIssueSync
   USAGE = <<~TXT
     gh-issue-sync -- GitHub issue-body read-modify-write helper (uses gh)
 
-    gh-issue-sync section NNN --file <md> --slug <key> [--repo owner/name]
-        Upsert the file's content, verbatim, into its own
+    gh-issue-sync section NNN (--file <md> | --delete) --slug <key> [--repo owner/name]
+        With --file: upsert the file's content, verbatim, into its own
         marker-delimited section of the issue body, keyed by --slug:
         created at the end of the body when absent, replaced in place
         on re-run. Idempotent. The file is the source of truth --
@@ -484,6 +488,12 @@ module GhIssueSync
         Refused: empty files, content containing a line shaped like a
         sync marker (mention markers mid-line instead), and a --slug
         that names an existing checklist section.
+        With --delete: remove the slug's section (either kind) along
+        with the blank line that separated it; a slug with no section
+        reports "already absent" and writes nothing. The go-to cleanup
+        after renaming a plan file between valid slugs -- a renamed
+        slug never adopts its old section, so the old slug's section
+        stays behind until deleted.
 
     gh-issue-sync checklist NNN --plan <plan.md> [--heading <slug>] [--repo owner/name]
         Regenerate the issue body's checklist section from the plan
