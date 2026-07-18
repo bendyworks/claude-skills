@@ -286,31 +286,43 @@ Confirm this story with the user (and, where the answer is theirs to
 give, flag what should be confirmed with the requesting client or
 stakeholder) *before* moving to the implementation interview.
 
-Append the agreed user story and acceptance criteria to the tracker
+Add the agreed user story and acceptance criteria to the tracker
 issue, and carry them into the plan file (Step 6) so the end-user
-definition of done travels with the work. On GitHub, "append" is a
-read-modify-write (`gh issue edit --body-file` REPLACES the entire
+definition of done travels with the work. On GitHub, any body edit is
+a read-modify-write (`gh issue edit --body-file` REPLACES the entire
 issue body), so never hand-roll it: use the `gh-issue-sync` CLI
 bundled with this plugin (on PATH when the plugin is installed;
 requires Ruby, like the linear CLI):
 
 ```bash
-gh-issue-sync append NNN --file <md>
+gh-issue-sync section NNN --file <md> --slug user-story
 ```
 
 The helper owns the mechanics every GitHub body edit in this skill
 needs: it fetches fresh immediately before writing (GitHub has no
 compare-and-swap and body edits notify no one, so writing from a stale
-copy silently clobbers a concurrent human edit), guards the blank line
-so appended content never glues onto the body's last line, round-trips
-the body exactly, normalizes CRLF from web-UI edits, and enforces
-GitHub's body-length limit. Note that `append` is not idempotent:
-re-running it appends again. For the rare body edit that is neither an
-append nor a checklist sync (e.g. amending an already-appended
-section), fetch fresh with `gh issue view NNN --json body` parsed as
-JSON (never `-q .body`, which grows a trailing newline per cycle),
+copy silently clobbers a concurrent human edit), keeps the content in
+its own marker-delimited section separated by a blank line,
+round-trips the body exactly, normalizes CRLF from web-UI edits, and
+enforces GitHub's body-length limit. The write is idempotent:
+re-running replaces the section in place, so amending the story is
+just editing the file and re-running the command. The file is the
+source of truth -- hand-edits inside the marked section are
+overwritten. (Transition note: a block written by the long-retired
+`append` subcommand is marker-less -- delete it from the body once
+before the first `section` run, or it will be duplicated.) In the
+multi-plan deviation case (one issue, several plans), prefix the slug
+with the plan slug (e.g. `--slug <plan-slug>-user-story`) and make
+sure the file's own heading names the plan -- the markers are
+invisible on GitHub, so only the content distinguishes the sections
+for a reader. For the rare body edit that is neither a section upsert
+nor a checklist sync (deleting a section, editing body text outside
+any section), fetch fresh with `gh issue view NNN --json body` parsed
+as JSON (never `-q .body`, which grows a trailing newline per cycle),
 edit, and write back immediately. Without write access to the repo,
-post the addition as a comment via `gh issue comment` instead.
+post the addition as a comment via `gh issue comment` instead
+(comments are one-shot: a re-posted comment duplicates, it never
+updates in place).
 
 **When this step is light or N/A:** for changes with no end-user-
 observable surface -- pure refactors, infra, dev tooling, internal
@@ -371,10 +383,12 @@ proposed.
 Skip questions whose answers are obvious from the issue or the code.
 Continue until the picture is clear; do not stop after a single round.
 
-When the interview is done, append the resulting specification to the
-tracker issue description (on GitHub, via the bundled helper's
-`gh-issue-sync append`, per Step 4), so the source of truth for what
-we agreed on lives there too.
+When the interview is done, write the resulting specification into
+the tracker issue description (on GitHub, via the bundled helper --
+`gh-issue-sync section NNN --file <md> --slug spec`, or
+`--slug <plan-slug>-spec` in the multi-plan deviation case, per
+Step 4), so the source of truth for what we agreed on lives there
+too.
 
 ### Step 6 -- Propose the plan
 
@@ -620,8 +634,8 @@ toggleable view of progress (Ctrl-T) alongside the markdown plan file.
   surfaced to the user ("the finish phase completes this one"), never
   absorbed. Without write access to
   the repo, skip this surface entirely -- the comment fallback suits
-  one-shot appends, not a per-commit sync, and the plan file and Task
-  tracker remain the two surfaces. The checklist is a projection, not
+  a one-shot addition, not a per-commit sync, and the plan file and
+  Task tracker remain the two surfaces. The checklist is a projection, not
   a peer: it syncs at each commit/push boundary (Step 6), not per
   to-do. This bullet owns the cadence. The finish phase's reconcile
   (`gh-issue-sync reconcile`) is stronger than a sync: it refuses to

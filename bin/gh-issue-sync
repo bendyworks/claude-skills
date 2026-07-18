@@ -12,27 +12,34 @@
 #
 # Stdlib-only (no gems). Run with no arguments for usage.
 #
-# The checklist section it owns is delimited by paired HTML-comment
-# markers (invisible on GitHub), wrapping the heading so regeneration
-# owns it too:
+# The sections it owns are delimited by paired HTML-comment markers
+# (invisible on GitHub), each keyed by a slug, and come in two kinds.
+# Checklist sections wrap a heading and items regenerated from a plan
+# file's To-dos (slug = the --plan file's basename minus .md):
 #
 #   <!-- gh-issue-sync: <slug> -->
 #   ## To-dos
 #   - [x] **1.** ...
 #   <!-- /gh-issue-sync: <slug> -->
 #
-# The slug is the --plan file's basename without its .md extension, so
-# several plans can share one issue, each owning its own section. The section is a projection
-# of the plan file: sync regenerates it wholesale, and anything on the
-# GitHub side the plan does not carry -- a ticked box, an edited item
-# text, a hand-added item -- is surfaced as a warning (the plan wins),
-# never silently kept or silently lost.
+# Content sections wrap an arbitrary file's content verbatim (slug =
+# the typed --slug). Both are projections of their source file:
+# regeneration replaces them wholesale. For checklists, anything on
+# the GitHub side the plan does not carry -- a ticked box, an edited
+# item text, a hand-added item -- is surfaced as a warning (the plan
+# wins), never silently kept or silently lost; content-section
+# overwrite semantics live in the usage text. The two kinds refuse
+# to overwrite each other.
 #
 # Known limitations around fenced code blocks: `## To-dos` headings
 # inside a fence are correctly ignored, but the sync markers themselves
-# are assumed never to start a line inside one, a fence INSIDE the
-# plan's To-dos section may still trip the strict line parser, and only
-# triple-backtick fences are recognized (not ~~~ or longer runs).
+# are assumed never to start a line inside one (the content-section
+# guard refuses such content outright, keeping the assumption true), a
+# fence INSIDE the plan's To-dos section may still trip the strict
+# line parser, a content file carrying an UNMATCHED fence line flips
+# fence tracking for the rest of the body (hiding a later marker-less
+# '## To-dos' heading from adoption), and only triple-backtick fences
+# are recognized (not ~~~ or longer runs).
 
 require 'json'
 require 'open3'
@@ -63,8 +70,12 @@ module GhIssueSync
 
   module_function
 
+  # CRLF and lone CR both become LF: GitHub's web UI submits CRLF, and
+  # a lone CR left un-normalized would smuggle line starts (marker
+  # lines included) past every LF-splitting scanner, only to become
+  # real lines after the next web-UI edit re-encodes them.
   def normalize(text)
-    text.gsub("\r\n", "\n")
+    text.gsub(/\r\n?/, "\n")
   end
 
   # Parses the plan file's "## To-dos" section into
@@ -98,11 +109,11 @@ module GhIssueSync
 
   def render_section(items, slug:, heading_suffix: nil)
     heading = heading_suffix ? "## To-dos (#{heading_suffix})" : '## To-dos'
-    lines = ["<!-- gh-issue-sync: #{slug} -->", heading]
+    lines = [open_marker_line(slug), heading]
     items.each do |item|
       lines << "- [#{item[:checked] ? 'x' : ' '}] **#{item[:number]}.** #{item[:text]}"
     end
-    lines << "<!-- /gh-issue-sync: #{slug} -->"
+    lines << close_marker_line(slug)
     lines.join("\n")
   end
 
@@ -113,11 +124,16 @@ module GhIssueSync
   # check.
   def sync_section(body, items, slug:, heading_suffix: nil)
     body = normalize(body)
-    body_items = section_items(body, slug: slug)
+    existing = matched_section!(body, slug)
+    if existing && !checklist_section?(existing[0])
+      raise Error, "section '#{slug}' holds arbitrary content, not a checklist; rename the plan file " \
+                   "(or, if a hand edit removed the section's '## To-dos' heading, restore it)"
+    end
+
     # First-ever sync on a pre-helper issue: the checklist about to be
     # adopted has no markers, and its hand-maintained state deserves
     # the same divergence warnings as a marked section's.
-    body_items = adoption_items(body) if body_items.empty?
+    body_items = existing ? items_in(existing[0]) : adoption_items(body)
     divs = divergences(body_items, items)
     warnings =
       if divs.empty?
@@ -126,7 +142,8 @@ module GhIssueSync
         ["#{divs.join('; ')} -- the plan file wins; absorb real GitHub-side changes into the plan, then re-sync"]
       end
     rendered = render_section(items, slug: slug, heading_suffix: heading_suffix)
-    [upsert_section(body, rendered, slug: slug), warnings]
+    new_body = existing ? replace_section(existing, rendered) : upsert_section(body, rendered, slug: slug)
+    [new_body, warnings]
   end
 
   # Regenerates this slug's section in place; creates it (at the end of
@@ -149,9 +166,12 @@ module GhIssueSync
   # Reads this slug's section back out of a body, for divergence checks.
   def section_items(body, slug:)
     match = section_pattern(slug).match(normalize(body))
-    return [] unless match
+    match ? items_in(match[0]) : []
+  end
 
-    match[0].each_line.filter_map do |line|
+  # The checkbox items inside an already-extracted section's text.
+  def items_in(section_text)
+    section_text.each_line.filter_map do |line|
       m = TODO_LINE.match(line.chomp)
       m && { number: m[2].to_i, checked: m[1] == 'x', text: m[3] }
     end
@@ -175,13 +195,149 @@ module GhIssueSync
     end
   end
 
-  # Joins with exactly one blank line. Leading blank lines and trailing
-  # whitespace are trimmed from the addition, but never the first
-  # line's indentation -- an appended file may open with an indented
-  # code block.
+  # The one spelling of the marker-line format; render and matching
+  # both derive from these so they can never drift apart.
+  def open_marker_line(slug)
+    "<!-- gh-issue-sync: #{slug} -->"
+  end
+
+  def close_marker_line(slug)
+    "<!-- /gh-issue-sync: #{slug} -->"
+  end
+
+  # Finds this slug's section and returns its MatchData (nil when the
+  # body has none) -- refusing to proceed when the slug's markers do
+  # not form exactly the matched pair. A marker orphaned by a hand
+  # edit would otherwise make the next write append a duplicate
+  # section, and the run after that swallow every line between the
+  # orphan and a later close marker.
+  def matched_section!(body, slug)
+    opens = body.lines.count { |line| line.chomp == open_marker_line(slug) }
+    closes = body.lines.count { |line| line.chomp == close_marker_line(slug) }
+    match = section_pattern(slug).match(body)
+    valid = match ? opens == 1 && closes == 1 : opens.zero? && closes.zero?
+    unless valid
+      raise Error, "issue body has unpaired '#{slug}' section markers " \
+                   "(#{opens} open, #{closes} close); repair the body by hand first"
+    end
+    # No legitimate section contains a marker line (the content guard
+    # and the checklist renderer both guarantee it), so a foreign
+    # marker inside the span means another section's pair was broken
+    # by a hand edit -- replacing this span would swallow it.
+    if match && match[0].lines[1...-1].any? { |line| marker_line?(line.chomp) }
+      raise Error, "the '#{slug}' section's span contains another section's marker line; " \
+                   'repair the body by hand first'
+    end
+    match
+  end
+
+  def marker_line?(line)
+    OPEN_MARKER.match?(line) || CLOSE_MARKER.match?(line)
+  end
+
+  # Wraps arbitrary file content in this slug's marker pair, verbatim:
+  # no generated heading (the content carries its own) and no item
+  # parsing. Leading blank lines and trailing whitespace are trimmed,
+  # first-line indentation is preserved, and the close marker always
+  # lands on its own line.
+  def render_content_section(content, slug:)
+    [open_marker_line(slug), trim_addition(content), close_marker_line(slug)].join("\n")
+  end
+
+  # Idempotently upserts arbitrary content into this slug's
+  # marker-delimited section: regenerated in place when present,
+  # created at the end of the body when absent. Returns
+  # [new_body, outcome] where outcome is :created, :replaced, or
+  # :unchanged. Never adopts a marker-less '## To-dos' heading --
+  # adoption is checklist-only -- and refuses to overwrite a checklist
+  # section, so a content slug colliding with a plan basename fails
+  # loudly instead of corrupting the checklist.
+  def upsert_content_section(body, content, slug:)
+    assert_valid_section_slug!(slug)
+    raise Error, 'refusing to write an empty section (the content file is blank)' if content.strip.empty?
+
+    assert_no_marker_lines!(content)
+    assert_not_checklist_shaped!(content)
+    body = normalize(body)
+    rendered = render_content_section(content, slug: slug)
+    existing = matched_section!(body, slug)
+    return [append_body(body, rendered), :created] unless existing
+
+    if checklist_section?(existing[0])
+      raise Error, "section '#{slug}' is a checklist section; use checklist/reconcile, or pick another --slug"
+    end
+    return [body, :unchanged] if existing[0] == rendered
+
+    [replace_section(existing, rendered), :replaced]
+  end
+
+  # Splices a rendered section over the span its MatchData covers --
+  # the one replacement mechanism both section kinds share, immune to
+  # String#sub's backslash-sequence interpretation.
+  def replace_section(match, rendered)
+    "#{match.pre_match}#{rendered}#{match.post_match}"
+  end
+
+  # A section's kind is readable from its first non-blank content
+  # line: checklist renders put the '## To-dos' heading directly under
+  # the open marker, and content sections can never start with that
+  # heading (assert_not_checklist_shaped! refuses it). Skipping blank
+  # lines keeps the kind stable when a hand edit reflows whitespace
+  # under the marker.
+  def checklist_section?(section)
+    first_content_line = section.each_line.lazy.drop(1).find { |line| !line.strip.empty? }
+    first_content_line ? TODOS_HEADING.match?(first_content_line.chomp) : false
+  end
+
+  # The section kinds are told apart by their first non-blank line, so
+  # content that opens with the checklist heading would be
+  # misclassified on every later read -- locked against its own
+  # re-runs and overwritable by a same-slug checklist sync. Refused
+  # loudly instead, like the marker guard.
+  def assert_not_checklist_shaped!(content)
+    first_line = normalize(content).lines.find { |line| !line.strip.empty? }
+    return content unless first_line && TODOS_HEADING.match?(first_line.chomp)
+
+    raise Error, "content opens with a '## To-dos' heading, which marks checklist sections; " \
+                 'reword its first line'
+  end
+
+  # Content is written verbatim, so a line shaped like either marker --
+  # for ANY slug, even inside a fenced code block -- would corrupt
+  # section detection body-wide. Line-anchored like the marker
+  # scanners; mid-line mentions are legal.
+  def assert_no_marker_lines!(content)
+    normalize(content).each_line do |raw|
+      next unless marker_line?(raw.chomp)
+
+      raise Error, "content contains a gh-issue-sync marker line (#{raw.strip}); " \
+                   'mention markers mid-line or indent them instead'
+    end
+    content
+  end
+
+  # The one charset both slug origins (typed --slug, plan basename)
+  # are held to; see assert_valid_slug! for why it is this tight.
+  SLUG_CHARSET = /\A[A-Za-z0-9._-]+\z/
+
+  def assert_valid_section_slug!(slug)
+    return slug if slug.match?(SLUG_CHARSET)
+
+    raise Error, "--slug must contain only letters, digits, dots, underscores, and dashes, got #{slug.inspect}"
+  end
+
+  # Trims leading blank lines and trailing whitespace, but never the
+  # first line's indentation -- content may open with an indented code
+  # block. The one trim both the render and append paths share, so a
+  # rendered section always byte-matches what a re-render produces.
+  def trim_addition(text)
+    normalize(text).sub(/\A(?:[ \t]*\n)+/, '').rstrip
+  end
+
+  # Joins with exactly one blank line.
   def append_body(body, addition)
     body = normalize(body).rstrip
-    addition = normalize(addition).sub(/\A(?:[ \t]*\n)+/, '').rstrip
+    addition = trim_addition(addition)
     return "#{addition}\n" if body.empty?
 
     "#{body}\n\n#{addition}\n"
@@ -211,18 +367,20 @@ module GhIssueSync
   # and an item text merely MENTIONING a marker string must not end the
   # match mid-line.
   def section_pattern(slug)
-    open_marker = Regexp.escape("<!-- gh-issue-sync: #{slug} -->")
-    close_marker = Regexp.escape("<!-- /gh-issue-sync: #{slug} -->")
-    /^#{open_marker}$.*?^#{close_marker}$/m
+    /^#{Regexp.escape(open_marker_line(slug))}$.*?^#{Regexp.escape(close_marker_line(slug))}$/m
   end
 
-  # Slugs are embedded in the marker lines, whose scanners split on
-  # whitespace; a slug containing whitespace would render markers they
-  # can never re-recognize.
+  # Slugs are embedded in the marker lines: whitespace breaks the
+  # scanners' tokenizing, and '>' (as in 'x-->') closes the HTML
+  # comment early, leaking text into the rendered body. Same charset
+  # as the typed --slug guard, plan-file phrasing.
   def assert_valid_slug!(slug)
-    return slug if slug.match?(/\A\S+\z/)
+    return slug if slug.match?(SLUG_CHARSET)
 
-    raise Error, "slug must contain no whitespace, got #{slug.inspect} (rename the plan file)"
+    raise Error, "slug must contain only letters, digits, dots, underscores, and dashes, " \
+                 "got #{slug.inspect} (rename the plan file; if an older sync already wrote a " \
+                 'section under this name, delete that section from the issue body by hand -- ' \
+                 'a renamed slug never adopts its old section)'
   end
 
   # The lines [start, stop) of the first "## To-dos" section: heading
@@ -297,10 +455,15 @@ module GhIssueSync
   USAGE = <<~TXT
     gh-issue-sync -- GitHub issue-body read-modify-write helper (uses gh)
 
-    gh-issue-sync append NNN --file <md> [--repo owner/name]
-        Append the file's content to the issue body, separated by
-        exactly one blank line. NOT idempotent: re-running appends
-        again. For repeatable syncs use checklist/reconcile.
+    gh-issue-sync section NNN --file <md> --slug <key> [--repo owner/name]
+        Upsert the file's content, verbatim, into its own
+        marker-delimited section of the issue body, keyed by --slug:
+        created at the end of the body when absent, replaced in place
+        on re-run. Idempotent. The file is the source of truth --
+        hand-edits inside the section are overwritten without warning.
+        Refused: empty files, content containing a line shaped like a
+        sync marker (mention markers mid-line instead), and a --slug
+        that names an existing checklist section.
 
     gh-issue-sync checklist NNN --plan <plan.md> [--heading <slug>] [--repo owner/name]
         Regenerate the issue body's checklist section from the plan
@@ -335,7 +498,9 @@ module GhIssueSync
     def run(argv)
       command = argv.shift
       case command
-      when 'append'    then append(argv)
+      when 'append'
+        raise Error, "append was replaced by the idempotent 'section NNN --file <md> --slug <key>'"
+      when 'section'   then section(argv)
       when 'checklist' then sync(argv, reconcile: false)
       when 'reconcile' then sync(argv, reconcile: true)
       when nil, 'help', '--help', '-h' then puts USAGE
@@ -350,23 +515,35 @@ module GhIssueSync
 
     private
 
-    def append(argv)
+    def section(argv)
       options = {}
-      rest = parse_options(argv, 'append NNN --file <md> [--repo owner/name]') do |o|
-        o.on('--file PATH', 'markdown file to append') { |v| options[:file] = v }
+      rest = parse_options(argv, 'section NNN --file <md> --slug <key> [--repo owner/name]') do |o|
+        o.on('--file PATH', 'markdown file whose content fills the section') { |v| options[:file] = v }
+        o.on('--slug KEY', 'key naming the marker-delimited section') { |v| options[:slug] = v }
         o.on('--repo NAME', 'owner/name pass-through to gh') { |v| options[:repo] = v }
       end
       number = issue_number(rest)
       path = options[:file]
-      raise Error, 'append requires --file <md>' unless path
+      raise Error, 'section requires --file <md>' unless path
+      raise Error, 'section requires --slug <key>' unless options[:slug]
       raise Error, "file not found: #{path}" unless File.exist?(path)
 
-      addition = File.read(path)
-      raise Error, "file is empty: #{path}" if addition.strip.empty?
+      # upsert_content_section re-runs these guards; the copies here
+      # exist to fail on local input before the network fetch.
+      GhIssueSync.assert_valid_section_slug!(options[:slug])
+      content = File.read(path)
+      raise Error, "content file is blank: #{path}" if content.strip.empty?
 
+      GhIssueSync.assert_no_marker_lines!(content)
+      GhIssueSync.assert_not_checklist_shaped!(content)
       body = fetch_body(number, options[:repo])
-      write_body(number, options[:repo], GhIssueSync.append_body(body, addition))
-      puts "Appended #{path} to issue ##{number}"
+      new_body, outcome = GhIssueSync.upsert_content_section(body, content, slug: options[:slug])
+      if outcome == :unchanged
+        puts "Section #{options[:slug]} on issue ##{number} is already up to date (nothing written)"
+      else
+        write_body(number, options[:repo], new_body)
+        puts "#{outcome == :created ? 'Created' : 'Replaced'} section #{options[:slug]} on issue ##{number}"
+      end
     end
 
     def sync(argv, reconcile:)
