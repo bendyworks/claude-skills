@@ -656,7 +656,10 @@ module GhIssueSync
         o.banner = "Usage: gh-issue-sync #{banner}"
         yield o
       end
-      parser.parse(argv)
+      # permute, not parse: #parse only permutes while POSIXLY_CORRECT
+      # is unset, and order mode would hand valid flags to the
+      # stray-positional guard as "unexpected extra arguments".
+      parser.permute(argv)
     rescue OptionParser::ParseError => e
       raise Error, e.message
     end

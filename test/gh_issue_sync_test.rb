@@ -814,4 +814,22 @@ class CliStrayPositionalTest < Minitest::Test
     assert_match(/unexpected extra argument/, error.message)
     assert_match(/"43"/, error.message)
   end
+
+  # OptionParser#parse only permutes while POSIXLY_CORRECT is unset;
+  # the CLI pins permutation explicitly so a strict-POSIX environment
+  # cannot turn valid flags into "unexpected extra arguments".
+  def test_flags_parse_as_flags_even_under_posixly_correct
+    prior = ENV['POSIXLY_CORRECT']
+    ENV['POSIXLY_CORRECT'] = '1'
+    error = nil
+    capture_io do
+      error = assert_raises(SystemExit) do
+        GhIssueSync::CLI.run(['checklist', '42', '--plan', '/nonexistent-plan.md'])
+      end
+    end
+    refute_match(/unexpected extra argument/, error.message)
+    assert_match(/plan file not found/, error.message)
+  ensure
+    prior.nil? ? ENV.delete('POSIXLY_CORRECT') : ENV['POSIXLY_CORRECT'] = prior
+  end
 end
