@@ -319,7 +319,9 @@ sure the file's own heading names the plan -- the markers are
 invisible on GitHub, so only the content distinguishes the sections
 for a reader. For the rare body edit the helper doesn't cover
 (editing body text outside any section, removing a marker-less
-append-era block), fetch fresh with `gh issue view NNN --json body` parsed
+append-era block, or repairing marker damage that `section --delete`
+itself refuses to touch -- orphaned or interleaved marker pairs, an
+out-of-charset slug), fetch fresh with `gh issue view NNN --json body` parsed
 as JSON (never `-q .body`, which grows a trailing newline per cycle),
 edit, and write back immediately. Without write access to the repo,
 post the addition as a comment via `gh issue comment` instead
