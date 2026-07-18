@@ -217,7 +217,19 @@ module GhIssueSync
       raise Error, "issue body has unpaired '#{slug}' section markers " \
                    "(#{opens} open, #{closes} close); repair the body by hand first"
     end
+    # No legitimate section contains a marker line (the content guard
+    # and the checklist renderer both guarantee it), so a foreign
+    # marker inside the span means another section's pair was broken
+    # by a hand edit -- replacing this span would swallow it.
+    if match && match[0].lines[1...-1].any? { |line| marker_line?(line.chomp) }
+      raise Error, "the '#{slug}' section's span contains another section's marker line; " \
+                   'repair the body by hand first'
+    end
     match
+  end
+
+  def marker_line?(line)
+    OPEN_MARKER.match?(line) || CLOSE_MARKER.match?(line)
   end
 
   # Wraps arbitrary file content in this slug's marker pair, verbatim:
@@ -293,10 +305,9 @@ module GhIssueSync
   # scanners; mid-line mentions are legal.
   def assert_no_marker_lines!(content)
     normalize(content).each_line do |raw|
-      line = raw.chomp
-      next unless OPEN_MARKER.match?(line) || CLOSE_MARKER.match?(line)
+      next unless marker_line?(raw.chomp)
 
-      raise Error, "content contains a gh-issue-sync marker line (#{line.strip}); " \
+      raise Error, "content contains a gh-issue-sync marker line (#{raw.strip}); " \
                    'mention markers mid-line or indent them instead'
     end
     content

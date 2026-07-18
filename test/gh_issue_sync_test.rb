@@ -535,6 +535,20 @@ class UpsertContentSectionTest < Minitest::Test
     assert_raises(GhIssueSync::Error) { upsert(body) }
   end
 
+  def test_refuses_a_span_interleaved_with_another_sections_markers
+    body = <<~BODY
+      <!-- gh-issue-sync: user-story -->
+      A text
+      <!-- gh-issue-sync: other -->
+      B text
+      <!-- /gh-issue-sync: user-story -->
+      tail of other
+      <!-- /gh-issue-sync: other -->
+    BODY
+    error = assert_raises(GhIssueSync::Error) { upsert(body) }
+    assert_match(/marker/, error.message)
+  end
+
   def test_normalizes_crlf_bodies
     rendered = GhIssueSync.render_content_section(STORY, slug: 'user-story')
     new_body, = upsert("Intro.\r\n")
@@ -557,6 +571,22 @@ class ChecklistCoexistenceTest < Minitest::Test
     new_body, _warnings = GhIssueSync.sync_section(body, [{ number: 1, checked: true, text: 'One' }], slug: SLUG)
     assert_includes new_body, '- [x] **1.** One'
     refute_includes new_body, "-->\n\n## To-dos"
+  end
+
+  def test_checklist_sync_refuses_a_span_interleaved_with_another_sections_markers
+    body = <<~BODY
+      <!-- gh-issue-sync: #{SLUG} -->
+      ## To-dos
+      - [ ] **1.** One
+      <!-- gh-issue-sync: other -->
+      Other text
+      <!-- /gh-issue-sync: #{SLUG} -->
+      tail of other
+      <!-- /gh-issue-sync: other -->
+    BODY
+    items = [{ number: 1, checked: false, text: 'One' }]
+    error = assert_raises(GhIssueSync::Error) { GhIssueSync.sync_section(body, items, slug: SLUG) }
+    assert_match(/marker/, error.message)
   end
 
   def test_checklist_sync_refuses_a_body_with_an_unpaired_marker_for_its_slug
