@@ -271,6 +271,26 @@ module GhIssueSync
     [replace_section(existing, rendered), :replaced]
   end
 
+  # Removes this slug's marker-delimited section along with the blank
+  # line that separated it, so the body round-trips to its pre-section
+  # shape (following content keeps its first-line indentation; deleting
+  # the only section leaves an empty body). Returns [new_body, outcome]
+  # where outcome is :deleted or :absent -- absence is the goal state
+  # already holding, not an error, so re-runs are idempotent and a
+  # typo'd slug never writes anything. Damaged marker states get
+  # matched_section!'s refusals. Both section kinds are deletable: a
+  # delete names its slug explicitly, unlike the accidental cross-kind
+  # overwrites the upsert guards exist to stop.
+  def delete_section(body, slug:)
+    assert_valid_section_slug!(slug)
+    body = normalize(body)
+    match = matched_section!(body, slug)
+    return [body, :absent] unless match
+
+    parts = [match.pre_match.rstrip, trim_addition(match.post_match)].reject(&:empty?)
+    [parts.empty? ? '' : "#{parts.join("\n\n")}\n", :deleted]
+  end
+
   # Splices a rendered section over the span its MatchData covers --
   # the one replacement mechanism both section kinds share, immune to
   # String#sub's backslash-sequence interpretation.
@@ -517,20 +537,25 @@ module GhIssueSync
 
     def section(argv)
       options = {}
-      rest = parse_options(argv, 'section NNN --file <md> --slug <key> [--repo owner/name]') do |o|
+      rest = parse_options(argv, 'section NNN (--file <md> | --delete) --slug <key> [--repo owner/name]') do |o|
         o.on('--file PATH', 'markdown file whose content fills the section') { |v| options[:file] = v }
         o.on('--slug KEY', 'key naming the marker-delimited section') { |v| options[:slug] = v }
+        o.on('--delete', "remove the slug's section instead of upserting") { options[:delete] = true }
         o.on('--repo NAME', 'owner/name pass-through to gh') { |v| options[:repo] = v }
       end
       number = issue_number(rest)
-      path = options[:file]
-      raise Error, 'section requires --file <md>' unless path
       raise Error, 'section requires --slug <key>' unless options[:slug]
+      raise Error, 'section requires exactly one of --file or --delete' unless [options[:file], options[:delete]].compact.one?
+
+      # delete_section and upsert_content_section re-run these guards;
+      # the copies here exist to fail on local input before the
+      # network fetch.
+      GhIssueSync.assert_valid_section_slug!(options[:slug])
+      return section_delete(number, options) if options[:delete]
+
+      path = options[:file]
       raise Error, "file not found: #{path}" unless File.exist?(path)
 
-      # upsert_content_section re-runs these guards; the copies here
-      # exist to fail on local input before the network fetch.
-      GhIssueSync.assert_valid_section_slug!(options[:slug])
       content = File.read(path)
       raise Error, "content file is blank: #{path}" if content.strip.empty?
 
@@ -543,6 +568,17 @@ module GhIssueSync
       else
         write_body(number, options[:repo], new_body)
         puts "#{outcome == :created ? 'Created' : 'Replaced'} section #{options[:slug]} on issue ##{number}"
+      end
+    end
+
+    def section_delete(number, options)
+      body = fetch_body(number, options[:repo])
+      new_body, outcome = GhIssueSync.delete_section(body, slug: options[:slug])
+      if outcome == :absent
+        puts "Section #{options[:slug]} on issue ##{number} is already absent (nothing written)"
+      else
+        write_body(number, options[:repo], new_body)
+        puts "Deleted section #{options[:slug]} on issue ##{number}"
       end
     end
 

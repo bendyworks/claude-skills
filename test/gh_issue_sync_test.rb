@@ -556,6 +556,95 @@ class UpsertContentSectionTest < Minitest::Test
   end
 end
 
+class DeleteSectionTest < Minitest::Test
+  STORY_SECTION = GhIssueSync.render_content_section("## User story\n\nA story.\n", slug: 'user-story')
+
+  def delete(body, slug: 'user-story')
+    GhIssueSync.delete_section(body, slug: slug)
+  end
+
+  def test_deletes_a_mid_body_section_rejoining_with_one_blank_line
+    new_body, outcome = delete("Intro.\n\n#{STORY_SECTION}\n\nTail.\n")
+    assert_equal "Intro.\n\nTail.\n", new_body
+    assert_equal :deleted, outcome
+  end
+
+  def test_deletes_a_section_at_the_start_of_the_body
+    new_body, outcome = delete("#{STORY_SECTION}\n\nTail.\n")
+    assert_equal "Tail.\n", new_body
+    assert_equal :deleted, outcome
+  end
+
+  def test_deletes_a_section_at_the_end_without_leaving_a_trailing_blank_line
+    new_body, outcome = delete("Intro.\n\n#{STORY_SECTION}\n")
+    assert_equal "Intro.\n", new_body
+    assert_equal :deleted, outcome
+  end
+
+  def test_deleting_the_only_section_leaves_an_empty_body
+    new_body, outcome = delete("#{STORY_SECTION}\n")
+    assert_equal '', new_body
+    assert_equal :deleted, outcome
+  end
+
+  def test_deletes_a_checklist_section
+    checklist = GhIssueSync.render_section([{ number: 1, checked: false, text: 'One' }], slug: SLUG)
+    new_body, outcome = delete("Intro.\n\n#{checklist}\n", slug: SLUG)
+    assert_equal "Intro.\n", new_body
+    assert_equal :deleted, outcome
+  end
+
+  def test_leaves_other_sections_byte_untouched
+    checklist = GhIssueSync.render_section([{ number: 1, checked: false, text: 'One' }], slug: SLUG)
+    new_body, outcome = delete("Intro.\n\n#{STORY_SECTION}\n\n#{checklist}\n\nTail.\n")
+    assert_equal "Intro.\n\n#{checklist}\n\nTail.\n", new_body
+    assert_equal :deleted, outcome
+  end
+
+  def test_preserves_indentation_of_following_content
+    new_body, = delete("Intro.\n\n#{STORY_SECTION}\n\n    indented code line\nplain line.\n")
+    assert_equal "Intro.\n\n    indented code line\nplain line.\n", new_body
+  end
+
+  def test_normalizes_crlf_bodies
+    body = "Intro.\r\n\r\n#{STORY_SECTION.gsub("\n", "\r\n")}\r\n"
+    new_body, outcome = delete(body)
+    assert_equal "Intro.\n", new_body
+    assert_equal :deleted, outcome
+  end
+
+  def test_reports_absent_when_the_body_has_no_such_section_and_writes_nothing
+    new_body, outcome = delete("Intro.\n\nTail.\n")
+    assert_equal "Intro.\n\nTail.\n", new_body
+    assert_equal :absent, outcome
+  end
+
+  def test_refuses_a_body_with_an_unpaired_open_marker_for_the_slug
+    body = "Intro.\n\n<!-- gh-issue-sync: user-story -->\nOld story\n"
+    error = assert_raises(GhIssueSync::Error) { delete(body) }
+    assert_match(/unpaired/, error.message)
+  end
+
+  def test_refuses_a_span_interleaved_with_another_sections_markers
+    body = <<~BODY
+      <!-- gh-issue-sync: user-story -->
+      A text
+      <!-- gh-issue-sync: other -->
+      B text
+      <!-- /gh-issue-sync: user-story -->
+      tail of other
+      <!-- /gh-issue-sync: other -->
+    BODY
+    error = assert_raises(GhIssueSync::Error) { delete(body) }
+    assert_match(/marker/, error.message)
+  end
+
+  def test_rejects_slugs_outside_the_tight_charset
+    error = assert_raises(GhIssueSync::Error) { delete("Intro.\n", slug: 'a b') }
+    assert_match(/--slug/, error.message)
+  end
+end
+
 class ChecklistCoexistenceTest < Minitest::Test
   def test_checklist_sync_refuses_to_overwrite_a_content_section_sharing_its_slug
     content = GhIssueSync.render_content_section("## Notes\n\nNot a checklist.\n", slug: SLUG)
