@@ -461,6 +461,7 @@ class UpsertContentSectionTest < Minitest::Test
     body = "Intro.\n\n#{checklist}\n"
     error = assert_raises(GhIssueSync::Error) { upsert(body, STORY, slug: SLUG) }
     assert_match(/is a checklist section/, error.message)
+    assert_match(/--delete/, error.message)
   end
 
   def test_rejects_content_containing_an_open_marker_line_for_any_slug
@@ -546,7 +547,7 @@ class UpsertContentSectionTest < Minitest::Test
       <!-- /gh-issue-sync: other -->
     BODY
     error = assert_raises(GhIssueSync::Error) { upsert(body) }
-    assert_match(/marker/, error.message)
+    assert_match(/another section's marker line/, error.message)
   end
 
   def test_normalizes_crlf_bodies
@@ -557,32 +558,34 @@ class UpsertContentSectionTest < Minitest::Test
 end
 
 class DeleteSectionTest < Minitest::Test
-  STORY_SECTION = GhIssueSync.render_content_section("## User story\n\nA story.\n", slug: 'user-story')
+  def story_section
+    GhIssueSync.render_content_section("## User story\n\nA story.\n", slug: 'user-story')
+  end
 
   def delete(body, slug: 'user-story')
     GhIssueSync.delete_section(body, slug: slug)
   end
 
   def test_deletes_a_mid_body_section_rejoining_with_one_blank_line
-    new_body, outcome = delete("Intro.\n\n#{STORY_SECTION}\n\nTail.\n")
+    new_body, outcome = delete("Intro.\n\n#{story_section}\n\nTail.\n")
     assert_equal "Intro.\n\nTail.\n", new_body
     assert_equal :deleted, outcome
   end
 
   def test_deletes_a_section_at_the_start_of_the_body
-    new_body, outcome = delete("#{STORY_SECTION}\n\nTail.\n")
+    new_body, outcome = delete("#{story_section}\n\nTail.\n")
     assert_equal "Tail.\n", new_body
     assert_equal :deleted, outcome
   end
 
   def test_deletes_a_section_at_the_end_without_leaving_a_trailing_blank_line
-    new_body, outcome = delete("Intro.\n\n#{STORY_SECTION}\n")
+    new_body, outcome = delete("Intro.\n\n#{story_section}\n")
     assert_equal "Intro.\n", new_body
     assert_equal :deleted, outcome
   end
 
   def test_deleting_the_only_section_leaves_an_empty_body
-    new_body, outcome = delete("#{STORY_SECTION}\n")
+    new_body, outcome = delete("#{story_section}\n")
     assert_equal '', new_body
     assert_equal :deleted, outcome
   end
@@ -596,27 +599,49 @@ class DeleteSectionTest < Minitest::Test
 
   def test_leaves_other_sections_byte_untouched
     checklist = GhIssueSync.render_section([{ number: 1, checked: false, text: 'One' }], slug: SLUG)
-    new_body, outcome = delete("Intro.\n\n#{STORY_SECTION}\n\n#{checklist}\n\nTail.\n")
+    new_body, outcome = delete("Intro.\n\n#{story_section}\n\n#{checklist}\n\nTail.\n")
     assert_equal "Intro.\n\n#{checklist}\n\nTail.\n", new_body
     assert_equal :deleted, outcome
   end
 
   def test_preserves_indentation_of_following_content
-    new_body, = delete("Intro.\n\n#{STORY_SECTION}\n\n    indented code line\nplain line.\n")
+    new_body, = delete("Intro.\n\n#{story_section}\n\n    indented code line\nplain line.\n")
     assert_equal "Intro.\n\n    indented code line\nplain line.\n", new_body
   end
 
+  def test_deletes_a_later_section_leaving_the_first_intact
+    checklist = GhIssueSync.render_section([{ number: 1, checked: false, text: 'One' }], slug: SLUG)
+    new_body, outcome = delete("Intro.\n\n#{checklist}\n\n#{story_section}\n\nTail.\n")
+    assert_equal "Intro.\n\n#{checklist}\n\nTail.\n", new_body
+    assert_equal :deleted, outcome
+  end
+
+  def test_returns_the_removed_section_text_for_recovery
+    _new_body, outcome, removed = delete("Intro.\n\n#{story_section}\n")
+    assert_equal :deleted, outcome
+    assert_equal story_section, removed
+  end
+
+  def test_never_matches_a_section_whose_slug_extends_the_requested_slug
+    other = GhIssueSync.render_content_section("## Notes\n\nLonger slug.\n", slug: 'user-story-2')
+    body = "Intro.\n\n#{other}\n"
+    new_body, outcome = delete(body)
+    assert_equal body, new_body
+    assert_equal :absent, outcome
+  end
+
   def test_normalizes_crlf_bodies
-    body = "Intro.\r\n\r\n#{STORY_SECTION.gsub("\n", "\r\n")}\r\n"
+    body = "Intro.\r\n\r\n#{story_section.gsub("\n", "\r\n")}\r\n"
     new_body, outcome = delete(body)
     assert_equal "Intro.\n", new_body
     assert_equal :deleted, outcome
   end
 
-  def test_reports_absent_when_the_body_has_no_such_section_and_writes_nothing
-    new_body, outcome = delete("Intro.\n\nTail.\n")
+  def test_reports_absent_when_the_body_has_no_such_section_and_returns_the_body_unchanged
+    new_body, outcome, removed = delete("Intro.\n\nTail.\n")
     assert_equal "Intro.\n\nTail.\n", new_body
     assert_equal :absent, outcome
+    assert_nil removed
   end
 
   def test_refuses_a_body_with_an_unpaired_open_marker_for_the_slug
@@ -636,7 +661,7 @@ class DeleteSectionTest < Minitest::Test
       <!-- /gh-issue-sync: other -->
     BODY
     error = assert_raises(GhIssueSync::Error) { delete(body) }
-    assert_match(/marker/, error.message)
+    assert_match(/another section's marker line/, error.message)
   end
 
   def test_rejects_slugs_outside_the_tight_charset
@@ -652,6 +677,7 @@ class ChecklistCoexistenceTest < Minitest::Test
     items = [{ number: 1, checked: false, text: 'One' }]
     error = assert_raises(GhIssueSync::Error) { GhIssueSync.sync_section(body, items, slug: SLUG) }
     assert_match(/holds arbitrary content/, error.message)
+    assert_match(/--delete/, error.message)
   end
 
   def test_checklist_sync_repairs_a_stray_blank_line_after_its_own_marker
@@ -675,7 +701,7 @@ class ChecklistCoexistenceTest < Minitest::Test
     BODY
     items = [{ number: 1, checked: false, text: 'One' }]
     error = assert_raises(GhIssueSync::Error) { GhIssueSync.sync_section(body, items, slug: SLUG) }
-    assert_match(/marker/, error.message)
+    assert_match(/another section's marker line/, error.message)
   end
 
   def test_checklist_sync_refuses_a_body_with_an_unpaired_marker_for_its_slug
@@ -735,6 +761,7 @@ class GuardsTest < Minitest::Test
   def test_slug_guard_rejects_marker_breaking_characters_in_plan_basenames
     error = assert_raises(GhIssueSync::Error) { GhIssueSync.assert_valid_slug!('notes-->') }
     assert_match(/rename the plan file/, error.message)
+    assert_match(/--delete/, error.message)
   end
 
   def test_length_guard_raises_past_the_github_body_limit_and_reports_bytes
