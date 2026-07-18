@@ -540,6 +540,13 @@ module GhIssueSync
   TXT
 
   class CLI
+    # Full-match so OptionParser yields the whole value, not the
+    # matched prefix. An option value must not begin with a dash: a
+    # mandatory-argument option would otherwise swallow a following
+    # flag as its value ('--slug --delete' parses as slug "--delete"
+    # with no delete flag) and silently act on the misread command.
+    VALUE_NOT_FLAG = /\A[^-].*\z/m
+
     def self.run(argv)
       new.run(argv)
     end
@@ -567,10 +574,10 @@ module GhIssueSync
     def section(argv)
       options = {}
       rest = parse_options(argv, 'section NNN (--file <md> | --delete) --slug <key> [--repo owner/name]') do |o|
-        o.on('--file PATH', 'markdown file whose content fills the section') { |v| options[:file] = v }
-        o.on('--slug KEY', 'key naming the marker-delimited section') { |v| options[:slug] = v }
+        o.on('--file PATH', VALUE_NOT_FLAG, 'markdown file whose content fills the section') { |v| options[:file] = v }
+        o.on('--slug KEY', VALUE_NOT_FLAG, 'key naming the marker-delimited section') { |v| options[:slug] = v }
         o.on('--delete', "remove the slug's section instead of upserting") { options[:delete] = true }
-        o.on('--repo NAME', 'owner/name pass-through to gh') { |v| options[:repo] = v }
+        o.on('--repo NAME', VALUE_NOT_FLAG, 'owner/name pass-through to gh') { |v| options[:repo] = v }
       end
       number = issue_number(rest)
       raise Error, 'section requires --slug <key>' unless options[:slug]
@@ -627,9 +634,9 @@ module GhIssueSync
       subcommand = reconcile ? 'reconcile' : 'checklist'
       options = {}
       rest = parse_options(argv, "#{subcommand} NNN --plan <plan.md> [--heading <slug>] [--repo owner/name]") do |o|
-        o.on('--plan PATH', 'plan file whose To-dos drive the sync') { |v| options[:plan] = v }
-        o.on('--heading SLUG', 'visible heading suffix for multi-plan issues') { |v| options[:heading] = v }
-        o.on('--repo NAME', 'owner/name pass-through to gh') { |v| options[:repo] = v }
+        o.on('--plan PATH', VALUE_NOT_FLAG, 'plan file whose To-dos drive the sync') { |v| options[:plan] = v }
+        o.on('--heading SLUG', VALUE_NOT_FLAG, 'visible heading suffix for multi-plan issues') { |v| options[:heading] = v }
+        o.on('--repo NAME', VALUE_NOT_FLAG, 'owner/name pass-through to gh') { |v| options[:repo] = v }
       end
       number = issue_number(rest)
       plan_path = options[:plan]

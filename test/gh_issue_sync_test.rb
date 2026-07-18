@@ -832,4 +832,22 @@ class CliStrayPositionalTest < Minitest::Test
   ensure
     prior.nil? ? ENV.delete('POSIXLY_CORRECT') : ENV['POSIXLY_CORRECT'] = prior
   end
+
+  # A mandatory-argument option must not swallow a following flag as
+  # its value: 'section 42 --file a.md --slug --delete' would
+  # otherwise parse as slug "--delete" with no delete flag -- and
+  # since the slug charset accepts that string, a junk section would
+  # be silently upserted instead of the intended delete. The
+  # nonexistent --file path keeps the pre-guard failure local, so the
+  # test never reaches the network.
+  def test_run_aborts_when_an_option_swallows_a_following_flag_as_its_value
+    error = nil
+    capture_io do
+      error = assert_raises(SystemExit) do
+        GhIssueSync::CLI.run(['section', '42', '--file', '/nonexistent.md', '--slug', '--delete'])
+      end
+    end
+    assert_match(/--slug/, error.message)
+    assert_match(/--delete/, error.message)
+  end
 end
