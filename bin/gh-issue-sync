@@ -36,8 +36,10 @@
 # are assumed never to start a line inside one (the content-section
 # guard refuses such content outright, keeping the assumption true), a
 # fence INSIDE the plan's To-dos section may still trip the strict
-# line parser, and only triple-backtick fences are recognized (not ~~~
-# or longer runs).
+# line parser, a content file carrying an UNMATCHED fence line flips
+# fence tracking for the rest of the body (hiding a later marker-less
+# '## To-dos' heading from adoption), and only triple-backtick fences
+# are recognized (not ~~~ or longer runs).
 
 require 'json'
 require 'open3'
@@ -124,7 +126,8 @@ module GhIssueSync
     body = normalize(body)
     existing = matched_section!(body, slug)
     if existing && !checklist_section?(existing[0])
-      raise Error, "section '#{slug}' holds arbitrary content, not a checklist; rename the plan file"
+      raise Error, "section '#{slug}' holds arbitrary content, not a checklist; rename the plan file " \
+                   "(or, if a hand edit removed the section's '## To-dos' heading, restore it)"
     end
 
     # First-ever sync on a pre-helper issue: the checklist about to be
@@ -375,7 +378,9 @@ module GhIssueSync
     return slug if slug.match?(SLUG_CHARSET)
 
     raise Error, "slug must contain only letters, digits, dots, underscores, and dashes, " \
-                 "got #{slug.inspect} (rename the plan file)"
+                 "got #{slug.inspect} (rename the plan file; if an older sync already wrote a " \
+                 'section under this name, delete that section from the issue body by hand -- ' \
+                 'a renamed slug never adopts its old section)'
   end
 
   # The lines [start, stop) of the first "## To-dos" section: heading
@@ -527,6 +532,8 @@ module GhIssueSync
       content = File.read(path)
       raise Error, "content file is blank: #{path}" if content.strip.empty?
 
+      GhIssueSync.assert_no_marker_lines!(content)
+      GhIssueSync.assert_not_checklist_shaped!(content)
       body = fetch_body(number, options[:repo])
       new_body, outcome = GhIssueSync.upsert_content_section(body, content, slug: options[:slug])
       if outcome == :unchanged

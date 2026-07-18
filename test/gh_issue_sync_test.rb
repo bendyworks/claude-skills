@@ -598,7 +598,8 @@ class ChecklistCoexistenceTest < Minitest::Test
 
   def test_checklist_adoption_ignores_todo_shaped_lines_inside_content_sections
     tricky = GhIssueSync.render_content_section(
-      "## To-dos\n- [ ] **1.** quoted example, not a real to-do\n", slug: 'user-story'
+      "Quoted checklist format:\n\n## To-dos\n- [ ] **1.** quoted example, not a real to-do\n",
+      slug: 'user-story'
     )
     body = "Intro.\n\n#{tricky}\n"
     items = [{ number: 2, checked: true, text: 'Real item' }]
