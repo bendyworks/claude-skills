@@ -308,16 +308,20 @@ enforces GitHub's body-length limit. The write is idempotent:
 re-running replaces the section in place, so amending the story is
 just editing the file and re-running the command. The file is the
 source of truth -- hand-edits inside the marked section are
-overwritten. (Transition note: a block written by the long-retired
-`append` subcommand is marker-less -- delete it from the body once
+overwritten. To remove a section outright, run the same command with
+`--delete` in place of `--file`. (Transition note: a block written by
+the long-retired `append` subcommand is marker-less -- `--delete` has
+no slug to target it by, so delete it from the body by hand once
 before the first `section` run, or it will be duplicated.) In the
 multi-plan deviation case (one issue, several plans), prefix the slug
 with the plan slug (e.g. `--slug <plan-slug>-user-story`) and make
 sure the file's own heading names the plan -- the markers are
 invisible on GitHub, so only the content distinguishes the sections
-for a reader. For the rare body edit that is neither a section upsert
-nor a checklist sync (deleting a section, editing body text outside
-any section), fetch fresh with `gh issue view NNN --json body` parsed
+for a reader. For the rare body edit the helper doesn't cover
+(editing body text outside any section, removing a marker-less
+append-era block, or repairing marker damage that `section --delete`
+itself refuses to touch -- orphaned, duplicated, or interleaved
+marker pairs, an out-of-charset slug), fetch fresh with `gh issue view NNN --json body` parsed
 as JSON (never `-q .body`, which grows a trailing newline per cycle),
 edit, and write back immediately. Without write access to the repo,
 post the addition as a comment via `gh issue comment` instead

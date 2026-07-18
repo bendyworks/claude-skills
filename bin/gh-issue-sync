@@ -29,7 +29,8 @@
 # item text, a hand-added item -- is surfaced as a warning (the plan
 # wins), never silently kept or silently lost; content-section
 # overwrite semantics live in the usage text. The two kinds refuse
-# to overwrite each other.
+# to overwrite each other. Either kind is removed wholesale with
+# `section --delete`, keyed by the same slug.
 #
 # Known limitations around fenced code blocks: `## To-dos` headings
 # inside a fence are correctly ignored, but the sync markers themselves
@@ -126,7 +127,8 @@ module GhIssueSync
     body = normalize(body)
     existing = matched_section!(body, slug)
     if existing && !checklist_section?(existing[0])
-      raise Error, "section '#{slug}' holds arbitrary content, not a checklist; rename the plan file " \
+      raise Error, "section '#{slug}' holds arbitrary content, not a checklist; rename the plan file, " \
+                   "or move the content to another slug and run 'section <issue> --slug #{slug} --delete' " \
                    "(or, if a hand edit removed the section's '## To-dos' heading, restore it)"
     end
 
@@ -264,11 +266,33 @@ module GhIssueSync
     return [append_body(body, rendered), :created] unless existing
 
     if checklist_section?(existing[0])
-      raise Error, "section '#{slug}' is a checklist section; use checklist/reconcile, or pick another --slug"
+      raise Error, "section '#{slug}' is a checklist section; use checklist/reconcile, pick another " \
+                   '--slug, or remove an obsolete checklist with --delete'
     end
     return [body, :unchanged] if existing[0] == rendered
 
     [replace_section(existing, rendered), :replaced]
+  end
+
+  # Removes this slug's marker-delimited section along with the blank
+  # line that separated it, rejoining the remainder with exactly one
+  # blank line (following content keeps its first-line indentation;
+  # deleting the only section leaves an empty body). Returns
+  # [new_body, outcome, removed] where outcome is :deleted or :absent
+  # and removed is the deleted span, markers included, so callers can
+  # keep a recovery copy -- absence is the goal state already holding,
+  # not an error, so re-runs are idempotent and a typo'd slug never
+  # writes anything. Damaged marker states get matched_section!'s
+  # refusals. Both section kinds are deletable: a delete names its
+  # slug explicitly, unlike the accidental cross-kind overwrites the
+  # upsert guards exist to stop.
+  def delete_section(body, slug:)
+    assert_valid_section_slug!(slug)
+    body = normalize(body)
+    match = matched_section!(body, slug)
+    return [body, :absent, nil] unless match
+
+    [join_blocks([match.pre_match.rstrip, trim_addition(match.post_match)]), :deleted, match[0]]
   end
 
   # Splices a rendered section over the span its MatchData covers --
@@ -334,13 +358,21 @@ module GhIssueSync
     normalize(text).sub(/\A(?:[ \t]*\n)+/, '').rstrip
   end
 
+  # The one spelling of the body's block-spacing rule: content blocks
+  # separated by exactly one blank line, a single trailing newline,
+  # empty blocks dropped, no blocks at all yielding an empty body.
+  # Every path that assembles a body from parts (append, adopt,
+  # delete) goes through here so the rule can never drift apart --
+  # the upserts' byte-exact :unchanged detection depends on all of
+  # them producing identical spacing.
+  def join_blocks(parts)
+    parts = parts.reject(&:empty?)
+    parts.empty? ? '' : "#{parts.join("\n\n")}\n"
+  end
+
   # Joins with exactly one blank line.
   def append_body(body, addition)
-    body = normalize(body).rstrip
-    addition = trim_addition(addition)
-    return "#{addition}\n" if body.empty?
-
-    "#{body}\n\n#{addition}\n"
+    join_blocks([normalize(body).rstrip, trim_addition(addition)])
   end
 
   # The finish-phase reconcile must leave the public checklist in a
@@ -380,7 +412,8 @@ module GhIssueSync
     raise Error, "slug must contain only letters, digits, dots, underscores, and dashes, " \
                  "got #{slug.inspect} (rename the plan file; if an older sync already wrote a " \
                  'section under this name, delete that section from the issue body by hand -- ' \
-                 'a renamed slug never adopts its old section)'
+                 "'section --delete' cannot target a slug outside the charset, and a renamed " \
+                 'slug never adopts its old section)'
   end
 
   # The lines [start, stop) of the first "## To-dos" section: heading
@@ -444,19 +477,14 @@ module GhIssueSync
     return nil unless bounds
 
     start, stop = bounds
-    before = lines[0...start].join.rstrip
-    after = lines[stop..].join.strip
-    result = before.empty? ? '' : "#{before}\n\n"
-    result += "#{rendered.rstrip}\n"
-    result += "\n#{after}\n" unless after.empty?
-    result
+    join_blocks([lines[0...start].join.rstrip, rendered.rstrip, trim_addition(lines[stop..].join)])
   end
 
   USAGE = <<~TXT
     gh-issue-sync -- GitHub issue-body read-modify-write helper (uses gh)
 
-    gh-issue-sync section NNN --file <md> --slug <key> [--repo owner/name]
-        Upsert the file's content, verbatim, into its own
+    gh-issue-sync section NNN (--file <md> | --delete) --slug <key> [--repo owner/name]
+        With --file: upsert the file's content, verbatim, into its own
         marker-delimited section of the issue body, keyed by --slug:
         created at the end of the body when absent, replaced in place
         on re-run. Idempotent. The file is the source of truth --
@@ -464,6 +492,12 @@ module GhIssueSync
         Refused: empty files, content containing a line shaped like a
         sync marker (mention markers mid-line instead), and a --slug
         that names an existing checklist section.
+        With --delete: remove the slug's section (either kind) along
+        with the blank line that separated it; a slug with no section
+        reports "already absent" and writes nothing. The go-to cleanup
+        after renaming a plan file between valid slugs -- a renamed
+        slug never adopts its old section, so the old slug's section
+        stays behind until deleted.
 
     gh-issue-sync checklist NNN --plan <plan.md> [--heading <slug>] [--repo owner/name]
         Regenerate the issue body's checklist section from the plan
@@ -517,23 +551,32 @@ module GhIssueSync
 
     def section(argv)
       options = {}
-      rest = parse_options(argv, 'section NNN --file <md> --slug <key> [--repo owner/name]') do |o|
+      rest = parse_options(argv, 'section NNN (--file <md> | --delete) --slug <key> [--repo owner/name]') do |o|
         o.on('--file PATH', 'markdown file whose content fills the section') { |v| options[:file] = v }
         o.on('--slug KEY', 'key naming the marker-delimited section') { |v| options[:slug] = v }
+        o.on('--delete', "remove the slug's section instead of upserting") { options[:delete] = true }
         o.on('--repo NAME', 'owner/name pass-through to gh') { |v| options[:repo] = v }
       end
       number = issue_number(rest)
-      path = options[:file]
-      raise Error, 'section requires --file <md>' unless path
       raise Error, 'section requires --slug <key>' unless options[:slug]
+      raise Error, 'section requires exactly one of --file or --delete' unless [options[:file], options[:delete]].compact.one?
+
+      # delete_section and upsert_content_section re-run this guard;
+      # the copy here exists to fail on local input before the
+      # network fetch.
+      GhIssueSync.assert_valid_section_slug!(options[:slug])
+      options[:delete] ? section_delete(number, options) : section_upsert(number, options)
+    end
+
+    def section_upsert(number, options)
+      path = options[:file]
       raise Error, "file not found: #{path}" unless File.exist?(path)
 
-      # upsert_content_section re-runs these guards; the copies here
-      # exist to fail on local input before the network fetch.
-      GhIssueSync.assert_valid_section_slug!(options[:slug])
       content = File.read(path)
       raise Error, "content file is blank: #{path}" if content.strip.empty?
 
+      # upsert_content_section re-runs these guards; the copies here
+      # exist to fail on local input before the network fetch.
       GhIssueSync.assert_no_marker_lines!(content)
       GhIssueSync.assert_not_checklist_shaped!(content)
       body = fetch_body(number, options[:repo])
@@ -543,6 +586,25 @@ module GhIssueSync
       else
         write_body(number, options[:repo], new_body)
         puts "#{outcome == :created ? 'Created' : 'Replaced'} section #{options[:slug]} on issue ##{number}"
+      end
+    end
+
+    # The removed span goes to stderr: delete is the one mode where a
+    # wrong-target run (mistyped issue number, wrong cwd resolving the
+    # repo) destroys instead of adds, so the terminal scrollback keeps
+    # a paste-ready recovery copy.
+    def section_delete(number, options)
+      body = fetch_body(number, options[:repo])
+      new_body, outcome, removed = GhIssueSync.delete_section(body, slug: options[:slug])
+      if outcome == :absent
+        puts "Section #{options[:slug]} on issue ##{number} is already absent (nothing written)"
+      else
+        write_body(number, options[:repo], new_body)
+        # Recovery copy before the success line: stderr and a piped,
+        # block-buffered stdout interleave unpredictably, and this
+        # order keeps the success line from landing inside the blob.
+        warn "gh-issue-sync: removed content follows (GitHub also keeps issue-body edit history):\n#{removed}"
+        puts "Deleted section #{options[:slug]} on issue ##{number}"
       end
     end
 
