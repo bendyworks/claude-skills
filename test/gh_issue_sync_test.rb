@@ -769,33 +769,29 @@ class GuardsTest < Minitest::Test
     assert_match(/bytes/, error.message)
     GhIssueSync.check_length!('a' * 262_144)
   end
-end
 
-class IssueNumberGuardTest < Minitest::Test
-  def test_returns_the_sole_issue_number
+  def test_issue_number_guard_returns_the_sole_number
     assert_equal '42', GhIssueSync.parse_issue_number!(['42'])
   end
 
-  def test_rejects_a_missing_issue_number
+  def test_issue_number_guard_rejects_a_missing_number
     error = assert_raises(GhIssueSync::Error) { GhIssueSync.parse_issue_number!([]) }
     assert_match(/missing issue number/, error.message)
   end
 
-  def test_rejects_non_digit_issue_numbers
+  def test_issue_number_guard_rejects_non_digit_numbers
     error = assert_raises(GhIssueSync::Error) { GhIssueSync.parse_issue_number!(['forty']) }
     assert_match(/digits/, error.message)
   end
 
-  # Strays are inspect-quoted because a mis-quoted shell line can leave
-  # a stray containing spaces; the bare token would read as two.
-  def test_rejects_stray_positionals_naming_each_one
+  def test_issue_number_guard_rejects_strays_naming_each_one
     error = assert_raises(GhIssueSync::Error) { GhIssueSync.parse_issue_number!(['42', '43', 'sync later']) }
     assert_match(/"43"/, error.message)
     assert_match(/"sync later"/, error.message)
   end
 end
 
-class CliStrayPositionalTest < Minitest::Test
+class CliArgumentRejectionTest < Minitest::Test
   # A stray between flags still reaches the guard: OptionParser parses
   # in permutation mode, collecting every non-option token into the
   # leftover positionals regardless of position.

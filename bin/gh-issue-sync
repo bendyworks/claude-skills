@@ -398,14 +398,13 @@ module GhIssueSync
   # Takes every leftover positional, not just the first: a stray token
   # means part of the typed command was not understood, and silently
   # dropping it would let a destructive run do half of what was typed.
-  # Strays are inspect-quoted because one can contain spaces.
+  # Strays are inspect-quoted because a mis-quoted shell line can
+  # leave one containing spaces; a bare token would read as two.
   def parse_issue_number!(positionals)
     number, *extras = positionals
     raise Error, 'missing issue number' unless number
     raise Error, "issue number must be digits, got #{number.inspect}" unless number.match?(/\A\d+\z/)
-    unless extras.empty?
-      raise Error, "unexpected extra arguments after the issue number: #{extras.map(&:inspect).join(', ')}"
-    end
+    raise Error, "unexpected extra arguments: #{extras.map(&:inspect).join(', ')}" unless extras.empty?
 
     number
   end
@@ -579,7 +578,7 @@ module GhIssueSync
         o.on('--delete', "remove the slug's section instead of upserting") { options[:delete] = true }
         o.on('--repo NAME', VALUE_NOT_FLAG, 'owner/name pass-through to gh') { |v| options[:repo] = v }
       end
-      number = issue_number(rest)
+      number = GhIssueSync.parse_issue_number!(rest)
       raise Error, 'section requires --slug <key>' unless options[:slug]
       raise Error, 'section requires exactly one of --file or --delete' unless [options[:file], options[:delete]].compact.one?
 
@@ -638,7 +637,7 @@ module GhIssueSync
         o.on('--heading SLUG', VALUE_NOT_FLAG, 'visible heading suffix for multi-plan issues') { |v| options[:heading] = v }
         o.on('--repo NAME', VALUE_NOT_FLAG, 'owner/name pass-through to gh') { |v| options[:repo] = v }
       end
-      number = issue_number(rest)
+      number = GhIssueSync.parse_issue_number!(rest)
       plan_path = options[:plan]
       raise Error, "#{subcommand} requires --plan <plan.md>" unless plan_path
       raise Error, "plan file not found: #{plan_path}" unless File.exist?(plan_path)
@@ -669,10 +668,6 @@ module GhIssueSync
       parser.permute(argv)
     rescue OptionParser::ParseError => e
       raise Error, e.message
-    end
-
-    def issue_number(rest)
-      GhIssueSync.parse_issue_number!(rest)
     end
 
     def fetch_body(number, repo)
