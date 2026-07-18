@@ -395,6 +395,21 @@ module GhIssueSync
           "new body would be #{body.bytesize} bytes; GitHub's issue-body limit is #{MAX_BODY_BYTES} bytes (256 KiB)"
   end
 
+  # Takes every leftover positional, not just the first: a stray token
+  # means part of the typed command was not understood, and silently
+  # dropping it would let a destructive run do half of what was typed.
+  # Strays are inspect-quoted because one can contain spaces.
+  def parse_issue_number!(positionals)
+    number, *extras = positionals
+    raise Error, 'missing issue number' unless number
+    raise Error, "issue number must be digits, got #{number.inspect}" unless number.match?(/\A\d+\z/)
+    unless extras.empty?
+      raise Error, "unexpected extra arguments after the issue number: #{extras.map(&:inspect).join(', ')}"
+    end
+
+    number
+  end
+
   # Anchored to whole lines: markers are always rendered as full lines,
   # and an item text merely MENTIONING a marker string must not end the
   # match mid-line.
@@ -647,11 +662,7 @@ module GhIssueSync
     end
 
     def issue_number(rest)
-      number = rest.first
-      raise Error, 'missing issue number' unless number
-      raise Error, "issue number must be digits, got #{number.inspect}" unless number.match?(/\A\d+\z/)
-
-      number
+      GhIssueSync.parse_issue_number!(rest)
     end
 
     def fetch_body(number, repo)

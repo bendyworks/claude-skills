@@ -770,3 +770,48 @@ class GuardsTest < Minitest::Test
     GhIssueSync.check_length!('a' * 262_144)
   end
 end
+
+class IssueNumberGuardTest < Minitest::Test
+  def test_returns_the_sole_issue_number
+    assert_equal '42', GhIssueSync.parse_issue_number!(['42'])
+  end
+
+  def test_rejects_a_missing_issue_number
+    error = assert_raises(GhIssueSync::Error) { GhIssueSync.parse_issue_number!([]) }
+    assert_match(/missing issue number/, error.message)
+  end
+
+  def test_rejects_non_digit_issue_numbers
+    error = assert_raises(GhIssueSync::Error) { GhIssueSync.parse_issue_number!(['forty']) }
+    assert_match(/digits/, error.message)
+  end
+
+  # Strays are inspect-quoted because a mis-quoted shell line can leave
+  # a stray containing spaces; the bare token would read as two.
+  def test_rejects_stray_positionals_naming_each_one
+    error = assert_raises(GhIssueSync::Error) { GhIssueSync.parse_issue_number!(['42', '43', 'sync later']) }
+    assert_match(/"43"/, error.message)
+    assert_match(/"sync later"/, error.message)
+  end
+end
+
+class CliStrayPositionalTest < Minitest::Test
+  # A stray between flags still reaches the guard: OptionParser parses
+  # in permutation mode, collecting every non-option token into the
+  # leftover positionals regardless of position.
+  #
+  # The checklist subcommand with a nonexistent plan file keeps this
+  # test off the network in both directions: the stray-argument guard
+  # fires before any gh call, and if the guard ever regressed, the
+  # next check (plan-file existence) still raises locally.
+  def test_run_aborts_naming_a_stray_positional_even_between_flags
+    error = nil
+    capture_io do
+      error = assert_raises(SystemExit) do
+        GhIssueSync::CLI.run(['checklist', '42', '--plan', '/nonexistent-plan.md', '43'])
+      end
+    end
+    assert_match(/unexpected extra argument/, error.message)
+    assert_match(/"43"/, error.message)
+  end
+end
