@@ -21,7 +21,7 @@ require 'optparse'
 module Linear
   Error = Class.new(StandardError)
 
-  LINEAR_API = URI('https://api.linear.app/graphql')
+  API_URI = URI('https://api.linear.app/graphql')
 
   class Client
     def initialize
@@ -30,14 +30,14 @@ module Linear
     end
 
     def query(graphql, variables = {})
-      req = Net::HTTP::Post.new(LINEAR_API)
+      req = Net::HTTP::Post.new(API_URI)
       req['Content-Type'] = 'application/json'
       req['Authorization'] = @token
       req.body = JSON.generate(query: graphql, variables: variables)
 
       res =
         begin
-          Net::HTTP.start(LINEAR_API.hostname, LINEAR_API.port, use_ssl: true) do |http|
+          Net::HTTP.start(API_URI.hostname, API_URI.port, use_ssl: true) do |http|
             http.request(req)
           end
         rescue SocketError, Timeout::Error, OpenSSL::SSL::SSLError, Errno::ECONNREFUSED => e
@@ -54,12 +54,7 @@ module Linear
     end
 
     def resolve_issue(identifier, fields: 'id')
-      team_key, number_str = identifier.split('-', 2)
-      if team_key.nil? || number_str.nil?
-        raise Error, "linear: identifier must look like ABC-123, got #{identifier.inspect}"
-      end
-      team_key = team_key.upcase
-      number = Integer(number_str) rescue raise(Error, "linear: identifier must look like ABC-123, got #{identifier.inspect}")
+      team_key, number = Linear.parse_identifier!(identifier)
 
       res = query(<<~GQL, { teamKey: team_key, number: number })
         query($teamKey: String!, $number: Float!) {
@@ -91,7 +86,7 @@ module Linear
 
     # Resolves an assignee identifier to a Linear user id. Accepts the literal
     # "me" (the token's own user via viewer), an exact email, or a
-    # case-insensitive name substring. Aborts on no match or an ambiguous name.
+    # case-insensitive name substring. Raises on no match or an ambiguous name.
     def resolve_user_id(value)
       if value == 'me'
         res = query('query { viewer { id name email } }')
@@ -125,6 +120,20 @@ module Linear
   STARTED_STATE_TYPE = 'started'
 
   module_function
+
+  def parse_identifier!(identifier)
+    team_key, number_str = identifier.split('-', 2)
+    if team_key.nil? || number_str.nil?
+      raise Error, "linear: identifier must look like ABC-123, got #{identifier.inspect}"
+    end
+    number =
+      begin
+        Integer(number_str)
+      rescue ArgumentError
+        raise Error, "linear: identifier must look like ABC-123, got #{identifier.inspect}"
+      end
+    [team_key.upcase, number]
+  end
 
   def pop_flag!(args, name)
     if (idx = args.index(name))
@@ -211,9 +220,7 @@ module Linear
     fields << ISSUE_COMMENT_FIELDS if full
 
     client = Client.new
-    team_key, number_str = identifier.split('-', 2)
-    team_key = team_key&.upcase
-    number = Integer(number_str) rescue raise(Error, "linear: identifier must look like ABC-123, got #{identifier.inspect}")
+    team_key, number = parse_identifier!(identifier)
 
     res = client.query(<<~GQL, { teamKey: team_key, number: number })
       query($teamKey: String!, $number: Float!) {
@@ -239,9 +246,7 @@ module Linear
     raise Error, 'Usage: linear comments ABC-NNN [--json]' unless identifier
 
     client = Client.new
-    team_key, number_str = identifier.split('-', 2)
-    team_key = team_key&.upcase
-    number = Integer(number_str) rescue raise(Error, "linear: identifier must look like ABC-123, got #{identifier.inspect}")
+    team_key, number = parse_identifier!(identifier)
 
     res = client.query(<<~GQL, { teamKey: team_key, number: number })
       query($teamKey: String!, $number: Float!) {
@@ -745,8 +750,7 @@ module Linear
     end
   end
 
-  def usage
-    puts <<~TXT
+  USAGE = <<~TXT
       linear -- semantic CLI for Linear (uses LINEAR_API_TOKEN)
 
       Read:
@@ -814,8 +818,7 @@ module Linear
 
         linear project-list --team KEY [--json]
             List a team's projects with their ids and state.
-    TXT
-  end
+  TXT
 
   def cmd_list(args)
     json_mode = pop_flag!(args, '--json')
@@ -878,12 +881,14 @@ module Linear
     end
   end
 
-  module CLI
-    module_function
+  class CLI
+    def self.run(argv)
+      new.run(argv)
+    end
 
     def run(argv)
-      cmd = argv.shift
-      case cmd
+      command = argv.shift
+      case command
       when 'get'      then Linear.cmd_get(argv)
       when 'comments' then Linear.cmd_comments(argv)
       when 'search'   then Linear.cmd_search(argv)
@@ -896,10 +901,10 @@ module Linear
       when 'project-create' then Linear.cmd_project_create(argv)
       when 'project-update' then Linear.cmd_project_update(argv)
       when 'project-list'   then Linear.cmd_project_list(argv)
-      when nil, 'help', '--help', '-h' then Linear.usage
+      when nil, 'help', '--help', '-h' then puts USAGE
       else
-        warn "linear: unknown subcommand #{cmd.inspect}"
-        Linear.usage
+        warn "linear: unknown subcommand #{command.inspect}"
+        puts USAGE
         exit 1
       end
     rescue Error => e
