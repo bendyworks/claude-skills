@@ -108,23 +108,11 @@ class DispatchTest < LinearTestCase
   end
 end
 
-# Pins of the current silent drops: the parser accepts the offending
-# argv (usually by ignoring the bad token; the one leading-flag case
-# below takes it as the identifier) and the command sails on to the
-# token-missing sentinel. The hardening flips each of these to expect
-# a rejection message instead.
+# Pins of the remaining silent drops: the parser ignores the offending
+# token and the command sails on to the token-missing sentinel. Every
+# case left here is a stray positional, which the arity guard flips to
+# a rejection message.
 class SilentDropPinsTest < LinearTestCase
-  def test_get_silently_drops_unknown_flag
-    assert_equal TOKEN_MISSING, abort_message(%w[get ABC-1 --fulll])
-  end
-
-  def test_get_takes_leading_unknown_flag_as_the_identifier
-    # Not a drop: --unknown is consumed as the identifier (args.first)
-    # and ABC-1 becomes the stray. The sentinel still fires because
-    # Client.new precedes the identifier-format check.
-    assert_equal TOKEN_MISSING, abort_message(%w[get --unknown ABC-1])
-  end
-
   def test_get_silently_ignores_stray_positional
     assert_equal TOKEN_MISSING, abort_message(%w[get ABC-1 --full extra])
   end
@@ -135,12 +123,6 @@ class SilentDropPinsTest < LinearTestCase
 
   def test_search_silently_ignores_stray_positional
     assert_equal TOKEN_MISSING, abort_message(%w[search term --team ABC extra])
-  end
-
-  def test_search_silently_ignores_leftover_repeated_option
-    # pop_option! consumes only the first --limit pair; the second
-    # lingers in the positionals unread.
-    assert_equal TOKEN_MISSING, abort_message(%w[search term --limit 5 --limit abc])
   end
 
   def test_list_silently_ignores_stray_positional
@@ -177,6 +159,56 @@ class SilentDropPinsTest < LinearTestCase
   end
 end
 
+# Options the pop-style helpers used to drop on the floor now reach
+# OptionParser, which rejects them by name. The messages are
+# optparse's own, prefixed with the CLI name the way every other
+# linear error is.
+class ParseRejectionsTest < LinearTestCase
+  def test_get_rejects_unknown_flag_and_suggests_the_near_miss
+    # optparse appends its own did-you-mean line for a close match,
+    # which is exactly the affordance a typo'd flag wants.
+    assert_equal "linear: invalid option: --fulll\nDid you mean?  full",
+                 abort_message(%w[get ABC-1 --fulll])
+  end
+
+  def test_get_rejects_leading_unknown_flag_instead_of_taking_it_as_the_identifier
+    assert_equal 'linear: invalid option: --unknown', abort_message(%w[get --unknown ABC-1])
+  end
+
+  def test_comments_rejects_unknown_flag
+    assert_equal 'linear: invalid option: --bogus', abort_message(%w[comments ABC-1 --bogus])
+  end
+
+  def test_search_rejects_unknown_flag
+    assert_equal 'linear: invalid option: --bogus', abort_message(%w[search term --bogus])
+  end
+
+  def test_list_rejects_unknown_flag
+    assert_equal 'linear: invalid option: --bogus', abort_message(%w[list --team ABC --bogus])
+  end
+
+  def test_comment_delete_rejects_unknown_flag
+    assert_equal 'linear: invalid option: --bogus', abort_message(%w[comment-delete some-id --bogus])
+  end
+
+  def test_project_list_rejects_unknown_flag
+    assert_equal 'linear: invalid option: --bogus', abort_message(%w[project-list --team ABC --bogus])
+  end
+
+  def test_search_repeated_limit_takes_the_last_value
+    # Both --limit pairs now reach the parser, where last-one-wins
+    # feeds "abc" to parse_limit. Rejecting the repeat outright is the
+    # set_once guard's job, which flips this pin again.
+    assert_equal 'linear: --limit must be an integer, got "abc"',
+                 abort_message(%w[search term --limit 5 --limit abc])
+  end
+
+  def test_double_dash_terminator_protects_a_dash_leading_search_term
+    # The escape hatch for values the leading-dash guard would reject.
+    assert_equal TOKEN_MISSING, abort_message(['search', '--', '-not-a-flag'])
+  end
+end
+
 # Exact usage and validation messages that survive the hardening
 # unchanged.
 class UsageErrorsTest < LinearTestCase
@@ -197,13 +229,19 @@ class UsageErrorsTest < LinearTestCase
   end
 
   def test_search_team_requires_value
-    assert_equal 'linear: --team requires a value', abort_message(%w[search term --team])
+    assert_equal 'linear: missing argument: --team', abort_message(%w[search term --team])
   end
 
   def test_search_team_rejects_flag_shaped_value
-    # --limit is the flag-shaped value here; --json cannot be, because
-    # cmd_search pops it before --team's value is read.
-    assert_equal 'linear: --team requires a value', abort_message(%w[search term --team --limit 5])
+    # Every flag is now a candidate: --team's value is read by the same
+    # parser pass that knows --json and --limit, so neither can be
+    # swallowed as a value.
+    assert_equal 'linear: invalid argument: --team --limit', abort_message(%w[search term --team --limit 5])
+    assert_equal 'linear: invalid argument: --team --json', abort_message(%w[search term --team --json])
+  end
+
+  def test_search_team_rejects_single_dash_value
+    assert_equal 'linear: invalid argument: --team -x', abort_message(%w[search term --team -x])
   end
 
   def test_search_limit_requires_integer
@@ -258,7 +296,8 @@ class UsageErrorsTest < LinearTestCase
   end
 
   def test_comment_rejects_unknown_flag
-    assert_equal 'linear: unknown option --badflag (comment takes a positional message, --body TEXT, or --body-file PATH)',
+    assert_equal 'linear: invalid option: --badflag ' \
+                 '(comment takes a positional message, --body TEXT, or --body-file PATH)',
                  abort_message(%w[comment ABC-1 --badflag])
   end
 
@@ -371,33 +410,8 @@ class PureHelpersTest < LinearTestCase
     assert_equal 'linear: invalid priority "nonsense"; use none|urgent|high|medium|low or 0-4', error.message
   end
 
-  def test_pop_flag_removes_first_occurrence_and_reports_presence
-    args = %w[a --json b]
-    assert Linear.pop_flag!(args, '--json')
-    assert_equal %w[a b], args
-    refute Linear.pop_flag!(args, '--json')
-  end
-
-  def test_pop_option_takes_following_token_as_value
-    args = %w[a --team ABC b]
-    assert_equal 'ABC', Linear.pop_option!(args, '--team')
-    assert_equal %w[a b], args
-  end
-
-  def test_pop_option_returns_nil_when_absent
-    assert_nil Linear.pop_option!(%w[a b], '--team')
-  end
-
-  def test_pop_option_rejects_missing_and_double_dash_values
-    error = assert_raises(Linear::Error) { Linear.pop_option!(%w[--team], '--team') }
-    assert_equal 'linear: --team requires a value', error.message
-    error = assert_raises(Linear::Error) { Linear.pop_option!(%w[--team --json], '--team') }
-    assert_equal 'linear: --team requires a value', error.message
-  end
-
-  def test_pop_option_currently_accepts_single_dash_values
-    # Only double-dash values are rejected today; pinned, the
-    # hardening rejects any leading dash.
-    assert_equal '-x', Linear.pop_option!(%w[--team -x], '--team')
+  def test_pop_helpers_are_retired
+    refute Linear.respond_to?(:pop_flag!), 'pop_flag! should be gone; every subcommand parses with OptionParser'
+    refute Linear.respond_to?(:pop_option!), 'pop_option! should be gone; every subcommand parses with OptionParser'
   end
 end

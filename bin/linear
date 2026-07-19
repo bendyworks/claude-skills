@@ -135,22 +135,28 @@ module Linear
     [team_key.upcase, number]
   end
 
-  def pop_flag!(args, name)
-    if (idx = args.index(name))
-      args.delete_at(idx)
-      true
-    else
-      false
-    end
-  end
+  # An option value must not begin with a dash: a mandatory-argument
+  # option would otherwise swallow a following flag as its value
+  # ('--team --json' parses as team "--json" with no json flag) and
+  # silently act on the misread command. Anchored end to end to state
+  # explicitly the whole-argument match optparse requires of
+  # acceptance patterns.
+  VALUE_NOT_FLAG = /\A[^-].*\z/m
 
-  def pop_option!(args, name)
-    if (idx = args.index(name))
-      args.delete_at(idx)
-      value = args.delete_at(idx)
-      raise Error, "linear: #{name} requires a value" if value.nil? || value.start_with?('--')
-      value
+  # Returns the leftover positionals. The hint rides on parse failures
+  # for subcommands whose accepted shape is not obvious from the flag
+  # list alone.
+  def parse_options(args, banner, hint: nil)
+    parser = OptionParser.new do |o|
+      o.banner = banner
+      yield o
     end
+    # permute, not parse: #parse stops at the first positional while
+    # POSIXLY_CORRECT is set, which would turn every flag typed after
+    # an identifier into an ignored positional on those machines.
+    parser.permute(args)
+  rescue OptionParser::ParseError => e
+    raise Error, "linear: #{e.message}#{hint ? " #{hint}" : ''}"
   end
 
   def parse_limit(value)
@@ -211,10 +217,15 @@ module Linear
   end
 
   def cmd_get(args)
-    json_mode = pop_flag!(args, '--json')
-    full = pop_flag!(args, '--full')
-    identifier = args.first
-    raise Error, 'Usage: linear get ABC-NNN [--full] [--json]' unless identifier
+    usage = 'Usage: linear get ABC-NNN [--full] [--json]'
+    json_mode = false
+    full = false
+    rest = parse_options(args, usage) do |o|
+      o.on('--full') { full = true }
+      o.on('--json') { json_mode = true }
+    end
+    identifier = rest.first
+    raise Error, usage unless identifier
 
     fields = ISSUE_CORE_FIELDS.dup
     fields << ISSUE_COMMENT_FIELDS if full
@@ -241,9 +252,13 @@ module Linear
   end
 
   def cmd_comments(args)
-    json_mode = pop_flag!(args, '--json')
-    identifier = args.first
-    raise Error, 'Usage: linear comments ABC-NNN [--json]' unless identifier
+    usage = 'Usage: linear comments ABC-NNN [--json]'
+    json_mode = false
+    rest = parse_options(args, usage) do |o|
+      o.on('--json') { json_mode = true }
+    end
+    identifier = rest.first
+    raise Error, usage unless identifier
 
     client = Client.new
     team_key, number = parse_identifier!(identifier)
@@ -272,12 +287,18 @@ module Linear
   end
 
   def cmd_search(args)
-    json_mode = pop_flag!(args, '--json')
-    team_key = pop_option!(args, '--team')
-    limit_str = pop_option!(args, '--limit')
+    usage = 'Usage: linear search "phrase" [--team KEY] [--limit N] [--json]'
+    json_mode = false
+    team_key = nil
+    limit_str = nil
+    rest = parse_options(args, usage) do |o|
+      o.on('--team KEY', VALUE_NOT_FLAG) { |v| team_key = v }
+      o.on('--limit N', VALUE_NOT_FLAG) { |v| limit_str = v }
+      o.on('--json') { json_mode = true }
+    end
     limit = limit_str ? parse_limit(limit_str) : 25
-    term = args.first
-    raise Error, 'Usage: linear search "phrase" [--team KEY] [--limit N] [--json]' if term.nil? || term.empty?
+    term = rest.first
+    raise Error, usage if term.nil? || term.empty?
 
     filter = {
       or: [
@@ -522,14 +543,20 @@ module Linear
   end
 
   def cmd_comment(args)
-    json_mode = pop_flag!(args, '--json')
-    body_file = pop_option!(args, '--body-file')
-    body_opt = pop_option!(args, '--body')
-    identifier = args.shift
-
-    if (unknown = args.find { |a| a.start_with?('--') })
-      raise Error, "linear: unknown option #{unknown} (comment takes a positional message, --body TEXT, or --body-file PATH)"
+    usage = 'Usage: linear comment ABC-NNN ("message" | --body TEXT | --body-file PATH)'
+    json_mode = false
+    body_file = nil
+    body_opt = nil
+    # The one subcommand that keeps its trailing positionals: they are
+    # the message. A dash-leading word in that message needs a '--'
+    # terminator, or --body/--body-file.
+    rest = parse_options(args, usage, hint: '(comment takes a positional message, ' \
+                                            '--body TEXT, or --body-file PATH)') do |o|
+      o.on('--body TEXT', VALUE_NOT_FLAG) { |v| body_opt = v }
+      o.on('--body-file PATH', VALUE_NOT_FLAG) { |v| body_file = v }
+      o.on('--json') { json_mode = true }
     end
+    identifier = rest.shift
 
     body =
       if body_file
@@ -538,11 +565,9 @@ module Linear
       elsif body_opt
         body_opt
       else
-        args.join(' ')
+        rest.join(' ')
       end
-    if identifier.nil? || body.strip.empty?
-      raise Error, 'Usage: linear comment ABC-NNN ("message" | --body TEXT | --body-file PATH)'
-    end
+    raise Error, usage if identifier.nil? || body.strip.empty?
 
     client = Client.new
     issue = client.resolve_issue(identifier)
@@ -567,11 +592,13 @@ module Linear
   end
 
   def cmd_comment_delete(args)
-    json_mode = pop_flag!(args, '--json')
-    comment_id = args.shift
-    if comment_id.nil? || comment_id.empty?
-      raise Error, 'Usage: linear comment-delete COMMENT_ID (see "linear comments ABC-NNN")'
+    usage = 'Usage: linear comment-delete COMMENT_ID (see "linear comments ABC-NNN")'
+    json_mode = false
+    rest = parse_options(args, usage) do |o|
+      o.on('--json') { json_mode = true }
     end
+    comment_id = rest.first
+    raise Error, usage if comment_id.nil? || comment_id.empty?
 
     client = Client.new
     res = client.query(<<~GQL, { id: comment_id })
@@ -725,11 +752,15 @@ module Linear
   end
 
   def cmd_project_list(args)
-    json_mode = pop_flag!(args, '--json')
-    team_key = pop_option!(args, '--team') || ENV['LINEAR_TEAM_KEY']
-    if team_key.nil? || team_key.empty?
-      raise Error, 'Usage: linear project-list --team KEY [--json] (or set LINEAR_TEAM_KEY)'
+    usage = 'Usage: linear project-list --team KEY [--json] (or set LINEAR_TEAM_KEY)'
+    json_mode = false
+    team_opt = nil
+    parse_options(args, usage) do |o|
+      o.on('--team KEY', VALUE_NOT_FLAG) { |v| team_opt = v }
+      o.on('--json') { json_mode = true }
     end
+    team_key = team_opt || ENV['LINEAR_TEAM_KEY']
+    raise Error, usage if team_key.nil? || team_key.empty?
     client = Client.new
     res = client.query(<<~GQL, { teamKey: team_key })
       query($teamKey: String!) {
@@ -821,17 +852,25 @@ module Linear
   TXT
 
   def cmd_list(args)
-    json_mode = pop_flag!(args, '--json')
-    all = pop_flag!(args, '--all')
-    team_key = pop_option!(args, '--team') || ENV['LINEAR_TEAM_KEY']
-    project_name = pop_option!(args, '--project')
-    since = pop_option!(args, '--since')
-    limit_str = pop_option!(args, '--limit')
-    limit = limit_str ? parse_limit(limit_str) : 100
-    if team_key.nil? || team_key.empty? || (project_name.nil? && since.nil?)
-      raise Error, 'Usage: linear list --team KEY (--project NAME | --since YYYY-MM-DD) [--all] [--limit N] [--json] ' \
-                   '(--team may be omitted when LINEAR_TEAM_KEY is set)'
+    usage = 'Usage: linear list --team KEY (--project NAME | --since YYYY-MM-DD) [--all] [--limit N] [--json] ' \
+            '(--team may be omitted when LINEAR_TEAM_KEY is set)'
+    json_mode = false
+    all = false
+    team_opt = nil
+    project_name = nil
+    since = nil
+    limit_str = nil
+    parse_options(args, usage) do |o|
+      o.on('--team KEY', VALUE_NOT_FLAG) { |v| team_opt = v }
+      o.on('--project NAME', VALUE_NOT_FLAG) { |v| project_name = v }
+      o.on('--since YYYY-MM-DD', VALUE_NOT_FLAG) { |v| since = v }
+      o.on('--limit N', VALUE_NOT_FLAG) { |v| limit_str = v }
+      o.on('--all') { all = true }
+      o.on('--json') { json_mode = true }
     end
+    team_key = team_opt || ENV['LINEAR_TEAM_KEY']
+    limit = limit_str ? parse_limit(limit_str) : 100
+    raise Error, usage if team_key.nil? || team_key.empty? || (project_name.nil? && since.nil?)
     if since && since !~ /\A\d{4}-\d{2}-\d{2}\z/
       raise Error, "linear: --since must be YYYY-MM-DD, got #{since.inspect}"
     end
