@@ -35,7 +35,10 @@ jobs:
         with:
           ruby-version: '3.4'
       - name: Run bin helper tests
-        run: ruby test/gh_issue_sync_test.rb
+        run: |
+          for test_file in test/*_test.rb; do
+            ruby "$test_file" || exit 1
+          done
 
   validate-plugin:
     runs-on: ubuntu-latest
