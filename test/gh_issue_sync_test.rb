@@ -733,6 +733,17 @@ class ContentSectionSlugGuardTest < Minitest::Test
     end
   end
 
+  # A leading-dash slug would be impossible to type back as an option
+  # value (option values may not begin with a dash), leaving its
+  # section untargetable by 'section --delete'. Neither slug origin
+  # may mint one.
+  def test_rejects_leading_dash_slugs_from_both_origins
+    error = assert_raises(GhIssueSync::Error) { GhIssueSync.assert_valid_section_slug!('-foo') }
+    assert_match(/begin with/, error.message)
+    error = assert_raises(GhIssueSync::Error) { GhIssueSync.assert_valid_slug!('-foo') }
+    assert_match(/begin with/, error.message)
+  end
+
   def test_accepts_slugs_within_the_tight_charset
     GhIssueSync.assert_valid_section_slug!('user-story')
     GhIssueSync.assert_valid_section_slug!('18-keyed.Body_section')
@@ -768,5 +779,97 @@ class GuardsTest < Minitest::Test
     error = assert_raises(GhIssueSync::Error) { GhIssueSync.check_length!('a' * 262_145) }
     assert_match(/bytes/, error.message)
     GhIssueSync.check_length!('a' * 262_144)
+  end
+
+  def test_issue_number_guard_returns_the_sole_number
+    assert_equal '42', GhIssueSync.parse_issue_number!(['42'])
+  end
+
+  def test_issue_number_guard_rejects_a_missing_number
+    error = assert_raises(GhIssueSync::Error) { GhIssueSync.parse_issue_number!([]) }
+    assert_match(/missing issue number/, error.message)
+  end
+
+  def test_issue_number_guard_rejects_non_digit_numbers
+    error = assert_raises(GhIssueSync::Error) { GhIssueSync.parse_issue_number!(['forty']) }
+    assert_match(/digits/, error.message)
+  end
+
+  def test_issue_number_guard_rejects_strays_naming_each_one
+    error = assert_raises(GhIssueSync::Error) { GhIssueSync.parse_issue_number!(['42', '43', 'sync later']) }
+    assert_match(/"43"/, error.message)
+    assert_match(/"sync later"/, error.message)
+  end
+end
+
+class CliArgumentRejectionTest < Minitest::Test
+  # A stray between flags still reaches the guard: OptionParser parses
+  # in permutation mode, collecting every non-option token into the
+  # leftover positionals regardless of position.
+  #
+  # The checklist subcommand with a nonexistent plan file keeps this
+  # test off the network in both directions: the stray-argument guard
+  # fires before any gh call, and if the guard ever regressed, the
+  # next check (plan-file existence) still raises locally.
+  def test_run_aborts_naming_a_stray_positional_even_between_flags
+    error = nil
+    capture_io do
+      error = assert_raises(SystemExit) do
+        GhIssueSync::CLI.run(['checklist', '42', '--plan', '/nonexistent-plan.md', '43'])
+      end
+    end
+    assert_match(/unexpected extra argument/, error.message)
+    assert_match(/"43"/, error.message)
+  end
+
+  # OptionParser#parse only permutes while POSIXLY_CORRECT is unset;
+  # the CLI pins permutation explicitly so a strict-POSIX environment
+  # cannot turn valid flags into "unexpected extra arguments".
+  def test_flags_parse_as_flags_even_under_posixly_correct
+    prior = ENV['POSIXLY_CORRECT']
+    ENV['POSIXLY_CORRECT'] = '1'
+    error = nil
+    capture_io do
+      error = assert_raises(SystemExit) do
+        GhIssueSync::CLI.run(['checklist', '42', '--plan', '/nonexistent-plan.md'])
+      end
+    end
+    refute_match(/unexpected extra argument/, error.message)
+    assert_match(/plan file not found/, error.message)
+  ensure
+    prior.nil? ? ENV.delete('POSIXLY_CORRECT') : ENV['POSIXLY_CORRECT'] = prior
+  end
+
+  # A mandatory-argument option must not swallow a following flag as
+  # its value: 'section 42 --file a.md --slug --delete' would
+  # otherwise parse as slug "--delete" with no delete flag -- and
+  # since the slug charset accepts that string, a junk section would
+  # be silently upserted instead of the intended delete. The
+  # nonexistent --file path keeps the pre-guard failure local, so the
+  # test never reaches the network.
+  def test_run_aborts_when_an_option_swallows_a_following_flag_as_its_value
+    error = nil
+    capture_io do
+      error = assert_raises(SystemExit) do
+        GhIssueSync::CLI.run(['section', '42', '--file', '/nonexistent.md', '--slug', '--delete'])
+      end
+    end
+    assert_match(/--slug/, error.message)
+    assert_match(/--delete/, error.message)
+  end
+
+  # Last-wins would silently discard the first value -- the same
+  # dropped-input shape as a stray positional, and destructive when
+  # the surviving value aims a delete at the wrong section. The
+  # nonexistent plan paths keep the pre-guard failure local, so the
+  # test never reaches the network.
+  def test_run_aborts_on_a_repeated_value_option_instead_of_last_wins
+    error = nil
+    capture_io do
+      error = assert_raises(SystemExit) do
+        GhIssueSync::CLI.run(['checklist', '42', '--plan', '/nonexistent-plan.md', '--plan', '/other-nonexistent.md'])
+      end
+    end
+    assert_match(/duplicate --plan/, error.message)
   end
 end

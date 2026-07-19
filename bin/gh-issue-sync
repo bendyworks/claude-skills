@@ -341,13 +341,18 @@ module GhIssueSync
   end
 
   # The one charset both slug origins (typed --slug, plan basename)
-  # are held to; see assert_valid_slug! for why it is this tight.
-  SLUG_CHARSET = /\A[A-Za-z0-9._-]+\z/
+  # are held to; see assert_valid_slug! for why it is this tight. No
+  # leading dash: option values may not begin with one, so a
+  # leading-dash slug could be minted (via a plan basename) but never
+  # typed back as '--slug <key>', leaving its section untargetable by
+  # 'section --delete'.
+  SLUG_CHARSET = /\A[A-Za-z0-9._][A-Za-z0-9._-]*\z/
 
   def assert_valid_section_slug!(slug)
     return slug if slug.match?(SLUG_CHARSET)
 
-    raise Error, "--slug must contain only letters, digits, dots, underscores, and dashes, got #{slug.inspect}"
+    raise Error, '--slug must contain only letters, digits, dots, underscores, and dashes ' \
+                 "and must not begin with a dash, got #{slug.inspect}"
   end
 
   # Trims leading blank lines and trailing whitespace, but never the
@@ -395,6 +400,20 @@ module GhIssueSync
           "new body would be #{body.bytesize} bytes; GitHub's issue-body limit is #{MAX_BODY_BYTES} bytes (256 KiB)"
   end
 
+  # Takes every leftover positional, not just the first: a stray token
+  # means part of the typed command was not understood, and silently
+  # dropping it would let a destructive run do half of what was typed.
+  # Strays are inspect-quoted because a mis-quoted shell line can
+  # leave one containing spaces; a bare token would read as two.
+  def parse_issue_number!(positionals)
+    number, *extras = positionals
+    raise Error, 'missing issue number' unless number
+    raise Error, "issue number must be digits, got #{number.inspect}" unless number.match?(/\A\d+\z/)
+    raise Error, "unexpected extra arguments: #{extras.map(&:inspect).join(', ')}" unless extras.empty?
+
+    number
+  end
+
   # Anchored to whole lines: markers are always rendered as full lines,
   # and an item text merely MENTIONING a marker string must not end the
   # match mid-line.
@@ -409,7 +428,8 @@ module GhIssueSync
   def assert_valid_slug!(slug)
     return slug if slug.match?(SLUG_CHARSET)
 
-    raise Error, "slug must contain only letters, digits, dots, underscores, and dashes, " \
+    raise Error, 'slug must contain only letters, digits, dots, underscores, and dashes, ' \
+                 'and must not begin with a dash, ' \
                  "got #{slug.inspect} (rename the plan file; if an older sync already wrote a " \
                  'section under this name, delete that section from the issue body by hand -- ' \
                  "'section --delete' cannot target a slug outside the charset, and a renamed " \
@@ -525,6 +545,14 @@ module GhIssueSync
   TXT
 
   class CLI
+    # An option value must not begin with a dash: a mandatory-argument
+    # option would otherwise swallow a following flag as its value
+    # ('--slug --delete' parses as slug "--delete" with no delete
+    # flag) and silently act on the misread command. Anchored end to
+    # end to state explicitly the whole-argument match optparse
+    # requires of acceptance patterns.
+    VALUE_NOT_FLAG = /\A[^-].*\z/m
+
     def self.run(argv)
       new.run(argv)
     end
@@ -552,12 +580,12 @@ module GhIssueSync
     def section(argv)
       options = {}
       rest = parse_options(argv, 'section NNN (--file <md> | --delete) --slug <key> [--repo owner/name]') do |o|
-        o.on('--file PATH', 'markdown file whose content fills the section') { |v| options[:file] = v }
-        o.on('--slug KEY', 'key naming the marker-delimited section') { |v| options[:slug] = v }
+        o.on('--file PATH', VALUE_NOT_FLAG, 'markdown file whose content fills the section') { |v| set_once(options, :file, '--file', v) }
+        o.on('--slug KEY', VALUE_NOT_FLAG, 'key naming the marker-delimited section') { |v| set_once(options, :slug, '--slug', v) }
         o.on('--delete', "remove the slug's section instead of upserting") { options[:delete] = true }
-        o.on('--repo NAME', 'owner/name pass-through to gh') { |v| options[:repo] = v }
+        o.on('--repo NAME', VALUE_NOT_FLAG, 'owner/name pass-through to gh') { |v| set_once(options, :repo, '--repo', v) }
       end
-      number = issue_number(rest)
+      number = GhIssueSync.parse_issue_number!(rest)
       raise Error, 'section requires --slug <key>' unless options[:slug]
       raise Error, 'section requires exactly one of --file or --delete' unless [options[:file], options[:delete]].compact.one?
 
@@ -612,11 +640,11 @@ module GhIssueSync
       subcommand = reconcile ? 'reconcile' : 'checklist'
       options = {}
       rest = parse_options(argv, "#{subcommand} NNN --plan <plan.md> [--heading <slug>] [--repo owner/name]") do |o|
-        o.on('--plan PATH', 'plan file whose To-dos drive the sync') { |v| options[:plan] = v }
-        o.on('--heading SLUG', 'visible heading suffix for multi-plan issues') { |v| options[:heading] = v }
-        o.on('--repo NAME', 'owner/name pass-through to gh') { |v| options[:repo] = v }
+        o.on('--plan PATH', VALUE_NOT_FLAG, 'plan file whose To-dos drive the sync') { |v| set_once(options, :plan, '--plan', v) }
+        o.on('--heading SLUG', VALUE_NOT_FLAG, 'visible heading suffix for multi-plan issues') { |v| set_once(options, :heading, '--heading', v) }
+        o.on('--repo NAME', VALUE_NOT_FLAG, 'owner/name pass-through to gh') { |v| set_once(options, :repo, '--repo', v) }
       end
-      number = issue_number(rest)
+      number = GhIssueSync.parse_issue_number!(rest)
       plan_path = options[:plan]
       raise Error, "#{subcommand} requires --plan <plan.md>" unless plan_path
       raise Error, "plan file not found: #{plan_path}" unless File.exist?(plan_path)
@@ -641,17 +669,22 @@ module GhIssueSync
         o.banner = "Usage: gh-issue-sync #{banner}"
         yield o
       end
-      parser.parse(argv)
+      # permute, not parse: #parse only permutes while POSIXLY_CORRECT
+      # is unset, and order mode would hand valid flags to the
+      # stray-positional guard as "unexpected extra arguments".
+      parser.permute(argv)
     rescue OptionParser::ParseError => e
       raise Error, e.message
     end
 
-    def issue_number(rest)
-      number = rest.first
-      raise Error, 'missing issue number' unless number
-      raise Error, "issue number must be digits, got #{number.inspect}" unless number.match?(/\A\d+\z/)
+    # Last-wins on a repeated option would silently discard the first
+    # value -- the same dropped-input shape as a stray positional, and
+    # destructive when the surviving value aims a delete at the wrong
+    # section.
+    def set_once(options, key, flag, value)
+      raise Error, "duplicate #{flag}" if options.key?(key)
 
-      number
+      options[key] = value
     end
 
     def fetch_body(number, repo)

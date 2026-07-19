@@ -129,6 +129,13 @@ outside world and rescues to `abort`, dispatched behind
 `load` the bin file without executing the CLI, and CI runs it with a
 bare `ruby test/<name>_test.rb`.
 
+When adding a mode to an existing CLI, place it by this convention: a
+new mode of one resource rides a flag on that resource's subcommand
+(like `gh-issue-sync section --delete`), while an operation with its
+own gate semantics gets its own subcommand even when it shares an
+implementation (like `checklist` vs `reconcile`, whose difference is
+the refuse-unless-finalized gate).
+
 ## Proposing without building
 
 Open an issue with the "New skill proposal" template. A rough sketch of
