@@ -7,452 +7,368 @@
 # Pretty-prints by default; pass --json for the raw GraphQL response.
 #
 # Run `linear` with no arguments for the subcommand list.
+#
+# Structured as a Linear module whose errors raise Linear::Error,
+# rescued once to abort in Linear::CLI.run, dispatched behind the
+# $PROGRAM_NAME guard so test/linear_test.rb can load this file
+# without executing the CLI.
 
 require 'net/http'
 require 'json'
 require 'uri'
 require 'optparse'
 
-LINEAR_API = URI('https://api.linear.app/graphql')
+module Linear
+  Error = Class.new(StandardError)
 
-class LinearClient
-  def initialize
-    @token = ENV['LINEAR_API_TOKEN']
-    abort 'linear: LINEAR_API_TOKEN env var not set' if @token.nil? || @token.empty?
-  end
+  LINEAR_API = URI('https://api.linear.app/graphql')
 
-  def query(graphql, variables = {})
-    req = Net::HTTP::Post.new(LINEAR_API)
-    req['Content-Type'] = 'application/json'
-    req['Authorization'] = @token
-    req.body = JSON.generate(query: graphql, variables: variables)
+  class Client
+    def initialize
+      @token = ENV['LINEAR_API_TOKEN']
+      raise Error, 'linear: LINEAR_API_TOKEN env var not set' if @token.nil? || @token.empty?
+    end
 
-    res =
-      begin
-        Net::HTTP.start(LINEAR_API.hostname, LINEAR_API.port, use_ssl: true) do |http|
-          http.request(req)
+    def query(graphql, variables = {})
+      req = Net::HTTP::Post.new(LINEAR_API)
+      req['Content-Type'] = 'application/json'
+      req['Authorization'] = @token
+      req.body = JSON.generate(query: graphql, variables: variables)
+
+      res =
+        begin
+          Net::HTTP.start(LINEAR_API.hostname, LINEAR_API.port, use_ssl: true) do |http|
+            http.request(req)
+          end
+        rescue SocketError, Timeout::Error, OpenSSL::SSL::SSLError, Errno::ECONNREFUSED => e
+          raise Error, "linear: network error: #{e.message}"
         end
-      rescue SocketError, Timeout::Error, OpenSSL::SSL::SSLError, Errno::ECONNREFUSED => e
-        abort "linear: network error: #{e.message}"
+
+      raise Error, "linear: HTTP #{res.code}: #{res.body}" unless res.code == '200'
+
+      payload = JSON.parse(res.body)
+      if payload['errors']
+        raise Error, "linear: GraphQL error:\n#{JSON.pretty_generate(payload['errors'])}"
+      end
+      payload
+    end
+
+    def resolve_issue(identifier, fields: 'id')
+      team_key, number_str = identifier.split('-', 2)
+      if team_key.nil? || number_str.nil?
+        raise Error, "linear: identifier must look like ABC-123, got #{identifier.inspect}"
+      end
+      team_key = team_key.upcase
+      number = Integer(number_str) rescue raise(Error, "linear: identifier must look like ABC-123, got #{identifier.inspect}")
+
+      res = query(<<~GQL, { teamKey: team_key, number: number })
+        query($teamKey: String!, $number: Float!) {
+          issues(filter: { number: { eq: $number }, team: { key: { eq: $teamKey } } }) {
+            nodes { #{fields} }
+          }
+        }
+      GQL
+      issue = res.dig('data', 'issues', 'nodes', 0)
+      raise Error, "linear: issue #{identifier} not found" unless issue
+      issue
+    end
+
+    def resolve_project_id(team_id, project_name)
+      res = query(<<~GQL, { teamId: team_id })
+        query($teamId: String!) {
+          team(id: $teamId) { projects(first: 250) { nodes { id name } } }
+        }
+      GQL
+      projects = res.dig('data', 'team', 'projects', 'nodes') || []
+      project = projects.find { |p| p['name'] == project_name }
+      project ||= projects.find { |p| p['name'].downcase.include?(project_name.downcase) }
+      unless project
+        available = projects.map { |p| p['name'] }.sort.join("\n  ")
+        raise Error, "linear: project #{project_name.inspect} not found.\nAvailable projects:\n  #{available}"
+      end
+      project['id']
+    end
+
+    # Resolves an assignee identifier to a Linear user id. Accepts the literal
+    # "me" (the token's own user via viewer), an exact email, or a
+    # case-insensitive name substring. Aborts on no match or an ambiguous name.
+    def resolve_user_id(value)
+      if value == 'me'
+        res = query('query { viewer { id name email } }')
+        user = res.dig('data', 'viewer')
+        raise Error, 'linear: could not resolve current user (viewer)' unless user
+        return user['id']
       end
 
-    abort "linear: HTTP #{res.code}: #{res.body}" unless res.code == '200'
+      res = query(<<~GQL, { value: value })
+        query($value: String!) {
+          users(filter: { or: [{ email: { eq: $value } }, { name: { containsIgnoreCase: $value } }] }) {
+            nodes { id name email }
+          }
+        }
+      GQL
+      users = res.dig('data', 'users', 'nodes') || []
+      raise Error, "linear: no user matches #{value.inspect}" if users.empty?
+      if users.size > 1
+        exact = users.find { |u| u['email'] == value }
+        return exact['id'] if exact
 
-    payload = JSON.parse(res.body)
-    if payload['errors']
-      abort "linear: GraphQL error:\n#{JSON.pretty_generate(payload['errors'])}"
+        listing = users.map { |u| "#{u['name']} <#{u['email']}>" }.join("\n  ")
+        raise Error, "linear: #{value.inspect} matches multiple users:\n  #{listing}"
+      end
+      users.first['id']
     end
-    payload
   end
 
-  def resolve_issue(identifier, fields: 'id')
-    team_key, number_str = identifier.split('-', 2)
-    abort "linear: identifier must look like ABC-123, got #{identifier.inspect}" if team_key.nil? || number_str.nil?
-    team_key = team_key.upcase
-    number = Integer(number_str) rescue abort("linear: identifier must look like ABC-123, got #{identifier.inspect}")
+  # A state whose Linear type is "started" (e.g. In Progress) means someone is
+  # actively working the issue, so it must have an assignee.
+  STARTED_STATE_TYPE = 'started'
 
-    res = query(<<~GQL, { teamKey: team_key, number: number })
+  module_function
+
+  def pop_flag!(args, name)
+    if (idx = args.index(name))
+      args.delete_at(idx)
+      true
+    else
+      false
+    end
+  end
+
+  def pop_option!(args, name)
+    if (idx = args.index(name))
+      args.delete_at(idx)
+      value = args.delete_at(idx)
+      raise Error, "linear: #{name} requires a value" if value.nil? || value.start_with?('--')
+      value
+    end
+  end
+
+  def parse_limit(value)
+    Integer(value)
+  rescue ArgumentError
+    raise Error, "linear: --limit must be an integer, got #{value.inspect}"
+  end
+
+  ISSUE_CORE_FIELDS = <<~GQL
+    id identifier title description url
+    state { name }
+    assignee { name email }
+    team { key name }
+    project { name }
+    parent { identifier title }
+    children { nodes { identifier title state { name } } }
+  GQL
+
+  ISSUE_COMMENT_FIELDS = <<~GQL
+    comments(first: 100) { nodes { id body createdAt user { name } } }
+  GQL
+
+  def print_issue(issue, include_comments:)
+    puts "#{issue['identifier']} [#{issue.dig('state', 'name')}] #{issue['title']}"
+    team = issue.dig('team', 'name') || issue.dig('team', 'key') || '-'
+    project = issue.dig('project', 'name') || '-'
+    puts "Team: #{team} | Project: #{project}"
+    assignee = issue.dig('assignee', 'name')
+    puts "Assignee: #{assignee || '(unassigned)'}"
+    if (parent = issue['parent'])
+      puts "Parent: #{parent['identifier']} #{parent['title']}"
+    end
+    children = issue.dig('children', 'nodes') || []
+    unless children.empty?
+      puts 'Children:'
+      children.each { |c| puts "  #{c['identifier']} [#{c.dig('state', 'name')}] #{c['title']}" }
+    end
+    puts "URL: #{issue['url']}" if issue['url']
+    puts
+    body = issue['description']
+    puts(body && !body.empty? ? body : '(no description)')
+
+    return unless include_comments
+
+    comments = issue.dig('comments', 'nodes') || []
+    puts
+    puts "Comments (#{comments.size}):"
+    comments.each { |c| print_comment(c) }
+  end
+
+  def print_comment(comment)
+    name = comment.dig('user', 'name') || 'unknown'
+    date = (comment['createdAt'] || '')[0, 10]
+    id = comment['id']
+    puts "  [#{name}, #{date}]#{id ? " (id: #{id})" : ''}"
+    (comment['body'] || '').each_line { |line| puts "    #{line.chomp}" }
+    puts
+  end
+
+  def cmd_get(args)
+    json_mode = pop_flag!(args, '--json')
+    full = pop_flag!(args, '--full')
+    identifier = args.first
+    raise Error, 'Usage: linear get ABC-NNN [--full] [--json]' unless identifier
+
+    fields = ISSUE_CORE_FIELDS.dup
+    fields << ISSUE_COMMENT_FIELDS if full
+
+    client = Client.new
+    team_key, number_str = identifier.split('-', 2)
+    team_key = team_key&.upcase
+    number = Integer(number_str) rescue raise(Error, "linear: identifier must look like ABC-123, got #{identifier.inspect}")
+
+    res = client.query(<<~GQL, { teamKey: team_key, number: number })
       query($teamKey: String!, $number: Float!) {
         issues(filter: { number: { eq: $number }, team: { key: { eq: $teamKey } } }) {
           nodes { #{fields} }
         }
       }
     GQL
+
+    if json_mode
+      puts JSON.pretty_generate(res)
+      return
+    end
+
     issue = res.dig('data', 'issues', 'nodes', 0)
-    abort "linear: issue #{identifier} not found" unless issue
-    issue
+    raise Error, "linear: issue #{identifier} not found" unless issue
+    print_issue(issue, include_comments: full)
   end
 
-  def resolve_project_id(team_id, project_name)
-    res = query(<<~GQL, { teamId: team_id })
-      query($teamId: String!) {
-        team(id: $teamId) { projects(first: 250) { nodes { id name } } }
-      }
-    GQL
-    projects = res.dig('data', 'team', 'projects', 'nodes') || []
-    project = projects.find { |p| p['name'] == project_name }
-    project ||= projects.find { |p| p['name'].downcase.include?(project_name.downcase) }
-    unless project
-      available = projects.map { |p| p['name'] }.sort.join("\n  ")
-      abort "linear: project #{project_name.inspect} not found.\nAvailable projects:\n  #{available}"
-    end
-    project['id']
-  end
+  def cmd_comments(args)
+    json_mode = pop_flag!(args, '--json')
+    identifier = args.first
+    raise Error, 'Usage: linear comments ABC-NNN [--json]' unless identifier
 
-  # Resolves an assignee identifier to a Linear user id. Accepts the literal
-  # "me" (the token's own user via viewer), an exact email, or a
-  # case-insensitive name substring. Aborts on no match or an ambiguous name.
-  def resolve_user_id(value)
-    if value == 'me'
-      res = query('query { viewer { id name email } }')
-      user = res.dig('data', 'viewer')
-      abort 'linear: could not resolve current user (viewer)' unless user
-      return user['id']
-    end
+    client = Client.new
+    team_key, number_str = identifier.split('-', 2)
+    team_key = team_key&.upcase
+    number = Integer(number_str) rescue raise(Error, "linear: identifier must look like ABC-123, got #{identifier.inspect}")
 
-    res = query(<<~GQL, { value: value })
-      query($value: String!) {
-        users(filter: { or: [{ email: { eq: $value } }, { name: { containsIgnoreCase: $value } }] }) {
-          nodes { id name email }
+    res = client.query(<<~GQL, { teamKey: team_key, number: number })
+      query($teamKey: String!, $number: Float!) {
+        issues(filter: { number: { eq: $number }, team: { key: { eq: $teamKey } } }) {
+          nodes {
+            identifier
+            #{ISSUE_COMMENT_FIELDS}
+          }
         }
       }
     GQL
-    users = res.dig('data', 'users', 'nodes') || []
-    abort "linear: no user matches #{value.inspect}" if users.empty?
-    if users.size > 1
-      exact = users.find { |u| u['email'] == value }
-      return exact['id'] if exact
 
-      listing = users.map { |u| "#{u['name']} <#{u['email']}>" }.join("\n  ")
-      abort "linear: #{value.inspect} matches multiple users:\n  #{listing}"
+    if json_mode
+      puts JSON.pretty_generate(res)
+      return
     end
-    users.first['id']
+
+    issue = res.dig('data', 'issues', 'nodes', 0)
+    raise Error, "linear: issue #{identifier} not found" unless issue
+    comments = issue.dig('comments', 'nodes') || []
+    puts "Comments on #{issue['identifier']} (#{comments.size}):"
+    comments.each { |c| print_comment(c) }
   end
-end
 
-# A state whose Linear type is "started" (e.g. In Progress) means someone is
-# actively working the issue, so it must have an assignee.
-STARTED_STATE_TYPE = 'started'
+  def cmd_search(args)
+    json_mode = pop_flag!(args, '--json')
+    team_key = pop_option!(args, '--team')
+    limit_str = pop_option!(args, '--limit')
+    limit = limit_str ? parse_limit(limit_str) : 25
+    term = args.first
+    raise Error, 'Usage: linear search "phrase" [--team KEY] [--limit N] [--json]' if term.nil? || term.empty?
 
-def pop_flag!(args, name)
-  if (idx = args.index(name))
-    args.delete_at(idx)
-    true
-  else
-    false
-  end
-end
-
-def pop_option!(args, name)
-  if (idx = args.index(name))
-    args.delete_at(idx)
-    value = args.delete_at(idx)
-    abort "linear: #{name} requires a value" if value.nil? || value.start_with?('--')
-    value
-  end
-end
-
-def parse_limit(value)
-  Integer(value)
-rescue ArgumentError
-  abort "linear: --limit must be an integer, got #{value.inspect}"
-end
-
-ISSUE_CORE_FIELDS = <<~GQL
-  id identifier title description url
-  state { name }
-  assignee { name email }
-  team { key name }
-  project { name }
-  parent { identifier title }
-  children { nodes { identifier title state { name } } }
-GQL
-
-ISSUE_COMMENT_FIELDS = <<~GQL
-  comments(first: 100) { nodes { id body createdAt user { name } } }
-GQL
-
-def print_issue(issue, include_comments:)
-  puts "#{issue['identifier']} [#{issue.dig('state', 'name')}] #{issue['title']}"
-  team = issue.dig('team', 'name') || issue.dig('team', 'key') || '-'
-  project = issue.dig('project', 'name') || '-'
-  puts "Team: #{team} | Project: #{project}"
-  assignee = issue.dig('assignee', 'name')
-  puts "Assignee: #{assignee || '(unassigned)'}"
-  if (parent = issue['parent'])
-    puts "Parent: #{parent['identifier']} #{parent['title']}"
-  end
-  children = issue.dig('children', 'nodes') || []
-  unless children.empty?
-    puts 'Children:'
-    children.each { |c| puts "  #{c['identifier']} [#{c.dig('state', 'name')}] #{c['title']}" }
-  end
-  puts "URL: #{issue['url']}" if issue['url']
-  puts
-  body = issue['description']
-  puts(body && !body.empty? ? body : '(no description)')
-
-  return unless include_comments
-
-  comments = issue.dig('comments', 'nodes') || []
-  puts
-  puts "Comments (#{comments.size}):"
-  comments.each { |c| print_comment(c) }
-end
-
-def print_comment(comment)
-  name = comment.dig('user', 'name') || 'unknown'
-  date = (comment['createdAt'] || '')[0, 10]
-  id = comment['id']
-  puts "  [#{name}, #{date}]#{id ? " (id: #{id})" : ''}"
-  (comment['body'] || '').each_line { |line| puts "    #{line.chomp}" }
-  puts
-end
-
-def cmd_get(args)
-  json_mode = pop_flag!(args, '--json')
-  full = pop_flag!(args, '--full')
-  identifier = args.first
-  abort 'Usage: linear get ABC-NNN [--full] [--json]' unless identifier
-
-  fields = ISSUE_CORE_FIELDS.dup
-  fields << ISSUE_COMMENT_FIELDS if full
-
-  client = LinearClient.new
-  team_key, number_str = identifier.split('-', 2)
-  team_key = team_key&.upcase
-  number = Integer(number_str) rescue abort("linear: identifier must look like ABC-123, got #{identifier.inspect}")
-
-  res = client.query(<<~GQL, { teamKey: team_key, number: number })
-    query($teamKey: String!, $number: Float!) {
-      issues(filter: { number: { eq: $number }, team: { key: { eq: $teamKey } } }) {
-        nodes { #{fields} }
-      }
+    filter = {
+      or: [
+        { title: { containsIgnoreCase: term } },
+        { description: { containsIgnoreCase: term } }
+      ]
     }
-  GQL
+    filter[:team] = { key: { eq: team_key } } if team_key
 
-  if json_mode
-    puts JSON.pretty_generate(res)
-    return
-  end
-
-  issue = res.dig('data', 'issues', 'nodes', 0)
-  abort "linear: issue #{identifier} not found" unless issue
-  print_issue(issue, include_comments: full)
-end
-
-def cmd_comments(args)
-  json_mode = pop_flag!(args, '--json')
-  identifier = args.first
-  abort 'Usage: linear comments ABC-NNN [--json]' unless identifier
-
-  client = LinearClient.new
-  team_key, number_str = identifier.split('-', 2)
-  team_key = team_key&.upcase
-  number = Integer(number_str) rescue abort("linear: identifier must look like ABC-123, got #{identifier.inspect}")
-
-  res = client.query(<<~GQL, { teamKey: team_key, number: number })
-    query($teamKey: String!, $number: Float!) {
-      issues(filter: { number: { eq: $number }, team: { key: { eq: $teamKey } } }) {
-        nodes {
-          identifier
-          #{ISSUE_COMMENT_FIELDS}
+    client = Client.new
+    res = client.query(<<~GQL, { filter: filter, first: limit })
+      query($filter: IssueFilter!, $first: Int!) {
+        issues(filter: $filter, first: $first, orderBy: updatedAt) {
+          nodes { identifier title state { name } updatedAt }
         }
       }
-    }
-  GQL
+    GQL
 
-  if json_mode
-    puts JSON.pretty_generate(res)
-    return
-  end
-
-  issue = res.dig('data', 'issues', 'nodes', 0)
-  abort "linear: issue #{identifier} not found" unless issue
-  comments = issue.dig('comments', 'nodes') || []
-  puts "Comments on #{issue['identifier']} (#{comments.size}):"
-  comments.each { |c| print_comment(c) }
-end
-
-def cmd_search(args)
-  json_mode = pop_flag!(args, '--json')
-  team_key = pop_option!(args, '--team')
-  limit_str = pop_option!(args, '--limit')
-  limit = limit_str ? parse_limit(limit_str) : 25
-  term = args.first
-  abort 'Usage: linear search "phrase" [--team KEY] [--limit N] [--json]' if term.nil? || term.empty?
-
-  filter = {
-    or: [
-      { title: { containsIgnoreCase: term } },
-      { description: { containsIgnoreCase: term } }
-    ]
-  }
-  filter[:team] = { key: { eq: team_key } } if team_key
-
-  client = LinearClient.new
-  res = client.query(<<~GQL, { filter: filter, first: limit })
-    query($filter: IssueFilter!, $first: Int!) {
-      issues(filter: $filter, first: $first, orderBy: updatedAt) {
-        nodes { identifier title state { name } updatedAt }
-      }
-    }
-  GQL
-
-  if json_mode
-    puts JSON.pretty_generate(res)
-    return
-  end
-
-  nodes = res.dig('data', 'issues', 'nodes') || []
-  if nodes.empty?
-    puts '(no matches)'
-    return
-  end
-  nodes.each do |n|
-    date = (n['updatedAt'] || '')[0, 10]
-    puts "#{n['identifier']} [#{n.dig('state', 'name')}] #{n['title']}  (#{date})"
-  end
-end
-
-def cmd_create(args)
-  team_key = nil
-  project_name = nil
-  title = nil
-  description = nil
-  description_file = nil
-  no_project = false
-  state_name = nil
-  parent_id = nil
-  assignee = nil
-  priority = nil
-  json_mode = false
-
-  parser = OptionParser.new do |o|
-    o.banner = 'Usage: linear create --team KEY --title TITLE --priority LEVEL (--project NAME | --no-project) ' \
-               '[--description TEXT | --description-file PATH] [--state NAME] [--parent ABC-NNN] ' \
-               '[--assignee EMAIL|me] [--json]'
-    o.on('--team KEY') { |v| team_key = v }
-    o.on('--priority LEVEL', 'REQUIRED: urgent|high|medium|low, or an explicit none (or 0-4)') { |v| priority = v }
-    o.on('--project NAME') { |v| project_name = v }
-    o.on('--title TITLE') { |v| title = v }
-    o.on('--description TEXT') { |v| description = v }
-    o.on('--description-file PATH') { |v| description_file = v }
-    o.on('--state NAME', 'Workflow state (default: Todo; never Triage/Backlog)') { |v| state_name = v }
-    o.on('--parent ABC-NNN', 'Make the new issue a sub-issue of this parent') { |v| parent_id = v }
-    o.on('--assignee EMAIL|me', 'Assign the issue (required when creating in a started state like In Progress)') do |v|
-      assignee = v
+    if json_mode
+      puts JSON.pretty_generate(res)
+      return
     end
-    o.on('--no-project') { no_project = true }
-    o.on('--json') { json_mode = true }
-  end
-  parser.parse!(args)
 
-  abort parser.banner if team_key.nil? || title.nil?
-  if priority.nil?
-    abort "linear: --priority is required on create (urgent|high|medium|low, or an explicit none).\n" \
-          "Guidelines: urgent = money/data actively wrong in prod, drop current work; " \
-          "high = users can hit it today or it gates scheduled work, this cycle; " \
-          "medium = default for scheduled improvements (refactors, epic phases, bugs with a workaround); " \
-          "low = non-compounding cleanups; none = deliberately parked (spike awaiting a decision).\n" \
-          "#{parser.banner}"
-  end
-  unless project_name || no_project
-    abort "linear: --project is required (or pass --no-project to override).\n#{parser.banner}"
-  end
-
-  description = File.read(description_file) if description_file
-
-  client = LinearClient.new
-
-  team_res = client.query(<<~GQL, { teamKey: team_key })
-    query($teamKey: String!) {
-      teams(filter: { key: { eq: $teamKey } }) { nodes { id key name } }
-    }
-  GQL
-  team = team_res.dig('data', 'teams', 'nodes', 0)
-  abort "linear: team #{team_key} not found" unless team
-
-  # New issues default to Todo, never the team's default Triage (or Backlog).
-  # Pass --state "In Progress" when the issue is already being worked.
-  desired_state = state_name || 'Todo'
-  state_res = client.query(<<~GQL, { teamId: team['id'], name: desired_state })
-    query($teamId: ID!, $name: String!) {
-      workflowStates(filter: { team: { id: { eq: $teamId } }, name: { eq: $name } }) {
-        nodes { id name type }
-      }
-    }
-  GQL
-  state = state_res.dig('data', 'workflowStates', 'nodes', 0)
-  abort "linear: state #{desired_state.inspect} not found on team #{team_key}" unless state
-
-  # Creating directly in a started state (e.g. In Progress) requires an assignee.
-  if state['type'] == STARTED_STATE_TYPE && assignee.nil?
-    abort "linear: creating in #{desired_state.inspect} (a started state) requires an assignee; pass --assignee EMAIL|me"
-  end
-  assignee_id = assignee ? client.resolve_user_id(assignee) : nil
-
-  project_id = client.resolve_project_id(team['id'], project_name) if project_name
-
-  input = { teamId: team['id'], title: title, stateId: state['id'] }
-  input[:description] = description if description
-  input[:projectId] = project_id if project_id
-  input[:parentId] = client.resolve_issue(parent_id)['id'] if parent_id
-  input[:assigneeId] = assignee_id if assignee_id
-  input[:priority] = resolve_priority(priority) if priority
-
-  res = client.query(<<~GQL, { input: input })
-    mutation($input: IssueCreateInput!) {
-      issueCreate(input: $input) {
-        success
-        issue { identifier title url state { name } project { name } parent { identifier } assignee { name } priorityLabel }
-      }
-    }
-  GQL
-
-  if json_mode
-    puts JSON.pretty_generate(res)
-    return
-  end
-
-  issue = res.dig('data', 'issueCreate', 'issue')
-  abort "linear: create failed: #{res.inspect}" unless issue
-  puts "Created #{issue['identifier']}: #{issue['title']}"
-  puts "State: #{issue.dig('state', 'name')} | Project: #{issue.dig('project', 'name') || '-'}"
-  puts "Assignee: #{issue.dig('assignee', 'name') || '-'} | Priority: #{issue['priorityLabel'] || '-'}"
-  puts "Parent: #{issue.dig('parent', 'identifier')}" if issue['parent']
-  puts issue['url']
-end
-
-PRIORITY_NAMES = { 'none' => 0, 'urgent' => 1, 'high' => 2, 'medium' => 3, 'low' => 4 }.freeze
-
-def resolve_priority(value)
-  key = value.to_s.strip.downcase
-  return Integer(key) if key.match?(/\A[0-4]\z/)
-
-  PRIORITY_NAMES[key] || abort("linear: invalid priority #{value.inspect}; use none|urgent|high|medium|low or 0-4")
-end
-
-def cmd_update(args)
-  state_name = nil
-  title = nil
-  description = nil
-  description_file = nil
-  priority = nil
-  project_name = nil
-  parent_id = nil
-  assignee = nil
-  json_mode = false
-
-  parser = OptionParser.new do |o|
-    o.banner = 'Usage: linear update ABC-NNN [--state NAME] [--title TITLE] ' \
-               '[--description TEXT | --description-file PATH] [--project NAME] [--parent ABC-NNN] ' \
-               '[--assignee EMAIL|me] [--priority none|urgent|high|medium|low] [--json]'
-    o.on('--priority LEVEL', 'Set priority (none|urgent|high|medium|low or 0-4)') { |v| priority = v }
-    o.on('--state NAME') { |v| state_name = v }
-    o.on('--title TITLE') { |v| title = v }
-    o.on('--description TEXT') { |v| description = v }
-    o.on('--description-file PATH') { |v| description_file = v }
-    o.on('--project NAME', 'Move the issue to this project') { |v| project_name = v }
-    o.on('--parent ABC-NNN', 'Reparent the issue under this parent') { |v| parent_id = v }
-    o.on('--assignee EMAIL|me', 'Assign the issue (required when moving to a started state like In Progress)') do |v|
-      assignee = v
+    nodes = res.dig('data', 'issues', 'nodes') || []
+    if nodes.empty?
+      puts '(no matches)'
+      return
     end
-    o.on('--json') { json_mode = true }
+    nodes.each do |n|
+      date = (n['updatedAt'] || '')[0, 10]
+      puts "#{n['identifier']} [#{n.dig('state', 'name')}] #{n['title']}  (#{date})"
+    end
   end
-  rest = parser.parse(args)
-  identifier = rest.first
-  abort parser.banner unless identifier
 
-  description = File.read(description_file) if description_file
+  def cmd_create(args)
+    team_key = nil
+    project_name = nil
+    title = nil
+    description = nil
+    description_file = nil
+    no_project = false
+    state_name = nil
+    parent_id = nil
+    assignee = nil
+    priority = nil
+    json_mode = false
 
-  client = LinearClient.new
-  issue = client.resolve_issue(identifier, fields: 'id identifier team { id } assignee { id name }')
+    parser = OptionParser.new do |o|
+      o.banner = 'Usage: linear create --team KEY --title TITLE --priority LEVEL (--project NAME | --no-project) ' \
+                 '[--description TEXT | --description-file PATH] [--state NAME] [--parent ABC-NNN] ' \
+                 '[--assignee EMAIL|me] [--json]'
+      o.on('--team KEY') { |v| team_key = v }
+      o.on('--priority LEVEL', 'REQUIRED: urgent|high|medium|low, or an explicit none (or 0-4)') { |v| priority = v }
+      o.on('--project NAME') { |v| project_name = v }
+      o.on('--title TITLE') { |v| title = v }
+      o.on('--description TEXT') { |v| description = v }
+      o.on('--description-file PATH') { |v| description_file = v }
+      o.on('--state NAME', 'Workflow state (default: Todo; never Triage/Backlog)') { |v| state_name = v }
+      o.on('--parent ABC-NNN', 'Make the new issue a sub-issue of this parent') { |v| parent_id = v }
+      o.on('--assignee EMAIL|me', 'Assign the issue (required when creating in a started state like In Progress)') do |v|
+        assignee = v
+      end
+      o.on('--no-project') { no_project = true }
+      o.on('--json') { json_mode = true }
+    end
+    parser.parse!(args)
 
-  input = {}
-  input[:assigneeId] = client.resolve_user_id(assignee) if assignee
-  if state_name
-    state_res = client.query(<<~GQL, { teamId: issue.dig('team', 'id'), name: state_name })
+    raise Error, parser.banner if team_key.nil? || title.nil?
+    if priority.nil?
+      raise Error, "linear: --priority is required on create (urgent|high|medium|low, or an explicit none).\n" \
+                   "Guidelines: urgent = money/data actively wrong in prod, drop current work; " \
+                   "high = users can hit it today or it gates scheduled work, this cycle; " \
+                   "medium = default for scheduled improvements (refactors, epic phases, bugs with a workaround); " \
+                   "low = non-compounding cleanups; none = deliberately parked (spike awaiting a decision).\n" \
+                   "#{parser.banner}"
+    end
+    unless project_name || no_project
+      raise Error, "linear: --project is required (or pass --no-project to override).\n#{parser.banner}"
+    end
+
+    description = File.read(description_file) if description_file
+
+    client = Client.new
+
+    team_res = client.query(<<~GQL, { teamKey: team_key })
+      query($teamKey: String!) {
+        teams(filter: { key: { eq: $teamKey } }) { nodes { id key name } }
+      }
+    GQL
+    team = team_res.dig('data', 'teams', 'nodes', 0)
+    raise Error, "linear: team #{team_key} not found" unless team
+
+    # New issues default to Todo, never the team's default Triage (or Backlog).
+    # Pass --state "In Progress" when the issue is already being worked.
+    desired_state = state_name || 'Todo'
+    state_res = client.query(<<~GQL, { teamId: team['id'], name: desired_state })
       query($teamId: ID!, $name: String!) {
         workflowStates(filter: { team: { id: { eq: $teamId } }, name: { eq: $name } }) {
           nodes { id name type }
@@ -460,422 +376,536 @@ def cmd_update(args)
       }
     GQL
     state = state_res.dig('data', 'workflowStates', 'nodes', 0)
-    abort "linear: state #{state_name.inspect} not found on team #{identifier.split('-').first&.upcase}" unless state
-    input[:stateId] = state['id']
+    raise Error, "linear: state #{desired_state.inspect} not found on team #{team_key}" unless state
 
-    # Moving into a started state (e.g. In Progress) requires an assignee:
-    # either one passed this call, or one already on the issue.
-    if state['type'] == STARTED_STATE_TYPE && !input.key?(:assigneeId) && issue.dig('assignee', 'id').nil?
-      abort "linear: moving #{identifier} to #{state_name.inspect} (a started state) requires an assignee; " \
-            'pass --assignee EMAIL|me'
+    # Creating directly in a started state (e.g. In Progress) requires an assignee.
+    if state['type'] == STARTED_STATE_TYPE && assignee.nil?
+      raise Error, "linear: creating in #{desired_state.inspect} (a started state) requires an assignee; " \
+                   'pass --assignee EMAIL|me'
     end
-  end
-  input[:priority] = resolve_priority(priority) if priority
-  input[:title] = title if title
-  input[:description] = description if description
-  input[:projectId] = client.resolve_project_id(issue.dig('team', 'id'), project_name) if project_name
-  input[:parentId] = client.resolve_issue(parent_id)['id'] if parent_id
-  if input.empty?
-    abort 'linear: nothing to update; pass --state, --title, --description, --project, --parent, --assignee, or --priority'
-  end
+    assignee_id = assignee ? client.resolve_user_id(assignee) : nil
 
-  res = client.query(<<~GQL, { id: issue['id'], input: input })
-    mutation($id: String!, $input: IssueUpdateInput!) {
-      issueUpdate(id: $id, input: $input) {
-        success
-        issue { identifier title url state { name } project { name } parent { identifier } assignee { name } priorityLabel }
-      }
-    }
-  GQL
+    project_id = client.resolve_project_id(team['id'], project_name) if project_name
 
-  if json_mode
-    puts JSON.pretty_generate(res)
-    return
-  end
+    input = { teamId: team['id'], title: title, stateId: state['id'] }
+    input[:description] = description if description
+    input[:projectId] = project_id if project_id
+    input[:parentId] = client.resolve_issue(parent_id)['id'] if parent_id
+    input[:assigneeId] = assignee_id if assignee_id
+    input[:priority] = resolve_priority(priority) if priority
 
-  updated = res.dig('data', 'issueUpdate', 'issue')
-  abort "linear: update failed: #{res.inspect}" unless updated
-  puts "Updated #{updated['identifier']}: [#{updated.dig('state', 'name')}] #{updated['title']}"
-  puts "Project: #{updated.dig('project', 'name') || '-'} | Parent: #{updated.dig('parent', 'identifier') || '-'}"
-  puts "Assignee: #{updated.dig('assignee', 'name') || '-'} | Priority: #{updated['priorityLabel'] || '-'}"
-  puts updated['url']
-end
-
-def cmd_comment(args)
-  json_mode = pop_flag!(args, '--json')
-  body_file = pop_option!(args, '--body-file')
-  body_opt = pop_option!(args, '--body')
-  identifier = args.shift
-
-  if (unknown = args.find { |a| a.start_with?('--') })
-    abort "linear: unknown option #{unknown} (comment takes a positional message, --body TEXT, or --body-file PATH)"
-  end
-
-  body =
-    if body_file
-      abort "linear: --body-file not found: #{body_file}" unless File.exist?(body_file)
-      File.read(body_file)
-    elsif body_opt
-      body_opt
-    else
-      args.join(' ')
-    end
-  abort 'Usage: linear comment ABC-NNN ("message" | --body TEXT | --body-file PATH)' if identifier.nil? || body.strip.empty?
-
-  client = LinearClient.new
-  issue = client.resolve_issue(identifier)
-
-  res = client.query(<<~GQL, { input: { issueId: issue['id'], body: body } })
-    mutation($input: CommentCreateInput!) {
-      commentCreate(input: $input) {
-        success
-        comment { id url }
-      }
-    }
-  GQL
-
-  if json_mode
-    puts JSON.pretty_generate(res)
-    return
-  end
-
-  comment = res.dig('data', 'commentCreate', 'comment')
-  abort "linear: comment failed: #{res.inspect}" unless comment
-  puts "Posted comment on #{identifier}: #{comment['url']}"
-end
-
-def cmd_comment_delete(args)
-  json_mode = pop_flag!(args, '--json')
-  comment_id = args.shift
-  abort 'Usage: linear comment-delete COMMENT_ID (see "linear comments ABC-NNN")' if comment_id.nil? || comment_id.empty?
-
-  client = LinearClient.new
-  res = client.query(<<~GQL, { id: comment_id })
-    mutation($id: String!) {
-      commentDelete(id: $id) { success }
-    }
-  GQL
-
-  if json_mode
-    puts JSON.pretty_generate(res)
-    return
-  end
-
-  abort "linear: comment delete failed: #{res.inspect}" unless res.dig('data', 'commentDelete', 'success')
-  puts "Deleted comment #{comment_id}"
-end
-
-def cmd_relate(args)
-  type = 'related'
-  json_mode = false
-  parser = OptionParser.new do |o|
-    o.banner = 'Usage: linear relate ABC-AAA ABC-BBB [--type related|blocks|duplicate] [--json]'
-    o.on('--type TYPE') { |v| type = v }
-    o.on('--json') { json_mode = true }
-  end
-  rest = parser.parse(args)
-  source, target = rest[0], rest[1]
-  abort parser.banner if source.nil? || target.nil?
-
-  client = LinearClient.new
-  source_issue = client.resolve_issue(source, fields: 'id identifier')
-  target_issue = client.resolve_issue(target, fields: 'id identifier')
-
-  res = client.query(<<~GQL, { input: { issueId: source_issue['id'], relatedIssueId: target_issue['id'], type: type } })
-    mutation($input: IssueRelationCreateInput!) {
-      issueRelationCreate(input: $input) {
-        success
-        issueRelation { type issue { identifier } relatedIssue { identifier } }
-      }
-    }
-  GQL
-
-  if json_mode
-    puts JSON.pretty_generate(res)
-    return
-  end
-
-  rel = res.dig('data', 'issueRelationCreate', 'issueRelation')
-  abort "linear: relate failed: #{res.inspect}" unless rel
-  puts "Related #{rel.dig('issue', 'identifier')} <-> #{rel.dig('relatedIssue', 'identifier')} (#{rel['type']})"
-end
-
-def cmd_project_create(args)
-  team_key = nil
-  name = nil
-  description = nil
-  content = nil
-  content_file = nil
-  json_mode = false
-  parser = OptionParser.new do |o|
-    o.banner = 'Usage: linear project-create --team KEY --name NAME ' \
-               '[--description TEXT] [--content TEXT | --content-file PATH] [--json]'
-    o.on('--team KEY') { |v| team_key = v }
-    o.on('--name NAME') { |v| name = v }
-    o.on('--description TEXT', 'Short one-line project summary') { |v| description = v }
-    o.on('--content TEXT', 'Project body (markdown)') { |v| content = v }
-    o.on('--content-file PATH', 'Read project body (markdown) from a file') { |v| content_file = v }
-    o.on('--json') { json_mode = true }
-  end
-  parser.parse!(args)
-  abort parser.banner if team_key.nil? || name.nil?
-  content = File.read(content_file) if content_file
-
-  client = LinearClient.new
-  team_res = client.query(<<~GQL, { teamKey: team_key })
-    query($teamKey: String!) {
-      teams(filter: { key: { eq: $teamKey } }) { nodes { id key name } }
-    }
-  GQL
-  team = team_res.dig('data', 'teams', 'nodes', 0)
-  abort "linear: team #{team_key} not found" unless team
-
-  input = { name: name, teamIds: [team['id']] }
-  input[:description] = description if description
-  input[:content] = content if content
-
-  res = client.query(<<~GQL, { input: input })
-    mutation($input: ProjectCreateInput!) {
-      projectCreate(input: $input) {
-        success
-        project { id name url }
-      }
-    }
-  GQL
-
-  if json_mode
-    puts JSON.pretty_generate(res)
-    return
-  end
-  project = res.dig('data', 'projectCreate', 'project')
-  abort "linear: project create failed: #{res.inspect}" unless project
-  puts "Created project: #{project['name']}"
-  puts "Id: #{project['id']}"
-  puts project['url']
-end
-
-def cmd_project_update(args)
-  id = nil
-  name = nil
-  description = nil
-  content = nil
-  content_file = nil
-  json_mode = false
-  parser = OptionParser.new do |o|
-    o.banner = 'Usage: linear project-update --id PROJECT_ID ' \
-               '[--name NAME] [--description TEXT] [--content TEXT | --content-file PATH] [--json]'
-    o.on('--id ID') { |v| id = v }
-    o.on('--name NAME') { |v| name = v }
-    o.on('--description TEXT', 'Short one-line project summary') { |v| description = v }
-    o.on('--content TEXT', 'Project body (markdown)') { |v| content = v }
-    o.on('--content-file PATH', 'Read project body (markdown) from a file') { |v| content_file = v }
-    o.on('--json') { json_mode = true }
-  end
-  parser.parse!(args)
-  abort parser.banner if id.nil?
-  content = File.read(content_file) if content_file
-
-  input = {}
-  input[:name] = name if name
-  input[:description] = description if description
-  input[:content] = content if content
-  abort "linear: nothing to update; pass --name, --description, or --content" if input.empty?
-
-  client = LinearClient.new
-  res = client.query(<<~GQL, { id: id, input: input })
-    mutation($id: String!, $input: ProjectUpdateInput!) {
-      projectUpdate(id: $id, input: $input) {
-        success
-        project { id name url }
-      }
-    }
-  GQL
-  if json_mode
-    puts JSON.pretty_generate(res)
-    return
-  end
-  project = res.dig('data', 'projectUpdate', 'project')
-  abort "linear: project update failed: #{res.inspect}" unless project
-  puts "Updated project: #{project['name']}"
-  puts project['url']
-end
-
-def cmd_project_list(args)
-  json_mode = pop_flag!(args, '--json')
-  team_key = pop_option!(args, '--team') || ENV['LINEAR_TEAM_KEY']
-  if team_key.nil? || team_key.empty?
-    abort 'Usage: linear project-list --team KEY [--json] (or set LINEAR_TEAM_KEY)'
-  end
-  client = LinearClient.new
-  res = client.query(<<~GQL, { teamKey: team_key })
-    query($teamKey: String!) {
-      teams(filter: { key: { eq: $teamKey } }) {
-        nodes { id projects(first: 100) { nodes { id name state } } }
-      }
-    }
-  GQL
-  team = res.dig('data', 'teams', 'nodes', 0)
-  abort "linear: team #{team_key} not found" unless team
-  if json_mode
-    puts JSON.pretty_generate(res)
-    return
-  end
-  projects = team.dig('projects', 'nodes') || []
-  projects.sort_by { |p| p['name'].to_s.downcase }.each do |p|
-    puts "#{p['name']} [#{p['state']}] (#{p['id']})"
-  end
-end
-
-def usage
-  puts <<~TXT
-    linear -- semantic CLI for Linear (uses LINEAR_API_TOKEN)
-
-    Read:
-      linear get ABC-NNN [--full] [--json]
-          Show title, state, description, team, project, parent, children.
-          --full also includes the comment thread.
-
-      linear comments ABC-NNN [--json]
-          Show just the comment thread.
-
-      linear search "phrase" [--team KEY] [--limit N] [--json]
-          Case-insensitive substring search across title and description.
-
-      linear list --team KEY (--project NAME | --since YYYY-MM-DD)
-                  [--all] [--limit N] [--json]
-          List a team's issues, filtered to a project and/or a created-since
-          date. Excludes completed/canceled unless --all -- pass --all when
-          mining history, since shipped issues are the interesting ones.
-          Paginates past the API's 250-per-page cap up to --limit (default
-          100). With --since, results sort and display by created date.
-
-    Write:
-      linear create --team KEY --title TITLE --priority LEVEL
-                    (--project NAME | --no-project)
-                    [--description TEXT | --description-file PATH] [--state NAME]
-                    [--parent ABC-NNN] [--assignee EMAIL|me] [--json]
-          Create a new issue. --project is required; pass --no-project to override.
-          --priority is required: urgent = money/data actively wrong in prod;
-          high = users can hit it today or it gates scheduled work; medium =
-          default for scheduled improvements; low = non-compounding cleanups;
-          none = deliberately parked (explicit only, never an accidental default).
-          Defaults to the Todo state (never Triage/Backlog); pass
-          --state "In Progress" when the issue is already being worked.
-          --parent makes the new issue a sub-issue of the given parent.
-          --assignee takes an email, a name substring, or the literal "me"
-          (the token's own user). Required when the state is a started state.
-
-      linear update ABC-NNN [--state NAME] [--title TITLE]
-                    [--description TEXT | --description-file PATH]
-                    [--project NAME] [--parent ABC-NNN] [--assignee EMAIL|me]
-                    [--priority none|urgent|high|medium|low] [--json]
-          Update state, title, description, project, parent, assignee, or priority.
-          --project moves the issue; --parent reparents it as a sub-issue.
-          Moving to a started state (e.g. In Progress) requires an assignee:
-          pass --assignee, or the issue must already have one.
-
-      linear comment ABC-NNN ("message" | --body TEXT | --body-file PATH) [--json]
-          Post a comment. Use --body-file for long/markdown bodies.
-
-      linear comment-delete COMMENT_ID [--json]
-          Delete a comment by id (ids are shown by "linear comments ABC-NNN").
-
-      linear relate ABC-AAA ABC-BBB [--type related|blocks|duplicate] [--json]
-          Link two issues (default: related).
-
-      linear project-create --team KEY --name NAME [--description TEXT]
-                    [--content TEXT | --content-file PATH] [--json]
-          Create a project on a team. --description is the one-line summary;
-          --content is the full markdown body. Move issues into it afterward
-          with `linear update ABC-NNN --project NAME`.
-
-      linear project-update --id PROJECT_ID [--name NAME] [--description TEXT]
-                    [--content TEXT | --content-file PATH] [--json]
-          Update a project's name, one-line summary, or markdown body.
-
-      linear project-list --team KEY [--json]
-          List a team's projects with their ids and state.
-  TXT
-end
-
-def cmd_list(args)
-  json_mode = pop_flag!(args, '--json')
-  all = pop_flag!(args, '--all')
-  team_key = pop_option!(args, '--team') || ENV['LINEAR_TEAM_KEY']
-  project_name = pop_option!(args, '--project')
-  since = pop_option!(args, '--since')
-  limit_str = pop_option!(args, '--limit')
-  limit = limit_str ? parse_limit(limit_str) : 100
-  if team_key.nil? || team_key.empty? || (project_name.nil? && since.nil?)
-    abort 'Usage: linear list --team KEY (--project NAME | --since YYYY-MM-DD) [--all] [--limit N] [--json] ' \
-          '(--team may be omitted when LINEAR_TEAM_KEY is set)'
-  end
-  if since && since !~ /\A\d{4}-\d{2}-\d{2}\z/
-    abort "linear: --since must be YYYY-MM-DD, got #{since.inspect}"
-  end
-
-  filter = { team: { key: { eq: team_key } } }
-  filter[:project] = { name: { containsIgnoreCase: project_name } } if project_name
-  filter[:createdAt] = { gte: since } if since
-  filter[:state] = { type: { nin: %w[completed canceled] } } unless all
-
-  order_by = since ? 'createdAt' : 'updatedAt'
-  client = LinearClient.new
-  nodes = []
-  cursor = nil
-  loop do
-    page_size = [limit - nodes.size, 250].min
-    break if page_size <= 0
-
-    res = client.query(<<~GQL, { filter: filter, first: page_size, after: cursor })
-      query($filter: IssueFilter!, $first: Int!, $after: String) {
-        issues(filter: $filter, first: $first, after: $after, orderBy: #{order_by}) {
-          nodes { identifier title priority state { name } project { name } createdAt updatedAt }
-          pageInfo { hasNextPage endCursor }
+    res = client.query(<<~GQL, { input: input })
+      mutation($input: IssueCreateInput!) {
+        issueCreate(input: $input) {
+          success
+          issue { identifier title url state { name } project { name } parent { identifier } assignee { name } priorityLabel }
         }
       }
     GQL
-    nodes.concat(res.dig('data', 'issues', 'nodes') || [])
-    page_info = res.dig('data', 'issues', 'pageInfo') || {}
-    break unless page_info['hasNextPage']
 
-    cursor = page_info['endCursor']
+    if json_mode
+      puts JSON.pretty_generate(res)
+      return
+    end
+
+    issue = res.dig('data', 'issueCreate', 'issue')
+    raise Error, "linear: create failed: #{res.inspect}" unless issue
+    puts "Created #{issue['identifier']}: #{issue['title']}"
+    puts "State: #{issue.dig('state', 'name')} | Project: #{issue.dig('project', 'name') || '-'}"
+    puts "Assignee: #{issue.dig('assignee', 'name') || '-'} | Priority: #{issue['priorityLabel'] || '-'}"
+    puts "Parent: #{issue.dig('parent', 'identifier')}" if issue['parent']
+    puts issue['url']
   end
 
-  if json_mode
-    puts JSON.pretty_generate({ 'nodes' => nodes })
-    return
+  PRIORITY_NAMES = { 'none' => 0, 'urgent' => 1, 'high' => 2, 'medium' => 3, 'low' => 4 }.freeze
+
+  def resolve_priority(value)
+    key = value.to_s.strip.downcase
+    return Integer(key) if key.match?(/\A[0-4]\z/)
+
+    PRIORITY_NAMES[key] || raise(Error, "linear: invalid priority #{value.inspect}; use none|urgent|high|medium|low or 0-4")
   end
 
-  if nodes.empty?
-    puts '(no matches)'
-    return
+  def cmd_update(args)
+    state_name = nil
+    title = nil
+    description = nil
+    description_file = nil
+    priority = nil
+    project_name = nil
+    parent_id = nil
+    assignee = nil
+    json_mode = false
+
+    parser = OptionParser.new do |o|
+      o.banner = 'Usage: linear update ABC-NNN [--state NAME] [--title TITLE] ' \
+                 '[--description TEXT | --description-file PATH] [--project NAME] [--parent ABC-NNN] ' \
+                 '[--assignee EMAIL|me] [--priority none|urgent|high|medium|low] [--json]'
+      o.on('--priority LEVEL', 'Set priority (none|urgent|high|medium|low or 0-4)') { |v| priority = v }
+      o.on('--state NAME') { |v| state_name = v }
+      o.on('--title TITLE') { |v| title = v }
+      o.on('--description TEXT') { |v| description = v }
+      o.on('--description-file PATH') { |v| description_file = v }
+      o.on('--project NAME', 'Move the issue to this project') { |v| project_name = v }
+      o.on('--parent ABC-NNN', 'Reparent the issue under this parent') { |v| parent_id = v }
+      o.on('--assignee EMAIL|me', 'Assign the issue (required when moving to a started state like In Progress)') do |v|
+        assignee = v
+      end
+      o.on('--json') { json_mode = true }
+    end
+    rest = parser.parse(args)
+    identifier = rest.first
+    raise Error, parser.banner unless identifier
+
+    description = File.read(description_file) if description_file
+
+    client = Client.new
+    issue = client.resolve_issue(identifier, fields: 'id identifier team { id } assignee { id name }')
+
+    input = {}
+    input[:assigneeId] = client.resolve_user_id(assignee) if assignee
+    if state_name
+      state_res = client.query(<<~GQL, { teamId: issue.dig('team', 'id'), name: state_name })
+        query($teamId: ID!, $name: String!) {
+          workflowStates(filter: { team: { id: { eq: $teamId } }, name: { eq: $name } }) {
+            nodes { id name type }
+          }
+        }
+      GQL
+      state = state_res.dig('data', 'workflowStates', 'nodes', 0)
+      unless state
+        raise Error, "linear: state #{state_name.inspect} not found on team #{identifier.split('-').first&.upcase}"
+      end
+      input[:stateId] = state['id']
+
+      # Moving into a started state (e.g. In Progress) requires an assignee:
+      # either one passed this call, or one already on the issue.
+      if state['type'] == STARTED_STATE_TYPE && !input.key?(:assigneeId) && issue.dig('assignee', 'id').nil?
+        raise Error, "linear: moving #{identifier} to #{state_name.inspect} (a started state) requires an assignee; " \
+                     'pass --assignee EMAIL|me'
+      end
+    end
+    input[:priority] = resolve_priority(priority) if priority
+    input[:title] = title if title
+    input[:description] = description if description
+    input[:projectId] = client.resolve_project_id(issue.dig('team', 'id'), project_name) if project_name
+    input[:parentId] = client.resolve_issue(parent_id)['id'] if parent_id
+    if input.empty?
+      raise Error, 'linear: nothing to update; pass --state, --title, --description, --project, --parent, --assignee, or --priority'
+    end
+
+    res = client.query(<<~GQL, { id: issue['id'], input: input })
+      mutation($id: String!, $input: IssueUpdateInput!) {
+        issueUpdate(id: $id, input: $input) {
+          success
+          issue { identifier title url state { name } project { name } parent { identifier } assignee { name } priorityLabel }
+        }
+      }
+    GQL
+
+    if json_mode
+      puts JSON.pretty_generate(res)
+      return
+    end
+
+    updated = res.dig('data', 'issueUpdate', 'issue')
+    raise Error, "linear: update failed: #{res.inspect}" unless updated
+    puts "Updated #{updated['identifier']}: [#{updated.dig('state', 'name')}] #{updated['title']}"
+    puts "Project: #{updated.dig('project', 'name') || '-'} | Parent: #{updated.dig('parent', 'identifier') || '-'}"
+    puts "Assignee: #{updated.dig('assignee', 'name') || '-'} | Priority: #{updated['priorityLabel'] || '-'}"
+    puts updated['url']
   end
-  prio = { 0 => '-', 1 => 'Urgent', 2 => 'High', 3 => 'Med', 4 => 'Low' }
-  nodes.each do |n|
-    date = ((since ? n['createdAt'] : n['updatedAt']) || '')[0, 10]
-    project = project_name ? '' : "  {#{n.dig('project', 'name')}}"
-    puts "#{n['identifier']} [#{n.dig('state', 'name')}] (#{prio[n['priority']]}) #{n['title']}  (#{date})#{project}"
+
+  def cmd_comment(args)
+    json_mode = pop_flag!(args, '--json')
+    body_file = pop_option!(args, '--body-file')
+    body_opt = pop_option!(args, '--body')
+    identifier = args.shift
+
+    if (unknown = args.find { |a| a.start_with?('--') })
+      raise Error, "linear: unknown option #{unknown} (comment takes a positional message, --body TEXT, or --body-file PATH)"
+    end
+
+    body =
+      if body_file
+        raise Error, "linear: --body-file not found: #{body_file}" unless File.exist?(body_file)
+        File.read(body_file)
+      elsif body_opt
+        body_opt
+      else
+        args.join(' ')
+      end
+    if identifier.nil? || body.strip.empty?
+      raise Error, 'Usage: linear comment ABC-NNN ("message" | --body TEXT | --body-file PATH)'
+    end
+
+    client = Client.new
+    issue = client.resolve_issue(identifier)
+
+    res = client.query(<<~GQL, { input: { issueId: issue['id'], body: body } })
+      mutation($input: CommentCreateInput!) {
+        commentCreate(input: $input) {
+          success
+          comment { id url }
+        }
+      }
+    GQL
+
+    if json_mode
+      puts JSON.pretty_generate(res)
+      return
+    end
+
+    comment = res.dig('data', 'commentCreate', 'comment')
+    raise Error, "linear: comment failed: #{res.inspect}" unless comment
+    puts "Posted comment on #{identifier}: #{comment['url']}"
+  end
+
+  def cmd_comment_delete(args)
+    json_mode = pop_flag!(args, '--json')
+    comment_id = args.shift
+    if comment_id.nil? || comment_id.empty?
+      raise Error, 'Usage: linear comment-delete COMMENT_ID (see "linear comments ABC-NNN")'
+    end
+
+    client = Client.new
+    res = client.query(<<~GQL, { id: comment_id })
+      mutation($id: String!) {
+        commentDelete(id: $id) { success }
+      }
+    GQL
+
+    if json_mode
+      puts JSON.pretty_generate(res)
+      return
+    end
+
+    raise Error, "linear: comment delete failed: #{res.inspect}" unless res.dig('data', 'commentDelete', 'success')
+    puts "Deleted comment #{comment_id}"
+  end
+
+  def cmd_relate(args)
+    type = 'related'
+    json_mode = false
+    parser = OptionParser.new do |o|
+      o.banner = 'Usage: linear relate ABC-AAA ABC-BBB [--type related|blocks|duplicate] [--json]'
+      o.on('--type TYPE') { |v| type = v }
+      o.on('--json') { json_mode = true }
+    end
+    rest = parser.parse(args)
+    source, target = rest[0], rest[1]
+    raise Error, parser.banner if source.nil? || target.nil?
+
+    client = Client.new
+    source_issue = client.resolve_issue(source, fields: 'id identifier')
+    target_issue = client.resolve_issue(target, fields: 'id identifier')
+
+    res = client.query(<<~GQL, { input: { issueId: source_issue['id'], relatedIssueId: target_issue['id'], type: type } })
+      mutation($input: IssueRelationCreateInput!) {
+        issueRelationCreate(input: $input) {
+          success
+          issueRelation { type issue { identifier } relatedIssue { identifier } }
+        }
+      }
+    GQL
+
+    if json_mode
+      puts JSON.pretty_generate(res)
+      return
+    end
+
+    rel = res.dig('data', 'issueRelationCreate', 'issueRelation')
+    raise Error, "linear: relate failed: #{res.inspect}" unless rel
+    puts "Related #{rel.dig('issue', 'identifier')} <-> #{rel.dig('relatedIssue', 'identifier')} (#{rel['type']})"
+  end
+
+  def cmd_project_create(args)
+    team_key = nil
+    name = nil
+    description = nil
+    content = nil
+    content_file = nil
+    json_mode = false
+    parser = OptionParser.new do |o|
+      o.banner = 'Usage: linear project-create --team KEY --name NAME ' \
+                 '[--description TEXT] [--content TEXT | --content-file PATH] [--json]'
+      o.on('--team KEY') { |v| team_key = v }
+      o.on('--name NAME') { |v| name = v }
+      o.on('--description TEXT', 'Short one-line project summary') { |v| description = v }
+      o.on('--content TEXT', 'Project body (markdown)') { |v| content = v }
+      o.on('--content-file PATH', 'Read project body (markdown) from a file') { |v| content_file = v }
+      o.on('--json') { json_mode = true }
+    end
+    parser.parse!(args)
+    raise Error, parser.banner if team_key.nil? || name.nil?
+    content = File.read(content_file) if content_file
+
+    client = Client.new
+    team_res = client.query(<<~GQL, { teamKey: team_key })
+      query($teamKey: String!) {
+        teams(filter: { key: { eq: $teamKey } }) { nodes { id key name } }
+      }
+    GQL
+    team = team_res.dig('data', 'teams', 'nodes', 0)
+    raise Error, "linear: team #{team_key} not found" unless team
+
+    input = { name: name, teamIds: [team['id']] }
+    input[:description] = description if description
+    input[:content] = content if content
+
+    res = client.query(<<~GQL, { input: input })
+      mutation($input: ProjectCreateInput!) {
+        projectCreate(input: $input) {
+          success
+          project { id name url }
+        }
+      }
+    GQL
+
+    if json_mode
+      puts JSON.pretty_generate(res)
+      return
+    end
+    project = res.dig('data', 'projectCreate', 'project')
+    raise Error, "linear: project create failed: #{res.inspect}" unless project
+    puts "Created project: #{project['name']}"
+    puts "Id: #{project['id']}"
+    puts project['url']
+  end
+
+  def cmd_project_update(args)
+    id = nil
+    name = nil
+    description = nil
+    content = nil
+    content_file = nil
+    json_mode = false
+    parser = OptionParser.new do |o|
+      o.banner = 'Usage: linear project-update --id PROJECT_ID ' \
+                 '[--name NAME] [--description TEXT] [--content TEXT | --content-file PATH] [--json]'
+      o.on('--id ID') { |v| id = v }
+      o.on('--name NAME') { |v| name = v }
+      o.on('--description TEXT', 'Short one-line project summary') { |v| description = v }
+      o.on('--content TEXT', 'Project body (markdown)') { |v| content = v }
+      o.on('--content-file PATH', 'Read project body (markdown) from a file') { |v| content_file = v }
+      o.on('--json') { json_mode = true }
+    end
+    parser.parse!(args)
+    raise Error, parser.banner if id.nil?
+    content = File.read(content_file) if content_file
+
+    input = {}
+    input[:name] = name if name
+    input[:description] = description if description
+    input[:content] = content if content
+    raise Error, "linear: nothing to update; pass --name, --description, or --content" if input.empty?
+
+    client = Client.new
+    res = client.query(<<~GQL, { id: id, input: input })
+      mutation($id: String!, $input: ProjectUpdateInput!) {
+        projectUpdate(id: $id, input: $input) {
+          success
+          project { id name url }
+        }
+      }
+    GQL
+    if json_mode
+      puts JSON.pretty_generate(res)
+      return
+    end
+    project = res.dig('data', 'projectUpdate', 'project')
+    raise Error, "linear: project update failed: #{res.inspect}" unless project
+    puts "Updated project: #{project['name']}"
+    puts project['url']
+  end
+
+  def cmd_project_list(args)
+    json_mode = pop_flag!(args, '--json')
+    team_key = pop_option!(args, '--team') || ENV['LINEAR_TEAM_KEY']
+    if team_key.nil? || team_key.empty?
+      raise Error, 'Usage: linear project-list --team KEY [--json] (or set LINEAR_TEAM_KEY)'
+    end
+    client = Client.new
+    res = client.query(<<~GQL, { teamKey: team_key })
+      query($teamKey: String!) {
+        teams(filter: { key: { eq: $teamKey } }) {
+          nodes { id projects(first: 100) { nodes { id name state } } }
+        }
+      }
+    GQL
+    team = res.dig('data', 'teams', 'nodes', 0)
+    raise Error, "linear: team #{team_key} not found" unless team
+    if json_mode
+      puts JSON.pretty_generate(res)
+      return
+    end
+    projects = team.dig('projects', 'nodes') || []
+    projects.sort_by { |p| p['name'].to_s.downcase }.each do |p|
+      puts "#{p['name']} [#{p['state']}] (#{p['id']})"
+    end
+  end
+
+  def usage
+    puts <<~TXT
+      linear -- semantic CLI for Linear (uses LINEAR_API_TOKEN)
+
+      Read:
+        linear get ABC-NNN [--full] [--json]
+            Show title, state, description, team, project, parent, children.
+            --full also includes the comment thread.
+
+        linear comments ABC-NNN [--json]
+            Show just the comment thread.
+
+        linear search "phrase" [--team KEY] [--limit N] [--json]
+            Case-insensitive substring search across title and description.
+
+        linear list --team KEY (--project NAME | --since YYYY-MM-DD)
+                    [--all] [--limit N] [--json]
+            List a team's issues, filtered to a project and/or a created-since
+            date. Excludes completed/canceled unless --all -- pass --all when
+            mining history, since shipped issues are the interesting ones.
+            Paginates past the API's 250-per-page cap up to --limit (default
+            100). With --since, results sort and display by created date.
+
+      Write:
+        linear create --team KEY --title TITLE --priority LEVEL
+                      (--project NAME | --no-project)
+                      [--description TEXT | --description-file PATH] [--state NAME]
+                      [--parent ABC-NNN] [--assignee EMAIL|me] [--json]
+            Create a new issue. --project is required; pass --no-project to override.
+            --priority is required: urgent = money/data actively wrong in prod;
+            high = users can hit it today or it gates scheduled work; medium =
+            default for scheduled improvements; low = non-compounding cleanups;
+            none = deliberately parked (explicit only, never an accidental default).
+            Defaults to the Todo state (never Triage/Backlog); pass
+            --state "In Progress" when the issue is already being worked.
+            --parent makes the new issue a sub-issue of the given parent.
+            --assignee takes an email, a name substring, or the literal "me"
+            (the token's own user). Required when the state is a started state.
+
+        linear update ABC-NNN [--state NAME] [--title TITLE]
+                      [--description TEXT | --description-file PATH]
+                      [--project NAME] [--parent ABC-NNN] [--assignee EMAIL|me]
+                      [--priority none|urgent|high|medium|low] [--json]
+            Update state, title, description, project, parent, assignee, or priority.
+            --project moves the issue; --parent reparents it as a sub-issue.
+            Moving to a started state (e.g. In Progress) requires an assignee:
+            pass --assignee, or the issue must already have one.
+
+        linear comment ABC-NNN ("message" | --body TEXT | --body-file PATH) [--json]
+            Post a comment. Use --body-file for long/markdown bodies.
+
+        linear comment-delete COMMENT_ID [--json]
+            Delete a comment by id (ids are shown by "linear comments ABC-NNN").
+
+        linear relate ABC-AAA ABC-BBB [--type related|blocks|duplicate] [--json]
+            Link two issues (default: related).
+
+        linear project-create --team KEY --name NAME [--description TEXT]
+                      [--content TEXT | --content-file PATH] [--json]
+            Create a project on a team. --description is the one-line summary;
+            --content is the full markdown body. Move issues into it afterward
+            with `linear update ABC-NNN --project NAME`.
+
+        linear project-update --id PROJECT_ID [--name NAME] [--description TEXT]
+                      [--content TEXT | --content-file PATH] [--json]
+            Update a project's name, one-line summary, or markdown body.
+
+        linear project-list --team KEY [--json]
+            List a team's projects with their ids and state.
+    TXT
+  end
+
+  def cmd_list(args)
+    json_mode = pop_flag!(args, '--json')
+    all = pop_flag!(args, '--all')
+    team_key = pop_option!(args, '--team') || ENV['LINEAR_TEAM_KEY']
+    project_name = pop_option!(args, '--project')
+    since = pop_option!(args, '--since')
+    limit_str = pop_option!(args, '--limit')
+    limit = limit_str ? parse_limit(limit_str) : 100
+    if team_key.nil? || team_key.empty? || (project_name.nil? && since.nil?)
+      raise Error, 'Usage: linear list --team KEY (--project NAME | --since YYYY-MM-DD) [--all] [--limit N] [--json] ' \
+                   '(--team may be omitted when LINEAR_TEAM_KEY is set)'
+    end
+    if since && since !~ /\A\d{4}-\d{2}-\d{2}\z/
+      raise Error, "linear: --since must be YYYY-MM-DD, got #{since.inspect}"
+    end
+
+    filter = { team: { key: { eq: team_key } } }
+    filter[:project] = { name: { containsIgnoreCase: project_name } } if project_name
+    filter[:createdAt] = { gte: since } if since
+    filter[:state] = { type: { nin: %w[completed canceled] } } unless all
+
+    order_by = since ? 'createdAt' : 'updatedAt'
+    client = Client.new
+    nodes = []
+    cursor = nil
+    loop do
+      page_size = [limit - nodes.size, 250].min
+      break if page_size <= 0
+
+      res = client.query(<<~GQL, { filter: filter, first: page_size, after: cursor })
+        query($filter: IssueFilter!, $first: Int!, $after: String) {
+          issues(filter: $filter, first: $first, after: $after, orderBy: #{order_by}) {
+            nodes { identifier title priority state { name } project { name } createdAt updatedAt }
+            pageInfo { hasNextPage endCursor }
+          }
+        }
+      GQL
+      nodes.concat(res.dig('data', 'issues', 'nodes') || [])
+      page_info = res.dig('data', 'issues', 'pageInfo') || {}
+      break unless page_info['hasNextPage']
+
+      cursor = page_info['endCursor']
+    end
+
+    if json_mode
+      puts JSON.pretty_generate({ 'nodes' => nodes })
+      return
+    end
+
+    if nodes.empty?
+      puts '(no matches)'
+      return
+    end
+    prio = { 0 => '-', 1 => 'Urgent', 2 => 'High', 3 => 'Med', 4 => 'Low' }
+    nodes.each do |n|
+      date = ((since ? n['createdAt'] : n['updatedAt']) || '')[0, 10]
+      project = project_name ? '' : "  {#{n.dig('project', 'name')}}"
+      puts "#{n['identifier']} [#{n.dig('state', 'name')}] (#{prio[n['priority']]}) #{n['title']}  (#{date})#{project}"
+    end
+  end
+
+  module CLI
+    module_function
+
+    def run(argv)
+      cmd = argv.shift
+      case cmd
+      when 'get'      then Linear.cmd_get(argv)
+      when 'comments' then Linear.cmd_comments(argv)
+      when 'search'   then Linear.cmd_search(argv)
+      when 'list'     then Linear.cmd_list(argv)
+      when 'create'   then Linear.cmd_create(argv)
+      when 'update'   then Linear.cmd_update(argv)
+      when 'comment'  then Linear.cmd_comment(argv)
+      when 'comment-delete' then Linear.cmd_comment_delete(argv)
+      when 'relate'   then Linear.cmd_relate(argv)
+      when 'project-create' then Linear.cmd_project_create(argv)
+      when 'project-update' then Linear.cmd_project_update(argv)
+      when 'project-list'   then Linear.cmd_project_list(argv)
+      when nil, 'help', '--help', '-h' then Linear.usage
+      else
+        warn "linear: unknown subcommand #{cmd.inspect}"
+        Linear.usage
+        exit 1
+      end
+    rescue Error => e
+      abort e.message
+    end
   end
 end
 
-cmd = ARGV.shift
-case cmd
-when 'get'      then cmd_get(ARGV)
-when 'comments' then cmd_comments(ARGV)
-when 'search'   then cmd_search(ARGV)
-when 'list'     then cmd_list(ARGV)
-when 'create'   then cmd_create(ARGV)
-when 'update'   then cmd_update(ARGV)
-when 'comment'  then cmd_comment(ARGV)
-when 'comment-delete' then cmd_comment_delete(ARGV)
-when 'relate'   then cmd_relate(ARGV)
-when 'project-create' then cmd_project_create(ARGV)
-when 'project-update' then cmd_project_update(ARGV)
-when 'project-list'   then cmd_project_list(ARGV)
-when nil, 'help', '--help', '-h' then usage
-else
-  warn "linear: unknown subcommand #{cmd.inspect}"
-  usage
-  exit 1
-end
+Linear::CLI.run(ARGV) if $PROGRAM_NAME == __FILE__
