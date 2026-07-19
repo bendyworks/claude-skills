@@ -857,4 +857,19 @@ class CliArgumentRejectionTest < Minitest::Test
     assert_match(/--slug/, error.message)
     assert_match(/--delete/, error.message)
   end
+
+  # Last-wins would silently discard the first value -- the same
+  # dropped-input shape as a stray positional, and destructive when
+  # the surviving value aims a delete at the wrong section. The
+  # nonexistent plan paths keep the pre-guard failure local, so the
+  # test never reaches the network.
+  def test_run_aborts_on_a_repeated_value_option_instead_of_last_wins
+    error = nil
+    capture_io do
+      error = assert_raises(SystemExit) do
+        GhIssueSync::CLI.run(['checklist', '42', '--plan', '/nonexistent-plan.md', '--plan', '/other-nonexistent.md'])
+      end
+    end
+    assert_match(/duplicate --plan/, error.message)
+  end
 end

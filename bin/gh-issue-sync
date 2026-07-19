@@ -545,11 +545,12 @@ module GhIssueSync
   TXT
 
   class CLI
-    # Full-match so OptionParser yields the whole value, not the
-    # matched prefix. An option value must not begin with a dash: a
-    # mandatory-argument option would otherwise swallow a following
-    # flag as its value ('--slug --delete' parses as slug "--delete"
-    # with no delete flag) and silently act on the misread command.
+    # An option value must not begin with a dash: a mandatory-argument
+    # option would otherwise swallow a following flag as its value
+    # ('--slug --delete' parses as slug "--delete" with no delete
+    # flag) and silently act on the misread command. Anchored end to
+    # end to state explicitly the whole-argument match optparse
+    # requires of acceptance patterns.
     VALUE_NOT_FLAG = /\A[^-].*\z/m
 
     def self.run(argv)
@@ -579,10 +580,10 @@ module GhIssueSync
     def section(argv)
       options = {}
       rest = parse_options(argv, 'section NNN (--file <md> | --delete) --slug <key> [--repo owner/name]') do |o|
-        o.on('--file PATH', VALUE_NOT_FLAG, 'markdown file whose content fills the section') { |v| options[:file] = v }
-        o.on('--slug KEY', VALUE_NOT_FLAG, 'key naming the marker-delimited section') { |v| options[:slug] = v }
+        o.on('--file PATH', VALUE_NOT_FLAG, 'markdown file whose content fills the section') { |v| set_once(options, :file, '--file', v) }
+        o.on('--slug KEY', VALUE_NOT_FLAG, 'key naming the marker-delimited section') { |v| set_once(options, :slug, '--slug', v) }
         o.on('--delete', "remove the slug's section instead of upserting") { options[:delete] = true }
-        o.on('--repo NAME', VALUE_NOT_FLAG, 'owner/name pass-through to gh') { |v| options[:repo] = v }
+        o.on('--repo NAME', VALUE_NOT_FLAG, 'owner/name pass-through to gh') { |v| set_once(options, :repo, '--repo', v) }
       end
       number = GhIssueSync.parse_issue_number!(rest)
       raise Error, 'section requires --slug <key>' unless options[:slug]
@@ -639,9 +640,9 @@ module GhIssueSync
       subcommand = reconcile ? 'reconcile' : 'checklist'
       options = {}
       rest = parse_options(argv, "#{subcommand} NNN --plan <plan.md> [--heading <slug>] [--repo owner/name]") do |o|
-        o.on('--plan PATH', VALUE_NOT_FLAG, 'plan file whose To-dos drive the sync') { |v| options[:plan] = v }
-        o.on('--heading SLUG', VALUE_NOT_FLAG, 'visible heading suffix for multi-plan issues') { |v| options[:heading] = v }
-        o.on('--repo NAME', VALUE_NOT_FLAG, 'owner/name pass-through to gh') { |v| options[:repo] = v }
+        o.on('--plan PATH', VALUE_NOT_FLAG, 'plan file whose To-dos drive the sync') { |v| set_once(options, :plan, '--plan', v) }
+        o.on('--heading SLUG', VALUE_NOT_FLAG, 'visible heading suffix for multi-plan issues') { |v| set_once(options, :heading, '--heading', v) }
+        o.on('--repo NAME', VALUE_NOT_FLAG, 'owner/name pass-through to gh') { |v| set_once(options, :repo, '--repo', v) }
       end
       number = GhIssueSync.parse_issue_number!(rest)
       plan_path = options[:plan]
@@ -674,6 +675,16 @@ module GhIssueSync
       parser.permute(argv)
     rescue OptionParser::ParseError => e
       raise Error, e.message
+    end
+
+    # Last-wins on a repeated option would silently discard the first
+    # value -- the same dropped-input shape as a stray positional, and
+    # destructive when the surviving value aims a delete at the wrong
+    # section.
+    def set_once(options, key, flag, value)
+      raise Error, "duplicate #{flag}" if options.key?(key)
+
+      options[key] = value
     end
 
     def fetch_body(number, repo)
