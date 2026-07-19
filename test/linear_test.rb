@@ -91,11 +91,6 @@ class DispatchTest < LinearTestCase
     assert_includes cli_stdout(['-h']), 'semantic CLI for Linear'
   end
 
-  def test_help_ignores_stray_arguments
-    # Recorded decision: help stays lenient about strays.
-    assert_includes cli_stdout(%w[help junk]), 'semantic CLI for Linear'
-  end
-
   def test_unknown_subcommand_warns_prints_usage_and_exits_nonzero
     status = nil
     out, err = capture_io do
@@ -108,54 +103,73 @@ class DispatchTest < LinearTestCase
   end
 end
 
-# Pins of the remaining silent drops: the parser ignores the offending
-# token and the command sails on to the token-missing sentinel. Every
-# case left here is a stray positional, which the arity guard flips to
-# a rejection message.
-class SilentDropPinsTest < LinearTestCase
-  def test_get_silently_ignores_stray_positional
-    assert_equal TOKEN_MISSING, abort_message(%w[get ABC-1 --full extra])
+# A positional the subcommand has no slot for means part of the typed
+# command was not understood, so every subcommand but comment (whose
+# trailing words are the message) and help now rejects one.
+class StrayPositionalRejectionsTest < LinearTestCase
+  def test_get_rejects_stray_positional
+    assert_equal 'linear: unexpected extra arguments: "extra"', abort_message(%w[get ABC-1 --full extra])
   end
 
-  def test_comments_silently_ignores_stray_positional
-    assert_equal TOKEN_MISSING, abort_message(%w[comments ABC-1 extra])
+  def test_comments_rejects_stray_positional
+    assert_equal 'linear: unexpected extra arguments: "extra"', abort_message(%w[comments ABC-1 extra])
   end
 
-  def test_search_silently_ignores_stray_positional
-    assert_equal TOKEN_MISSING, abort_message(%w[search term --team ABC extra])
+  def test_search_rejects_stray_positional
+    assert_equal 'linear: unexpected extra arguments: "extra"', abort_message(%w[search term --team ABC extra])
   end
 
-  def test_list_silently_ignores_stray_positional
-    assert_equal TOKEN_MISSING, abort_message(%w[list --team ABC --project Foo stray])
+  def test_list_rejects_stray_positional
+    assert_equal 'linear: unexpected extra arguments: "stray"', abort_message(%w[list --team ABC --project Foo stray])
   end
 
-  def test_update_silently_ignores_stray_identifier
-    assert_equal TOKEN_MISSING, abort_message(%w[update ABC-1 ABC-2 --state Done])
+  def test_update_rejects_second_identifier
+    # The shape that used to update ABC-1 and drop ABC-2 on the floor.
+    assert_equal 'linear: unexpected extra arguments: "ABC-2"', abort_message(%w[update ABC-1 ABC-2 --state Done])
   end
 
-  def test_relate_silently_ignores_third_identifier
-    assert_equal TOKEN_MISSING, abort_message(%w[relate ABC-1 ABC-2 ABC-3])
+  def test_relate_rejects_third_identifier
+    assert_equal 'linear: unexpected extra arguments: "ABC-3"', abort_message(%w[relate ABC-1 ABC-2 ABC-3])
   end
 
-  def test_comment_delete_silently_ignores_stray_positional
-    assert_equal TOKEN_MISSING, abort_message(%w[comment-delete some-id extra])
+  def test_comment_delete_rejects_stray_positional
+    assert_equal 'linear: unexpected extra arguments: "extra"', abort_message(%w[comment-delete some-id extra])
   end
 
-  def test_create_silently_ignores_stray_positional
-    assert_equal TOKEN_MISSING,
+  def test_create_rejects_stray_positional
+    assert_equal 'linear: unexpected extra arguments: "stray"',
                  abort_message(%w[create --team ABC --title Title --priority medium --no-project stray])
   end
 
-  def test_project_create_silently_ignores_stray_positional
-    assert_equal TOKEN_MISSING, abort_message(%w[project-create --team ABC --name Foo stray])
+  def test_project_create_rejects_stray_positional
+    assert_equal 'linear: unexpected extra arguments: "stray"',
+                 abort_message(%w[project-create --team ABC --name Foo stray])
   end
 
-  def test_project_update_silently_ignores_stray_positional
-    assert_equal TOKEN_MISSING, abort_message(%w[project-update --id X --name Foo stray])
+  def test_project_update_rejects_stray_positional
+    assert_equal 'linear: unexpected extra arguments: "stray"',
+                 abort_message(%w[project-update --id X --name Foo stray])
   end
 
-  def test_project_list_silently_ignores_stray_positional
-    assert_equal TOKEN_MISSING, abort_message(%w[project-list --team ABC stray])
+  def test_project_list_rejects_stray_positional
+    assert_equal 'linear: unexpected extra arguments: "stray"', abort_message(%w[project-list --team ABC stray])
+  end
+
+  def test_every_stray_is_listed_and_inspect_quoted
+    # Inspect-quoted because a mis-quoted shell line can leave a stray
+    # containing spaces, which a bare token would read as two.
+    assert_equal 'linear: unexpected extra arguments: "a b", "c"', abort_message(['get', 'ABC-1', 'a b', 'c'])
+  end
+
+  def test_comment_keeps_its_trailing_positionals_as_the_message
+    # The sole opt-out: reaching the sentinel proves the parser took
+    # the trailing words rather than rejecting them.
+    assert_equal TOKEN_MISSING, abort_message(%w[comment ABC-1 words of message])
+  end
+
+  def test_help_stays_lenient_about_strays
+    # Recorded decision, restated here next to the guard it exempts.
+    assert_includes cli_stdout(%w[help junk]), 'semantic CLI for Linear'
   end
 end
 
@@ -333,39 +347,41 @@ class UsageErrorsTest < LinearTestCase
                  abort_message(%w[project-update --id X])
   end
 
+  def test_project_update_accepts_a_named_field
+    # Landing on the sentinel rather than "nothing to update" is the
+    # observable proof that --name's value reached the mutation input,
+    # not just that the parser tolerated the flag.
+    assert_equal TOKEN_MISSING, abort_message(%w[project-update --id X --name Foo])
+  end
+
   def test_project_list_requires_team_when_env_unset
     assert_equal 'Usage: linear project-list --team KEY [--json] (or set LINEAR_TEAM_KEY)',
                  abort_message(['project-list'])
   end
 end
 
-# The OptionParser-based subcommands currently let unknown-option
-# errors escape uncaught (a raw backtrace, not an abort). Pinned so
-# the change to friendly rejection messages is a visible flip.
-class OptionParserEscapePinsTest < LinearTestCase
-  def test_create_unknown_option_escapes_uncaught
-    error = assert_raises(OptionParser::InvalidOption) { run_scrubbed(%w[create --bogus]) }
-    assert_equal 'invalid option: --bogus', error.message
+# These five subcommands used to let OptionParser's own exception
+# escape as a raw backtrace. Routing them through parse_options turns
+# each into an ordinary aborted-with-a-message failure.
+class UncaughtParseErrorRejectionsTest < LinearTestCase
+  def test_create_rejects_unknown_option
+    assert_equal 'linear: invalid option: --bogus', abort_message(%w[create --bogus])
   end
 
-  def test_update_unknown_option_escapes_uncaught
-    error = assert_raises(OptionParser::InvalidOption) { run_scrubbed(%w[update ABC-1 --bogus]) }
-    assert_equal 'invalid option: --bogus', error.message
+  def test_update_rejects_unknown_option
+    assert_equal 'linear: invalid option: --bogus', abort_message(%w[update ABC-1 --bogus])
   end
 
-  def test_relate_unknown_option_escapes_uncaught
-    error = assert_raises(OptionParser::InvalidOption) { run_scrubbed(%w[relate ABC-1 ABC-2 --bogus]) }
-    assert_equal 'invalid option: --bogus', error.message
+  def test_relate_rejects_unknown_option
+    assert_equal 'linear: invalid option: --bogus', abort_message(%w[relate ABC-1 ABC-2 --bogus])
   end
 
-  def test_project_create_unknown_option_escapes_uncaught
-    error = assert_raises(OptionParser::InvalidOption) { run_scrubbed(%w[project-create --bogus]) }
-    assert_equal 'invalid option: --bogus', error.message
+  def test_project_create_rejects_unknown_option
+    assert_equal 'linear: invalid option: --bogus', abort_message(%w[project-create --bogus])
   end
 
-  def test_project_update_unknown_option_escapes_uncaught
-    error = assert_raises(OptionParser::InvalidOption) { run_scrubbed(%w[project-update --bogus]) }
-    assert_equal 'invalid option: --bogus', error.message
+  def test_project_update_rejects_unknown_option
+    assert_equal 'linear: invalid option: --bogus', abort_message(%w[project-update --bogus])
   end
 end
 

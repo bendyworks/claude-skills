@@ -159,6 +159,21 @@ module Linear
     raise Error, "linear: #{e.message}#{hint ? " #{hint}" : ''}"
   end
 
+  # Returns the first `count` positionals, refusing any beyond them. A
+  # stray positional means part of the typed command was not
+  # understood, and dropping it silently lets the command act on half
+  # of what was typed: `update ABC-1 ABC-2 --state Done` used to move
+  # ABC-1 alone. Strays are inspect-quoted because a mis-quoted shell
+  # line can leave one containing spaces, which a bare token would
+  # read as two. Missing positionals are not this guard's business --
+  # each subcommand reports those against its own usage banner.
+  def take_positionals!(rest, count)
+    extras = rest.drop(count)
+    raise Error, "linear: unexpected extra arguments: #{extras.map(&:inspect).join(', ')}" unless extras.empty?
+
+    rest.first(count)
+  end
+
   def parse_limit(value)
     Integer(value)
   rescue ArgumentError
@@ -224,7 +239,7 @@ module Linear
       o.on('--full') { full = true }
       o.on('--json') { json_mode = true }
     end
-    identifier = rest.first
+    identifier = take_positionals!(rest, 1).first
     raise Error, usage unless identifier
 
     fields = ISSUE_CORE_FIELDS.dup
@@ -257,7 +272,7 @@ module Linear
     rest = parse_options(args, usage) do |o|
       o.on('--json') { json_mode = true }
     end
-    identifier = rest.first
+    identifier = take_positionals!(rest, 1).first
     raise Error, usage unless identifier
 
     client = Client.new
@@ -297,7 +312,7 @@ module Linear
       o.on('--json') { json_mode = true }
     end
     limit = limit_str ? parse_limit(limit_str) : 25
-    term = rest.first
+    term = take_positionals!(rest, 1).first
     raise Error, usage if term.nil? || term.empty?
 
     filter = {
@@ -346,10 +361,10 @@ module Linear
     priority = nil
     json_mode = false
 
-    parser = OptionParser.new do |o|
-      o.banner = 'Usage: linear create --team KEY --title TITLE --priority LEVEL (--project NAME | --no-project) ' \
-                 '[--description TEXT | --description-file PATH] [--state NAME] [--parent ABC-NNN] ' \
-                 '[--assignee EMAIL|me] [--json]'
+    usage = 'Usage: linear create --team KEY --title TITLE --priority LEVEL (--project NAME | --no-project) ' \
+            '[--description TEXT | --description-file PATH] [--state NAME] [--parent ABC-NNN] ' \
+            '[--assignee EMAIL|me] [--json]'
+    rest = parse_options(args, usage) do |o|
       o.on('--team KEY') { |v| team_key = v }
       o.on('--priority LEVEL', 'REQUIRED: urgent|high|medium|low, or an explicit none (or 0-4)') { |v| priority = v }
       o.on('--project NAME') { |v| project_name = v }
@@ -364,19 +379,19 @@ module Linear
       o.on('--no-project') { no_project = true }
       o.on('--json') { json_mode = true }
     end
-    parser.parse!(args)
+    take_positionals!(rest, 0)
 
-    raise Error, parser.banner if team_key.nil? || title.nil?
+    raise Error, usage if team_key.nil? || title.nil?
     if priority.nil?
       raise Error, "linear: --priority is required on create (urgent|high|medium|low, or an explicit none).\n" \
                    "Guidelines: urgent = money/data actively wrong in prod, drop current work; " \
                    "high = users can hit it today or it gates scheduled work, this cycle; " \
                    "medium = default for scheduled improvements (refactors, epic phases, bugs with a workaround); " \
                    "low = non-compounding cleanups; none = deliberately parked (spike awaiting a decision).\n" \
-                   "#{parser.banner}"
+                   "#{usage}"
     end
     unless project_name || no_project
-      raise Error, "linear: --project is required (or pass --no-project to override).\n#{parser.banner}"
+      raise Error, "linear: --project is required (or pass --no-project to override).\n#{usage}"
     end
 
     description = File.read(description_file) if description_file
@@ -463,10 +478,10 @@ module Linear
     assignee = nil
     json_mode = false
 
-    parser = OptionParser.new do |o|
-      o.banner = 'Usage: linear update ABC-NNN [--state NAME] [--title TITLE] ' \
-                 '[--description TEXT | --description-file PATH] [--project NAME] [--parent ABC-NNN] ' \
-                 '[--assignee EMAIL|me] [--priority none|urgent|high|medium|low] [--json]'
+    usage = 'Usage: linear update ABC-NNN [--state NAME] [--title TITLE] ' \
+            '[--description TEXT | --description-file PATH] [--project NAME] [--parent ABC-NNN] ' \
+            '[--assignee EMAIL|me] [--priority none|urgent|high|medium|low] [--json]'
+    rest = parse_options(args, usage) do |o|
       o.on('--priority LEVEL', 'Set priority (none|urgent|high|medium|low or 0-4)') { |v| priority = v }
       o.on('--state NAME') { |v| state_name = v }
       o.on('--title TITLE') { |v| title = v }
@@ -479,9 +494,8 @@ module Linear
       end
       o.on('--json') { json_mode = true }
     end
-    rest = parser.parse(args)
-    identifier = rest.first
-    raise Error, parser.banner unless identifier
+    identifier = take_positionals!(rest, 1).first
+    raise Error, usage unless identifier
 
     description = File.read(description_file) if description_file
 
@@ -597,7 +611,7 @@ module Linear
     rest = parse_options(args, usage) do |o|
       o.on('--json') { json_mode = true }
     end
-    comment_id = rest.first
+    comment_id = take_positionals!(rest, 1).first
     raise Error, usage if comment_id.nil? || comment_id.empty?
 
     client = Client.new
@@ -619,14 +633,13 @@ module Linear
   def cmd_relate(args)
     type = 'related'
     json_mode = false
-    parser = OptionParser.new do |o|
-      o.banner = 'Usage: linear relate ABC-AAA ABC-BBB [--type related|blocks|duplicate] [--json]'
+    usage = 'Usage: linear relate ABC-AAA ABC-BBB [--type related|blocks|duplicate] [--json]'
+    rest = parse_options(args, usage) do |o|
       o.on('--type TYPE') { |v| type = v }
       o.on('--json') { json_mode = true }
     end
-    rest = parser.parse(args)
-    source, target = rest[0], rest[1]
-    raise Error, parser.banner if source.nil? || target.nil?
+    source, target = take_positionals!(rest, 2)
+    raise Error, usage if source.nil? || target.nil?
 
     client = Client.new
     source_issue = client.resolve_issue(source, fields: 'id identifier')
@@ -658,9 +671,9 @@ module Linear
     content = nil
     content_file = nil
     json_mode = false
-    parser = OptionParser.new do |o|
-      o.banner = 'Usage: linear project-create --team KEY --name NAME ' \
-                 '[--description TEXT] [--content TEXT | --content-file PATH] [--json]'
+    usage = 'Usage: linear project-create --team KEY --name NAME ' \
+            '[--description TEXT] [--content TEXT | --content-file PATH] [--json]'
+    rest = parse_options(args, usage) do |o|
       o.on('--team KEY') { |v| team_key = v }
       o.on('--name NAME') { |v| name = v }
       o.on('--description TEXT', 'Short one-line project summary') { |v| description = v }
@@ -668,8 +681,8 @@ module Linear
       o.on('--content-file PATH', 'Read project body (markdown) from a file') { |v| content_file = v }
       o.on('--json') { json_mode = true }
     end
-    parser.parse!(args)
-    raise Error, parser.banner if team_key.nil? || name.nil?
+    take_positionals!(rest, 0)
+    raise Error, usage if team_key.nil? || name.nil?
     content = File.read(content_file) if content_file
 
     client = Client.new
@@ -712,9 +725,9 @@ module Linear
     content = nil
     content_file = nil
     json_mode = false
-    parser = OptionParser.new do |o|
-      o.banner = 'Usage: linear project-update --id PROJECT_ID ' \
-                 '[--name NAME] [--description TEXT] [--content TEXT | --content-file PATH] [--json]'
+    usage = 'Usage: linear project-update --id PROJECT_ID ' \
+            '[--name NAME] [--description TEXT] [--content TEXT | --content-file PATH] [--json]'
+    rest = parse_options(args, usage) do |o|
       o.on('--id ID') { |v| id = v }
       o.on('--name NAME') { |v| name = v }
       o.on('--description TEXT', 'Short one-line project summary') { |v| description = v }
@@ -722,8 +735,8 @@ module Linear
       o.on('--content-file PATH', 'Read project body (markdown) from a file') { |v| content_file = v }
       o.on('--json') { json_mode = true }
     end
-    parser.parse!(args)
-    raise Error, parser.banner if id.nil?
+    take_positionals!(rest, 0)
+    raise Error, usage if id.nil?
     content = File.read(content_file) if content_file
 
     input = {}
@@ -755,10 +768,11 @@ module Linear
     usage = 'Usage: linear project-list --team KEY [--json] (or set LINEAR_TEAM_KEY)'
     json_mode = false
     team_opt = nil
-    parse_options(args, usage) do |o|
+    rest = parse_options(args, usage) do |o|
       o.on('--team KEY', VALUE_NOT_FLAG) { |v| team_opt = v }
       o.on('--json') { json_mode = true }
     end
+    take_positionals!(rest, 0)
     team_key = team_opt || ENV['LINEAR_TEAM_KEY']
     raise Error, usage if team_key.nil? || team_key.empty?
     client = Client.new
@@ -860,7 +874,7 @@ module Linear
     project_name = nil
     since = nil
     limit_str = nil
-    parse_options(args, usage) do |o|
+    rest = parse_options(args, usage) do |o|
       o.on('--team KEY', VALUE_NOT_FLAG) { |v| team_opt = v }
       o.on('--project NAME', VALUE_NOT_FLAG) { |v| project_name = v }
       o.on('--since YYYY-MM-DD', VALUE_NOT_FLAG) { |v| since = v }
@@ -868,6 +882,7 @@ module Linear
       o.on('--all') { all = true }
       o.on('--json') { json_mode = true }
     end
+    take_positionals!(rest, 0)
     team_key = team_opt || ENV['LINEAR_TEAM_KEY']
     limit = limit_str ? parse_limit(limit_str) : 100
     raise Error, usage if team_key.nil? || team_key.empty? || (project_name.nil? && since.nil?)
