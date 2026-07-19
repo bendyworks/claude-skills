@@ -13,15 +13,26 @@
 
 require 'minitest/autorun'
 
+# The load runs the module body before any setup scrub can protect it,
+# so bin/linear's module body must stay side-effect-free: no env reads,
+# no network, nothing but definitions.
 load File.expand_path('../bin/linear', __dir__)
 
-# Every argument-validation path in bin/linear runs before
+# The usage and requiredness checks in every subcommand run before
 # Linear::Client is instantiated, and the client's first act is to
 # read LINEAR_API_TOKEN. With the token scrubbed, any invocation whose
-# parsing succeeds fails deterministically on this message before any
-# network call -- so reaching it proves the parser accepted the
-# arguments, and no test ever talks to the real API.
+# argv the parser accepts fails deterministically on this message
+# before any network call -- so reaching it proves the parser accepted
+# the arguments, and no test ever talks to the real API. It proves
+# only that: the identifier-format checks in get/comments run AFTER
+# the client is built, so with the token scrubbed a malformed
+# identifier also lands here, not on its own message.
 TOKEN_MISSING = 'linear: LINEAR_API_TOKEN env var not set'
+
+# Shared across tests so the copies cannot drift from each other;
+# still independent literals, never imported from bin/linear.
+SEARCH_USAGE = 'Usage: linear search "phrase" [--team KEY] [--limit N] [--json]'
+COMMENT_USAGE = 'Usage: linear comment ABC-NNN ("message" | --body TEXT | --body-file PATH)'
 
 # Base class: scrubs the Linear-related environment so results do not
 # depend on this machine's token, default team, or POSIX parsing mode.
@@ -33,7 +44,7 @@ class LinearTestCase < Minitest::Test
   end
 
   def teardown
-    @saved_env.each { |key, value| ENV[key] = value if value }
+    @saved_env.each { |key, value| value ? ENV[key] = value : ENV.delete(key) }
   end
 
   # Runs the CLI expecting an abort; returns the SystemExit message
@@ -41,7 +52,7 @@ class LinearTestCase < Minitest::Test
   def abort_message(argv)
     message = nil
     capture_io do
-      error = assert_raises(SystemExit) { Linear::CLI.run(argv) }
+      error = assert_raises(SystemExit) { run_scrubbed(argv) }
       message = error.message
     end
     message
@@ -49,8 +60,17 @@ class LinearTestCase < Minitest::Test
 
   # Runs the CLI expecting a clean return; returns captured stdout.
   def cli_stdout(argv)
-    out, _err = capture_io { Linear::CLI.run(argv) }
+    out, _err = capture_io { run_scrubbed(argv) }
     out
+  end
+
+  # Defense in depth: the sentinel pins only stay offline while the
+  # env scrub holds, and one of them reaches a live commentDelete
+  # mutation if it does not. Refuse to run the CLI with a real token
+  # present (e.g. a subclass overriding setup without super).
+  def run_scrubbed(argv)
+    flunk 'LINEAR_API_TOKEN leaked into the test environment' if ENV.key?('LINEAR_API_TOKEN')
+    Linear::CLI.run(argv)
   end
 end
 
@@ -77,11 +97,9 @@ class DispatchTest < LinearTestCase
   end
 
   def test_unknown_subcommand_warns_prints_usage_and_exits_nonzero
-    out = nil
-    err = nil
     status = nil
     out, err = capture_io do
-      error = assert_raises(SystemExit) { Linear::CLI.run(['bogus-subcommand']) }
+      error = assert_raises(SystemExit) { run_scrubbed(['bogus-subcommand']) }
       status = error.status
     end
     assert_equal 1, status
@@ -90,15 +108,20 @@ class DispatchTest < LinearTestCase
   end
 end
 
-# Pins of the current silent drops: the parser ignores the offending
-# token and the command sails on to the token-missing sentinel. The
-# hardening flips each of these to expect a rejection message instead.
+# Pins of the current silent drops: the parser accepts the offending
+# argv (usually by ignoring the bad token; the one leading-flag case
+# below takes it as the identifier) and the command sails on to the
+# token-missing sentinel. The hardening flips each of these to expect
+# a rejection message instead.
 class SilentDropPinsTest < LinearTestCase
   def test_get_silently_drops_unknown_flag
     assert_equal TOKEN_MISSING, abort_message(%w[get ABC-1 --fulll])
   end
 
-  def test_get_silently_drops_unknown_flag_before_identifier
+  def test_get_takes_leading_unknown_flag_as_the_identifier
+    # Not a drop: --unknown is consumed as the identifier (args.first)
+    # and ABC-1 becomes the stray. The sentinel still fires because
+    # Client.new precedes the identifier-format check.
     assert_equal TOKEN_MISSING, abort_message(%w[get --unknown ABC-1])
   end
 
@@ -145,6 +168,10 @@ class SilentDropPinsTest < LinearTestCase
     assert_equal TOKEN_MISSING, abort_message(%w[project-create --team ABC --name Foo stray])
   end
 
+  def test_project_update_silently_ignores_stray_positional
+    assert_equal TOKEN_MISSING, abort_message(%w[project-update --id X --name Foo stray])
+  end
+
   def test_project_list_silently_ignores_stray_positional
     assert_equal TOKEN_MISSING, abort_message(%w[project-list --team ABC stray])
   end
@@ -162,11 +189,11 @@ class UsageErrorsTest < LinearTestCase
   end
 
   def test_search_requires_term
-    assert_equal 'Usage: linear search "phrase" [--team KEY] [--limit N] [--json]', abort_message(['search'])
+    assert_equal SEARCH_USAGE, abort_message(['search'])
   end
 
   def test_search_rejects_empty_term
-    assert_equal 'Usage: linear search "phrase" [--team KEY] [--limit N] [--json]', abort_message(['search', ''])
+    assert_equal SEARCH_USAGE, abort_message(['search', ''])
   end
 
   def test_search_team_requires_value
@@ -174,7 +201,9 @@ class UsageErrorsTest < LinearTestCase
   end
 
   def test_search_team_rejects_flag_shaped_value
-    assert_equal 'linear: --team requires a value', abort_message(%w[search --team --json])
+    # --limit is the flag-shaped value here; --json cannot be, because
+    # cmd_search pops it before --team's value is read.
+    assert_equal 'linear: --team requires a value', abort_message(%w[search term --team --limit 5])
   end
 
   def test_search_limit_requires_integer
@@ -217,18 +246,15 @@ class UsageErrorsTest < LinearTestCase
   end
 
   def test_comment_requires_identifier
-    assert_equal 'Usage: linear comment ABC-NNN ("message" | --body TEXT | --body-file PATH)',
-                 abort_message(['comment'])
+    assert_equal COMMENT_USAGE, abort_message(['comment'])
   end
 
   def test_comment_requires_body
-    assert_equal 'Usage: linear comment ABC-NNN ("message" | --body TEXT | --body-file PATH)',
-                 abort_message(%w[comment ABC-1])
+    assert_equal COMMENT_USAGE, abort_message(%w[comment ABC-1])
   end
 
   def test_comment_with_body_but_no_identifier_shows_usage
-    assert_equal 'Usage: linear comment ABC-NNN ("message" | --body TEXT | --body-file PATH)',
-                 abort_message(%w[comment --body text])
+    assert_equal COMMENT_USAGE, abort_message(%w[comment --body text])
   end
 
   def test_comment_rejects_unknown_flag
@@ -247,15 +273,20 @@ class UsageErrorsTest < LinearTestCase
   end
 
   def test_relate_requires_two_identifiers
-    assert_includes abort_message(%w[relate ABC-1]), 'Usage: linear relate ABC-AAA ABC-BBB'
+    assert_equal 'Usage: linear relate ABC-AAA ABC-BBB [--type related|blocks|duplicate] [--json]',
+                 abort_message(%w[relate ABC-1])
   end
 
   def test_project_create_requires_team_and_name
-    assert_includes abort_message(%w[project-create --team ABC]), 'Usage: linear project-create --team KEY --name NAME'
+    assert_equal 'Usage: linear project-create --team KEY --name NAME ' \
+                 '[--description TEXT] [--content TEXT | --content-file PATH] [--json]',
+                 abort_message(%w[project-create --team ABC])
   end
 
   def test_project_update_requires_id
-    assert_includes abort_message(['project-update']), 'Usage: linear project-update --id PROJECT_ID'
+    assert_equal 'Usage: linear project-update --id PROJECT_ID ' \
+                 '[--name NAME] [--description TEXT] [--content TEXT | --content-file PATH] [--json]',
+                 abort_message(['project-update'])
   end
 
   def test_project_update_requires_a_field
@@ -274,28 +305,33 @@ end
 # the change to friendly rejection messages is a visible flip.
 class OptionParserEscapePinsTest < LinearTestCase
   def test_create_unknown_option_escapes_uncaught
-    error = assert_raises(OptionParser::InvalidOption) { Linear::CLI.run(%w[create --bogus]) }
+    error = assert_raises(OptionParser::InvalidOption) { run_scrubbed(%w[create --bogus]) }
     assert_equal 'invalid option: --bogus', error.message
   end
 
   def test_update_unknown_option_escapes_uncaught
-    error = assert_raises(OptionParser::InvalidOption) { Linear::CLI.run(%w[update ABC-1 --bogus]) }
+    error = assert_raises(OptionParser::InvalidOption) { run_scrubbed(%w[update ABC-1 --bogus]) }
     assert_equal 'invalid option: --bogus', error.message
   end
 
   def test_relate_unknown_option_escapes_uncaught
-    error = assert_raises(OptionParser::InvalidOption) { Linear::CLI.run(%w[relate ABC-1 ABC-2 --bogus]) }
+    error = assert_raises(OptionParser::InvalidOption) { run_scrubbed(%w[relate ABC-1 ABC-2 --bogus]) }
     assert_equal 'invalid option: --bogus', error.message
   end
 
   def test_project_create_unknown_option_escapes_uncaught
-    error = assert_raises(OptionParser::InvalidOption) { Linear::CLI.run(%w[project-create --bogus]) }
+    error = assert_raises(OptionParser::InvalidOption) { run_scrubbed(%w[project-create --bogus]) }
+    assert_equal 'invalid option: --bogus', error.message
+  end
+
+  def test_project_update_unknown_option_escapes_uncaught
+    error = assert_raises(OptionParser::InvalidOption) { run_scrubbed(%w[project-update --bogus]) }
     assert_equal 'invalid option: --bogus', error.message
   end
 end
 
 class PureHelpersTest < LinearTestCase
-  def test_parse_limit_accepts_decimal
+  def test_parse_limit_accepts_base_ten
     assert_equal 25, Linear.parse_limit('25')
   end
 
@@ -331,7 +367,8 @@ class PureHelpersTest < LinearTestCase
   def test_resolve_priority_rejects_out_of_range_and_nonsense
     error = assert_raises(Linear::Error) { Linear.resolve_priority('7') }
     assert_equal 'linear: invalid priority "7"; use none|urgent|high|medium|low or 0-4', error.message
-    assert_raises(Linear::Error) { Linear.resolve_priority('nonsense') }
+    error = assert_raises(Linear::Error) { Linear.resolve_priority('nonsense') }
+    assert_equal 'linear: invalid priority "nonsense"; use none|urgent|high|medium|low or 0-4', error.message
   end
 
   def test_pop_flag_removes_first_occurrence_and_reports_presence
@@ -354,7 +391,8 @@ class PureHelpersTest < LinearTestCase
   def test_pop_option_rejects_missing_and_double_dash_values
     error = assert_raises(Linear::Error) { Linear.pop_option!(%w[--team], '--team') }
     assert_equal 'linear: --team requires a value', error.message
-    assert_raises(Linear::Error) { Linear.pop_option!(%w[--team --json], '--team') }
+    error = assert_raises(Linear::Error) { Linear.pop_option!(%w[--team --json], '--team') }
+    assert_equal 'linear: --team requires a value', error.message
   end
 
   def test_pop_option_currently_accepts_single_dash_values
