@@ -209,14 +209,6 @@ class ParseRejectionsTest < LinearTestCase
     assert_equal 'linear: invalid option: --bogus', abort_message(%w[project-list --team ABC --bogus])
   end
 
-  def test_search_repeated_limit_takes_the_last_value
-    # Both --limit pairs now reach the parser, where last-one-wins
-    # feeds "abc" to parse_limit. Rejecting the repeat outright is the
-    # set_once guard's job, which flips this pin again.
-    assert_equal 'linear: --limit must be an integer, got "abc"',
-                 abort_message(%w[search term --limit 5 --limit abc])
-  end
-
   def test_double_dash_terminator_protects_a_dash_leading_search_term
     # The escape hatch for values the leading-dash guard would reject.
     assert_equal TOKEN_MISSING, abort_message(['search', '--', '-not-a-flag'])
@@ -357,6 +349,92 @@ class UsageErrorsTest < LinearTestCase
   def test_project_list_requires_team_when_env_unset
     assert_equal 'Usage: linear project-list --team KEY [--json] (or set LINEAR_TEAM_KEY)',
                  abort_message(['project-list'])
+  end
+end
+
+# Repeating a value-taking option used to keep the last value and
+# discard the first -- the same dropped-input shape as a stray
+# positional, and worse when the surviving value aims the command at
+# a different issue or project than the one typed first.
+class DuplicateOptionRejectionsTest < LinearTestCase
+  def test_search_rejects_duplicate_team
+    assert_equal 'linear: duplicate --team', abort_message(%w[search term --team A --team B])
+  end
+
+  def test_search_rejects_duplicate_limit
+    assert_equal 'linear: duplicate --limit', abort_message(%w[search term --limit 5 --limit 9])
+  end
+
+  def test_list_rejects_duplicate_project
+    assert_equal 'linear: duplicate --project', abort_message(%w[list --team ABC --project P --project Q])
+  end
+
+  def test_project_list_rejects_duplicate_team
+    assert_equal 'linear: duplicate --team', abort_message(%w[project-list --team A --team B])
+  end
+
+  def test_create_rejects_duplicate_team
+    assert_equal 'linear: duplicate --team',
+                 abort_message(%w[create --team A --team B --title T --priority medium --no-project])
+  end
+
+  def test_update_rejects_duplicate_state
+    assert_equal 'linear: duplicate --state', abort_message(%w[update ABC-1 --state A --state B])
+  end
+
+  def test_relate_rejects_duplicate_type
+    assert_equal 'linear: duplicate --type', abort_message(%w[relate ABC-1 ABC-2 --type blocks --type related])
+  end
+
+  def test_project_create_rejects_duplicate_name
+    assert_equal 'linear: duplicate --name', abort_message(%w[project-create --team ABC --name X --name Y])
+  end
+
+  def test_project_update_rejects_duplicate_name
+    assert_equal 'linear: duplicate --name', abort_message(%w[project-update --id X --name A --name B])
+  end
+
+  def test_comment_rejects_duplicate_body
+    assert_equal 'linear: duplicate --body', abort_message(%w[comment ABC-1 --body a --body b])
+  end
+
+  def test_repeating_a_boolean_flag_stays_harmless
+    # Deliberately out of scope: a repeated switch discards no input,
+    # so there is nothing to protect the user from.
+    assert_equal TOKEN_MISSING, abort_message(%w[get ABC-1 --json --json])
+  end
+end
+
+# The subcommands that already used OptionParser never carried the
+# acceptance pattern, so a mandatory-argument option would swallow a
+# following flag as its value and act on the misread command.
+class FlagShapedValueRejectionsTest < LinearTestCase
+  def test_create_rejects_flag_shaped_title
+    assert_equal 'linear: invalid argument: --title --json',
+                 abort_message(%w[create --team ABC --title --json --priority medium --no-project])
+  end
+
+  def test_update_rejects_flag_shaped_state
+    assert_equal 'linear: invalid argument: --state --json', abort_message(%w[update ABC-1 --state --json])
+  end
+
+  def test_relate_rejects_flag_shaped_type
+    assert_equal 'linear: invalid argument: --type --json', abort_message(%w[relate ABC-1 ABC-2 --type --json])
+  end
+
+  def test_project_create_rejects_flag_shaped_name
+    assert_equal 'linear: invalid argument: --name --json',
+                 abort_message(%w[project-create --team ABC --name --json])
+  end
+
+  def test_project_update_rejects_flag_shaped_id
+    assert_equal 'linear: invalid argument: --id --json', abort_message(%w[project-update --id --json])
+  end
+
+  def test_comment_rejects_flag_shaped_body
+    assert_equal 'linear: invalid argument: --body --json ' \
+                 '(comment takes a positional message, --body TEXT, or --body-file PATH)',
+                 abort_message(%w[comment ABC-1 --body --json])
   end
 end
 

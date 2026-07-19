@@ -159,6 +159,18 @@ module Linear
     raise Error, "linear: #{e.message}#{hint ? " #{hint}" : ''}"
   end
 
+  # Returns `value`, refusing it when the option already has one.
+  # Last-one-wins on a repeated option silently discards the first
+  # value -- the same dropped-input shape as a stray positional, and
+  # worse when the surviving value aims the command at a different
+  # issue or project than the one typed first. Only value-taking
+  # options need this: repeating a switch discards nothing.
+  def set_once!(current, flag, value)
+    raise Error, "linear: duplicate #{flag}" unless current.nil?
+
+    value
+  end
+
   # Returns the first `count` positionals, refusing any beyond them. A
   # stray positional means part of the typed command was not
   # understood, and dropping it silently lets the command act on half
@@ -307,8 +319,8 @@ module Linear
     team_key = nil
     limit_str = nil
     rest = parse_options(args, usage) do |o|
-      o.on('--team KEY', VALUE_NOT_FLAG) { |v| team_key = v }
-      o.on('--limit N', VALUE_NOT_FLAG) { |v| limit_str = v }
+      o.on('--team KEY', VALUE_NOT_FLAG) { |v| team_key = set_once!(team_key, '--team', v) }
+      o.on('--limit N', VALUE_NOT_FLAG) { |v| limit_str = set_once!(limit_str, '--limit', v) }
       o.on('--json') { json_mode = true }
     end
     limit = limit_str ? parse_limit(limit_str) : 25
@@ -365,16 +377,25 @@ module Linear
             '[--description TEXT | --description-file PATH] [--state NAME] [--parent ABC-NNN] ' \
             '[--assignee EMAIL|me] [--json]'
     rest = parse_options(args, usage) do |o|
-      o.on('--team KEY') { |v| team_key = v }
-      o.on('--priority LEVEL', 'REQUIRED: urgent|high|medium|low, or an explicit none (or 0-4)') { |v| priority = v }
-      o.on('--project NAME') { |v| project_name = v }
-      o.on('--title TITLE') { |v| title = v }
-      o.on('--description TEXT') { |v| description = v }
-      o.on('--description-file PATH') { |v| description_file = v }
-      o.on('--state NAME', 'Workflow state (default: Todo; never Triage/Backlog)') { |v| state_name = v }
-      o.on('--parent ABC-NNN', 'Make the new issue a sub-issue of this parent') { |v| parent_id = v }
-      o.on('--assignee EMAIL|me', 'Assign the issue (required when creating in a started state like In Progress)') do |v|
-        assignee = v
+      o.on('--team KEY', VALUE_NOT_FLAG) { |v| team_key = set_once!(team_key, '--team', v) }
+      o.on('--priority LEVEL', VALUE_NOT_FLAG, 'REQUIRED: urgent|high|medium|low, or an explicit none (or 0-4)') do |v|
+        priority = set_once!(priority, '--priority', v)
+      end
+      o.on('--project NAME', VALUE_NOT_FLAG) { |v| project_name = set_once!(project_name, '--project', v) }
+      o.on('--title TITLE', VALUE_NOT_FLAG) { |v| title = set_once!(title, '--title', v) }
+      o.on('--description TEXT', VALUE_NOT_FLAG) { |v| description = set_once!(description, '--description', v) }
+      o.on('--description-file PATH', VALUE_NOT_FLAG) do |v|
+        description_file = set_once!(description_file, '--description-file', v)
+      end
+      o.on('--state NAME', VALUE_NOT_FLAG, 'Workflow state (default: Todo; never Triage/Backlog)') do |v|
+        state_name = set_once!(state_name, '--state', v)
+      end
+      o.on('--parent ABC-NNN', VALUE_NOT_FLAG, 'Make the new issue a sub-issue of this parent') do |v|
+        parent_id = set_once!(parent_id, '--parent', v)
+      end
+      o.on('--assignee EMAIL|me', VALUE_NOT_FLAG,
+           'Assign the issue (required when creating in a started state like In Progress)') do |v|
+        assignee = set_once!(assignee, '--assignee', v)
       end
       o.on('--no-project') { no_project = true }
       o.on('--json') { json_mode = true }
@@ -482,15 +503,24 @@ module Linear
             '[--description TEXT | --description-file PATH] [--project NAME] [--parent ABC-NNN] ' \
             '[--assignee EMAIL|me] [--priority none|urgent|high|medium|low] [--json]'
     rest = parse_options(args, usage) do |o|
-      o.on('--priority LEVEL', 'Set priority (none|urgent|high|medium|low or 0-4)') { |v| priority = v }
-      o.on('--state NAME') { |v| state_name = v }
-      o.on('--title TITLE') { |v| title = v }
-      o.on('--description TEXT') { |v| description = v }
-      o.on('--description-file PATH') { |v| description_file = v }
-      o.on('--project NAME', 'Move the issue to this project') { |v| project_name = v }
-      o.on('--parent ABC-NNN', 'Reparent the issue under this parent') { |v| parent_id = v }
-      o.on('--assignee EMAIL|me', 'Assign the issue (required when moving to a started state like In Progress)') do |v|
-        assignee = v
+      o.on('--priority LEVEL', VALUE_NOT_FLAG, 'Set priority (none|urgent|high|medium|low or 0-4)') do |v|
+        priority = set_once!(priority, '--priority', v)
+      end
+      o.on('--state NAME', VALUE_NOT_FLAG) { |v| state_name = set_once!(state_name, '--state', v) }
+      o.on('--title TITLE', VALUE_NOT_FLAG) { |v| title = set_once!(title, '--title', v) }
+      o.on('--description TEXT', VALUE_NOT_FLAG) { |v| description = set_once!(description, '--description', v) }
+      o.on('--description-file PATH', VALUE_NOT_FLAG) do |v|
+        description_file = set_once!(description_file, '--description-file', v)
+      end
+      o.on('--project NAME', VALUE_NOT_FLAG, 'Move the issue to this project') do |v|
+        project_name = set_once!(project_name, '--project', v)
+      end
+      o.on('--parent ABC-NNN', VALUE_NOT_FLAG, 'Reparent the issue under this parent') do |v|
+        parent_id = set_once!(parent_id, '--parent', v)
+      end
+      o.on('--assignee EMAIL|me', VALUE_NOT_FLAG,
+           'Assign the issue (required when moving to a started state like In Progress)') do |v|
+        assignee = set_once!(assignee, '--assignee', v)
       end
       o.on('--json') { json_mode = true }
     end
@@ -566,8 +596,8 @@ module Linear
     # terminator, or --body/--body-file.
     rest = parse_options(args, usage, hint: '(comment takes a positional message, ' \
                                             '--body TEXT, or --body-file PATH)') do |o|
-      o.on('--body TEXT', VALUE_NOT_FLAG) { |v| body_opt = v }
-      o.on('--body-file PATH', VALUE_NOT_FLAG) { |v| body_file = v }
+      o.on('--body TEXT', VALUE_NOT_FLAG) { |v| body_opt = set_once!(body_opt, '--body', v) }
+      o.on('--body-file PATH', VALUE_NOT_FLAG) { |v| body_file = set_once!(body_file, '--body-file', v) }
       o.on('--json') { json_mode = true }
     end
     identifier = rest.shift
@@ -631,13 +661,16 @@ module Linear
   end
 
   def cmd_relate(args)
-    type = 'related'
+    # Starts nil so the duplicate guard can tell "not yet given" from
+    # "given once"; the default lands after parsing instead.
+    type = nil
     json_mode = false
     usage = 'Usage: linear relate ABC-AAA ABC-BBB [--type related|blocks|duplicate] [--json]'
     rest = parse_options(args, usage) do |o|
-      o.on('--type TYPE') { |v| type = v }
+      o.on('--type TYPE', VALUE_NOT_FLAG) { |v| type = set_once!(type, '--type', v) }
       o.on('--json') { json_mode = true }
     end
+    type ||= 'related'
     source, target = take_positionals!(rest, 2)
     raise Error, usage if source.nil? || target.nil?
 
@@ -674,11 +707,17 @@ module Linear
     usage = 'Usage: linear project-create --team KEY --name NAME ' \
             '[--description TEXT] [--content TEXT | --content-file PATH] [--json]'
     rest = parse_options(args, usage) do |o|
-      o.on('--team KEY') { |v| team_key = v }
-      o.on('--name NAME') { |v| name = v }
-      o.on('--description TEXT', 'Short one-line project summary') { |v| description = v }
-      o.on('--content TEXT', 'Project body (markdown)') { |v| content = v }
-      o.on('--content-file PATH', 'Read project body (markdown) from a file') { |v| content_file = v }
+      o.on('--team KEY', VALUE_NOT_FLAG) { |v| team_key = set_once!(team_key, '--team', v) }
+      o.on('--name NAME', VALUE_NOT_FLAG) { |v| name = set_once!(name, '--name', v) }
+      o.on('--description TEXT', VALUE_NOT_FLAG, 'Short one-line project summary') do |v|
+        description = set_once!(description, '--description', v)
+      end
+      o.on('--content TEXT', VALUE_NOT_FLAG, 'Project body (markdown)') do |v|
+        content = set_once!(content, '--content', v)
+      end
+      o.on('--content-file PATH', VALUE_NOT_FLAG, 'Read project body (markdown) from a file') do |v|
+        content_file = set_once!(content_file, '--content-file', v)
+      end
       o.on('--json') { json_mode = true }
     end
     take_positionals!(rest, 0)
@@ -728,11 +767,17 @@ module Linear
     usage = 'Usage: linear project-update --id PROJECT_ID ' \
             '[--name NAME] [--description TEXT] [--content TEXT | --content-file PATH] [--json]'
     rest = parse_options(args, usage) do |o|
-      o.on('--id ID') { |v| id = v }
-      o.on('--name NAME') { |v| name = v }
-      o.on('--description TEXT', 'Short one-line project summary') { |v| description = v }
-      o.on('--content TEXT', 'Project body (markdown)') { |v| content = v }
-      o.on('--content-file PATH', 'Read project body (markdown) from a file') { |v| content_file = v }
+      o.on('--id ID', VALUE_NOT_FLAG) { |v| id = set_once!(id, '--id', v) }
+      o.on('--name NAME', VALUE_NOT_FLAG) { |v| name = set_once!(name, '--name', v) }
+      o.on('--description TEXT', VALUE_NOT_FLAG, 'Short one-line project summary') do |v|
+        description = set_once!(description, '--description', v)
+      end
+      o.on('--content TEXT', VALUE_NOT_FLAG, 'Project body (markdown)') do |v|
+        content = set_once!(content, '--content', v)
+      end
+      o.on('--content-file PATH', VALUE_NOT_FLAG, 'Read project body (markdown) from a file') do |v|
+        content_file = set_once!(content_file, '--content-file', v)
+      end
       o.on('--json') { json_mode = true }
     end
     take_positionals!(rest, 0)
@@ -769,7 +814,7 @@ module Linear
     json_mode = false
     team_opt = nil
     rest = parse_options(args, usage) do |o|
-      o.on('--team KEY', VALUE_NOT_FLAG) { |v| team_opt = v }
+      o.on('--team KEY', VALUE_NOT_FLAG) { |v| team_opt = set_once!(team_opt, '--team', v) }
       o.on('--json') { json_mode = true }
     end
     take_positionals!(rest, 0)
@@ -875,10 +920,10 @@ module Linear
     since = nil
     limit_str = nil
     rest = parse_options(args, usage) do |o|
-      o.on('--team KEY', VALUE_NOT_FLAG) { |v| team_opt = v }
-      o.on('--project NAME', VALUE_NOT_FLAG) { |v| project_name = v }
-      o.on('--since YYYY-MM-DD', VALUE_NOT_FLAG) { |v| since = v }
-      o.on('--limit N', VALUE_NOT_FLAG) { |v| limit_str = v }
+      o.on('--team KEY', VALUE_NOT_FLAG) { |v| team_opt = set_once!(team_opt, '--team', v) }
+      o.on('--project NAME', VALUE_NOT_FLAG) { |v| project_name = set_once!(project_name, '--project', v) }
+      o.on('--since YYYY-MM-DD', VALUE_NOT_FLAG) { |v| since = set_once!(since, '--since', v) }
+      o.on('--limit N', VALUE_NOT_FLAG) { |v| limit_str = set_once!(limit_str, '--limit', v) }
       o.on('--all') { all = true }
       o.on('--json') { json_mode = true }
     end
