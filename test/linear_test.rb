@@ -463,6 +463,50 @@ class UncaughtParseErrorRejectionsTest < LinearTestCase
   end
 end
 
+# POSIXLY_CORRECT makes OptionParser#parse stop at the first
+# positional and strand everything after it. Every subcommand that
+# takes an identifier puts flags exactly there, so under #parse a
+# machine exporting that variable would see valid flags rejected as
+# stray arguments. #permute is immune, and these pin that.
+class PosixlyCorrectImmunityTest < LinearTestCase
+  # Each shape puts a flag AFTER a positional -- the position where
+  # the two parsing modes disagree.
+  FLAG_AFTER_POSITIONAL = [
+    %w[search term --limit abc],
+    %w[get ABC-1 --fulll],
+    %w[get ABC-1 --json],
+    %w[update ABC-1 ABC-2 --state Done],
+    %w[relate ABC-1 ABC-2 ABC-3 --type blocks],
+    %w[comment ABC-1 --body a --body b],
+    %w[comment-delete some-id --json]
+  ].freeze
+
+  def test_parsing_is_identical_with_and_without_posixly_correct
+    FLAG_AFTER_POSITIONAL.each do |argv|
+      # Each run gets its own copy: OptionParser#permute consumes the
+      # options out of the array it is handed, so a shared literal
+      # would reach the second run already picked clean.
+      unset = abort_message(argv.dup)
+      ENV['POSIXLY_CORRECT'] = '1'
+      set = abort_message(argv.dup)
+      ENV.delete('POSIXLY_CORRECT')
+      assert_equal unset, set, "#{argv.inspect} parsed differently under POSIXLY_CORRECT"
+    end
+  end
+
+  def test_a_flag_after_a_positional_is_still_a_flag
+    # Reaching parse_limit proves --limit was read as an option
+    # rather than stranded among the positionals.
+    ENV['POSIXLY_CORRECT'] = '1'
+    assert_equal 'linear: --limit must be an integer, got "abc"', abort_message(%w[search term --limit abc])
+  end
+
+  def test_the_stray_guard_still_sees_only_the_real_stray
+    ENV['POSIXLY_CORRECT'] = '1'
+    assert_equal 'linear: unexpected extra arguments: "ABC-2"', abort_message(%w[update ABC-1 ABC-2 --state Done])
+  end
+end
+
 class PureHelpersTest < LinearTestCase
   def test_parse_limit_accepts_base_ten
     assert_equal 25, Linear.parse_limit('25')
