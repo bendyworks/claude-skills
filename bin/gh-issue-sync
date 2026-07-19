@@ -341,13 +341,18 @@ module GhIssueSync
   end
 
   # The one charset both slug origins (typed --slug, plan basename)
-  # are held to; see assert_valid_slug! for why it is this tight.
-  SLUG_CHARSET = /\A[A-Za-z0-9._-]+\z/
+  # are held to; see assert_valid_slug! for why it is this tight. No
+  # leading dash: option values may not begin with one, so a
+  # leading-dash slug could be minted (via a plan basename) but never
+  # typed back as '--slug <key>', leaving its section untargetable by
+  # 'section --delete'.
+  SLUG_CHARSET = /\A[A-Za-z0-9._][A-Za-z0-9._-]*\z/
 
   def assert_valid_section_slug!(slug)
     return slug if slug.match?(SLUG_CHARSET)
 
-    raise Error, "--slug must contain only letters, digits, dots, underscores, and dashes, got #{slug.inspect}"
+    raise Error, '--slug must contain only letters, digits, dots, underscores, and dashes ' \
+                 "and must not begin with a dash, got #{slug.inspect}"
   end
 
   # Trims leading blank lines and trailing whitespace, but never the
@@ -423,7 +428,8 @@ module GhIssueSync
   def assert_valid_slug!(slug)
     return slug if slug.match?(SLUG_CHARSET)
 
-    raise Error, "slug must contain only letters, digits, dots, underscores, and dashes, " \
+    raise Error, 'slug must contain only letters, digits, dots, underscores, and dashes, ' \
+                 'and must not begin with a dash, ' \
                  "got #{slug.inspect} (rename the plan file; if an older sync already wrote a " \
                  'section under this name, delete that section from the issue body by hand -- ' \
                  "'section --delete' cannot target a slug outside the charset, and a renamed " \

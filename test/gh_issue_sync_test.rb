@@ -733,6 +733,17 @@ class ContentSectionSlugGuardTest < Minitest::Test
     end
   end
 
+  # A leading-dash slug would be impossible to type back as an option
+  # value (option values may not begin with a dash), leaving its
+  # section untargetable by 'section --delete'. Neither slug origin
+  # may mint one.
+  def test_rejects_leading_dash_slugs_from_both_origins
+    error = assert_raises(GhIssueSync::Error) { GhIssueSync.assert_valid_section_slug!('-foo') }
+    assert_match(/begin with/, error.message)
+    error = assert_raises(GhIssueSync::Error) { GhIssueSync.assert_valid_slug!('-foo') }
+    assert_match(/begin with/, error.message)
+  end
+
   def test_accepts_slugs_within_the_tight_charset
     GhIssueSync.assert_valid_section_slug!('user-story')
     GhIssueSync.assert_valid_section_slug!('18-keyed.Body_section')
