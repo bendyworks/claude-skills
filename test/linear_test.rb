@@ -254,6 +254,17 @@ class UsageErrorsTest < LinearTestCase
     assert_equal 'linear: --limit must be an integer, got "abc"', abort_message(%w[search term --limit abc])
   end
 
+  def test_search_limit_rejects_zero
+    # A zero limit asks the API for nothing at all, which is never
+    # what the caller meant.
+    assert_equal 'linear: --limit must be greater than zero, got "0"', abort_message(%w[search term --limit 0])
+  end
+
+  def test_list_limit_rejects_zero
+    assert_equal 'linear: --limit must be greater than zero, got "0"',
+                 abort_message(%w[list --team ABC --project P --limit 0])
+  end
+
   def test_list_requires_team_when_env_unset
     assert_includes abort_message(['list']), 'Usage: linear list --team KEY'
   end
@@ -517,18 +528,25 @@ class PureHelpersTest < LinearTestCase
     assert_equal 'linear: --limit must be an integer, got "abc"', error.message
   end
 
-  def test_parse_limit_currently_reads_leading_zero_as_octal
-    # Bare Integer() semantics, pinned; the hardening moves to base 10.
-    assert_equal 8, Linear.parse_limit('010')
+  def test_parse_limit_reads_a_leading_zero_as_base_ten
+    # Bare Integer() honours the 0 prefix and would read this as 8.
+    # Nobody typing --limit 010 means eight.
+    assert_equal 10, Linear.parse_limit('010')
   end
 
-  def test_parse_limit_currently_reads_hex_prefix
-    assert_equal 16, Linear.parse_limit('0x10')
+  def test_parse_limit_rejects_a_hex_prefix
+    error = assert_raises(Linear::Error) { Linear.parse_limit('0x10') }
+    assert_equal 'linear: --limit must be an integer, got "0x10"', error.message
   end
 
-  def test_parse_limit_currently_accepts_zero_and_negative
-    assert_equal 0, Linear.parse_limit('0')
-    assert_equal(-5, Linear.parse_limit('-5'))
+  def test_parse_limit_rejects_zero
+    error = assert_raises(Linear::Error) { Linear.parse_limit('0') }
+    assert_equal 'linear: --limit must be greater than zero, got "0"', error.message
+  end
+
+  def test_parse_limit_rejects_a_negative
+    error = assert_raises(Linear::Error) { Linear.parse_limit('-5') }
+    assert_equal 'linear: --limit must be greater than zero, got "-5"', error.message
   end
 
   def test_resolve_priority_names_and_case

@@ -186,10 +186,19 @@ module Linear
     rest.first(count)
   end
 
+  # Base 10 explicitly: bare Integer() honours the literal prefixes, so
+  # a typed --limit 010 would mean eight and --limit 0x10 sixteen.
+  # Nobody typing a page size means either of those.
   def parse_limit(value)
-    Integer(value)
-  rescue ArgumentError
-    raise Error, "linear: --limit must be an integer, got #{value.inspect}"
+    limit =
+      begin
+        Integer(value, 10)
+      rescue ArgumentError
+        raise Error, "linear: --limit must be an integer, got #{value.inspect}"
+      end
+    raise Error, "linear: --limit must be greater than zero, got #{value.inspect}" unless limit.positive?
+
+    limit
   end
 
   ISSUE_CORE_FIELDS = <<~GQL
