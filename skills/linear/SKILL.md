@@ -80,6 +80,29 @@ together. Guidelines:
   decision, placeholder pending triage). Must be passed explicitly; never an
   accidental default.
 
+## Dash-leading values
+
+A value that begins with `-` is read as a flag and rejected, so a
+mechanically composed comment or search term that happens to start with
+a dash needs care:
+
+- Put `--` before a dash-leading **search term** or **comment message**
+  so the rest of the line is taken literally: `linear search -- -oauth`,
+  `linear comment ABC-NNN -- -1 broke the build`.
+- `--` guards positionals only; it cannot rescue a dash-leading **option
+  value**. Three free-text options have a `--*-file` variant that accepts
+  one: the issue `--description` (`--description-file`), a project's
+  `--content` (`--content-file`), and a comment body (`--body-file`).
+  Writing the text to a file and passing the file option is the safest
+  default when composing bodies programmatically, and it already suits
+  long or markdown text.
+- The other free-text options -- `--title`, `--name`, `--state`,
+  `--project`, and a project's `--description` -- have no `--*-file`
+  variant, so a value that begins with a dash cannot be passed to them at
+  all (a rare limitation of the leading-dash guard). Every remaining
+  option takes a key, id, enum word, email, or date that never begins
+  with a dash, so none of those need escaping.
+
 ## When to use
 
 - The user mentions a Linear identifier (ABC-NNN, etc.) and wants info on it: `linear get`.

@@ -443,6 +443,60 @@ class FlagShapedValueRejectionsTest < LinearTestCase
   end
 end
 
+# When a subcommand offers two sources for one value, giving both is
+# rejected rather than silently resolved to one.
+class ConflictingSourceRejectionsTest < LinearTestCase
+  def test_comment_rejects_positional_message_and_body
+    assert_equal 'linear: a positional message and --body are mutually exclusive',
+                 abort_message(%w[comment ABC-1 hello there --body elsewhere])
+  end
+
+  def test_comment_rejects_positional_message_and_body_file
+    assert_equal 'linear: a positional message and --body-file are mutually exclusive',
+                 abort_message(%w[comment ABC-1 hello --body-file /nonexistent-battery-file])
+  end
+
+  def test_comment_rejects_body_and_body_file
+    assert_equal 'linear: --body and --body-file are mutually exclusive',
+                 abort_message(%w[comment ABC-1 --body inline --body-file /nonexistent-battery-file])
+  end
+
+  def test_comment_rejects_all_three_message_sources_at_once
+    # The only path through the three-way join: a comma-separated list
+    # closed with "and", so the rare all-three error still reads cleanly.
+    assert_equal 'linear: a positional message, --body, and --body-file are mutually exclusive',
+                 abort_message(%w[comment ABC-1 hello --body inline --body-file /nonexistent-battery-file])
+  end
+
+  def test_create_rejects_description_inline_and_file
+    assert_equal 'linear: --description and --description-file are mutually exclusive',
+                 abort_message(%w[create --team ABC --title T --priority low --no-project
+                                  --description inline --description-file /nonexistent-battery-file])
+  end
+
+  def test_create_rejects_project_and_no_project
+    # Contradictory intent: name a project and disclaim one at once.
+    assert_equal 'linear: --project and --no-project are mutually exclusive',
+                 abort_message(%w[create --team ABC --title T --priority low --project P --no-project])
+  end
+
+  def test_update_rejects_description_inline_and_file
+    assert_equal 'linear: --description and --description-file are mutually exclusive',
+                 abort_message(%w[update ABC-1 --description inline --description-file /nonexistent-battery-file])
+  end
+
+  def test_project_create_rejects_content_inline_and_file
+    assert_equal 'linear: --content and --content-file are mutually exclusive',
+                 abort_message(%w[project-create --team ABC --name N
+                                  --content inline --content-file /nonexistent-battery-file])
+  end
+
+  def test_project_update_rejects_content_inline_and_file
+    assert_equal 'linear: --content and --content-file are mutually exclusive',
+                 abort_message(%w[project-update --id X --content inline --content-file /nonexistent-battery-file])
+  end
+end
+
 # POSIXLY_CORRECT makes OptionParser#parse stop at the first
 # positional and strand everything after it. Every subcommand that
 # takes an identifier puts flags exactly there, so under #parse a

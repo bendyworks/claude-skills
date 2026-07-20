@@ -204,6 +204,23 @@ module Linear
     take_positionals!(rest, 0)
   end
 
+  # Refuses two sources for one value. Offering a value both inline and
+  # from a file (or as a positional and a flag) forces the code to keep
+  # whichever it reads first and silently drop the rest -- the same
+  # dropped-input shape as a repeated option. `sources` maps each way's
+  # label to whether it was given; more than one given is the conflict.
+  # An empty inline value still counts as given (clearing a field is a
+  # deliberate act), so callers pass presence, not truthiness of content.
+  def reject_conflicting_sources!(sources)
+    given = sources.select { |_label, present| present }.keys
+    return if given.size < 2
+
+    # "a and b" for two, "a, b, and c" for the comment subcommand's
+    # three-way message sources, so the rare all-three error still reads.
+    list = given.size == 2 ? given.join(' and ') : "#{given[0..-2].join(', ')}, and #{given.last}"
+    raise Error, "linear: #{list} are mutually exclusive"
+  end
+
   # Reads a --*-file option's path, refusing a missing file with the
   # option's own name rather than letting File.read escape as a raw
   # Errno backtrace.
@@ -435,10 +452,13 @@ module Linear
                    "low = non-compounding cleanups; none = deliberately parked (spike awaiting a decision).\n" \
                    "#{usage}"
     end
+    reject_conflicting_sources!('--project' => !project_name.nil?, '--no-project' => no_project)
     unless project_name || no_project
       raise Error, "linear: --project is required (or pass --no-project to override).\n#{usage}"
     end
 
+    reject_conflicting_sources!('--description' => !description.nil?,
+                                '--description-file' => !description_file.nil?)
     description = read_file_option!(description_file, '--description-file') if description_file
 
     client = Client.new
@@ -540,6 +560,8 @@ module Linear
     end
     identifier = take_positionals!(rest, 1, usage).first
 
+    reject_conflicting_sources!('--description' => !description.nil?,
+                                '--description-file' => !description_file.nil?)
     description = read_file_option!(description_file, '--description-file') if description_file
 
     client = Client.new
@@ -615,6 +637,9 @@ module Linear
     end
     identifier = rest.shift
 
+    reject_conflicting_sources!('a positional message' => !rest.empty?,
+                                '--body' => !body_opt.nil?,
+                                '--body-file' => !body_file.nil?)
     body =
       if body_file
         read_file_option!(body_file, '--body-file')
@@ -724,6 +749,7 @@ module Linear
     end
     reject_positionals!(rest)
     raise Error, usage if team_key.nil? || name.nil?
+    reject_conflicting_sources!('--content' => !content.nil?, '--content-file' => !content_file.nil?)
     content = read_file_option!(content_file, '--content-file') if content_file
 
     client = Client.new
@@ -778,6 +804,7 @@ module Linear
     end
     reject_positionals!(rest)
     raise Error, usage if id.nil?
+    reject_conflicting_sources!('--content' => !content.nil?, '--content-file' => !content_file.nil?)
     content = read_file_option!(content_file, '--content-file') if content_file
 
     input = {}
@@ -904,6 +931,22 @@ module Linear
 
         linear project-list --team KEY [--json]
             List a team's projects with their ids and state.
+
+      Dash-leading values:
+        A value that begins with '-' is otherwise read as a flag and
+        rejected. Put '--' before a dash-leading search term or comment
+        message so the rest of the line is taken literally:
+            linear search -- -oauth
+            linear comment ABC-NNN -- -1 broke the build
+        '--' guards positionals only -- it cannot rescue a dash-leading
+        OPTION value. Three free-text options have a --*-file variant
+        that accepts one: the issue --description (--description-file),
+        a project's --content (--content-file), and a comment body
+        (--body-file). The other free-text options -- --title, --name,
+        --state, --project, and a project's --description -- have no such
+        variant, so a value beginning with a dash cannot be passed to
+        them at all. Every remaining option takes a key, id, enum word,
+        email, or date that never begins with a dash.
   TXT
 
   def cmd_list(args)
