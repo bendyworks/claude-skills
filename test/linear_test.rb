@@ -443,10 +443,8 @@ class FlagShapedValueRejectionsTest < LinearTestCase
   end
 end
 
-# Two ways to supply one value means the code silently keeps whichever
-# it reaches first and drops the other -- the same dropped-input shape
-# as a repeated option, wearing different clothes. Each subcommand that
-# offers a second source for one value rejects being given both.
+# When a subcommand offers two sources for one value, giving both is
+# rejected rather than silently resolved to one.
 class ConflictingSourceRejectionsTest < LinearTestCase
   def test_comment_rejects_positional_message_and_body
     assert_equal 'linear: a positional message and --body are mutually exclusive',
