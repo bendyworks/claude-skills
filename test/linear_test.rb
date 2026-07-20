@@ -2,10 +2,10 @@
 # frozen_string_literal: true
 
 # Golden-master tests for bin/linear's argument handling and pure
-# helpers. They pin current behavior exactly as it stands, including
-# the silent drops (unknown flags and stray positionals ignored by the
-# pop-style helpers) -- those pins are the flip vehicle for the
-# hardening work, which edits them to expect rejection messages.
+# helpers. They pin how every subcommand answers malformed input:
+# stray positionals, unknown options, missing option values, repeated
+# options, flag-shaped values, and parsing that stays identical whether
+# or not POSIXLY_CORRECT is set.
 #
 # The bin file guards its CLI dispatch behind $PROGRAM_NAME == __FILE__,
 # so loading it here exposes the Linear module without executing the
@@ -107,52 +107,24 @@ end
 # command was not understood, so every subcommand but comment (whose
 # trailing words are the message) and help now rejects one.
 class StrayPositionalRejectionsTest < LinearTestCase
-  def test_get_rejects_stray_positional
-    assert_equal 'linear: unexpected extra arguments: "extra"', abort_message(%w[get ABC-1 --full extra])
-  end
+  # Every dispatchable subcommand except comment must reject strays --
+  # driven from the dispatch table itself, so a subcommand added later
+  # cannot silently opt out of the guard by being forgotten here.
+  STRAY_EXEMPT = %w[comment].freeze
 
-  def test_comments_rejects_stray_positional
-    assert_equal 'linear: unexpected extra arguments: "extra"', abort_message(%w[comments ABC-1 extra])
-  end
-
-  def test_search_rejects_stray_positional
-    assert_equal 'linear: unexpected extra arguments: "extra"', abort_message(%w[search term --team ABC extra])
-  end
-
-  def test_list_rejects_stray_positional
-    assert_equal 'linear: unexpected extra arguments: "stray"', abort_message(%w[list --team ABC --project Foo stray])
+  (Linear::CLI::COMMANDS.keys - STRAY_EXEMPT).each do |name|
+    define_method(:"test_#{name.tr('-', '_')}_rejects_stray_positionals") do
+      # Three trailing junk positionals exceed every subcommand's arity
+      # (the largest, relate, takes two), so whatever the arity the
+      # surplus lands in the stray guard.
+      message = abort_message([name, 'x1', 'x2', 'x3'])
+      assert_includes message, 'linear: unexpected extra arguments:'
+    end
   end
 
   def test_update_rejects_second_identifier
     # The shape that used to update ABC-1 and drop ABC-2 on the floor.
     assert_equal 'linear: unexpected extra arguments: "ABC-2"', abort_message(%w[update ABC-1 ABC-2 --state Done])
-  end
-
-  def test_relate_rejects_third_identifier
-    assert_equal 'linear: unexpected extra arguments: "ABC-3"', abort_message(%w[relate ABC-1 ABC-2 ABC-3])
-  end
-
-  def test_comment_delete_rejects_stray_positional
-    assert_equal 'linear: unexpected extra arguments: "extra"', abort_message(%w[comment-delete some-id extra])
-  end
-
-  def test_create_rejects_stray_positional
-    assert_equal 'linear: unexpected extra arguments: "stray"',
-                 abort_message(%w[create --team ABC --title Title --priority medium --no-project stray])
-  end
-
-  def test_project_create_rejects_stray_positional
-    assert_equal 'linear: unexpected extra arguments: "stray"',
-                 abort_message(%w[project-create --team ABC --name Foo stray])
-  end
-
-  def test_project_update_rejects_stray_positional
-    assert_equal 'linear: unexpected extra arguments: "stray"',
-                 abort_message(%w[project-update --id X --name Foo stray])
-  end
-
-  def test_project_list_rejects_stray_positional
-    assert_equal 'linear: unexpected extra arguments: "stray"', abort_message(%w[project-list --team ABC stray])
   end
 
   def test_every_stray_is_listed_and_inspect_quoted
@@ -173,40 +145,34 @@ class StrayPositionalRejectionsTest < LinearTestCase
   end
 end
 
-# Options the pop-style helpers used to drop on the floor now reach
-# OptionParser, which rejects them by name. The messages are
-# optparse's own, prefixed with the CLI name the way every other
-# linear error is.
-class ParseRejectionsTest < LinearTestCase
-  def test_get_rejects_unknown_flag_and_suggests_the_near_miss
+# An option a subcommand does not define is rejected by name rather
+# than ignored. Driven from the dispatch table so a subcommand added
+# later cannot silently accept unknown flags. --bogus is caught during
+# parsing, before any required-flag or positional check, so a bare
+# `<cmd> --bogus` reaches the rejection for every subcommand.
+class UnknownOptionRejectionsTest < LinearTestCase
+  Linear::CLI::COMMANDS.each_key do |name|
+    define_method(:"test_#{name.tr('-', '_')}_rejects_unknown_option") do
+      # assert_includes, not equal: comment appends its body-shape hint.
+      assert_includes abort_message([name, '--bogus']), 'linear: invalid option: --bogus'
+    end
+  end
+
+  def test_get_suggests_the_near_miss
     # optparse appends its own did-you-mean line for a close match,
     # which is exactly the affordance a typo'd flag wants.
     assert_equal "linear: invalid option: --fulll\nDid you mean?  full",
                  abort_message(%w[get ABC-1 --fulll])
   end
 
-  def test_get_rejects_leading_unknown_flag_instead_of_taking_it_as_the_identifier
+  def test_leading_unknown_flag_is_rejected_not_taken_as_the_identifier
     assert_equal 'linear: invalid option: --unknown', abort_message(%w[get --unknown ABC-1])
   end
 
-  def test_comments_rejects_unknown_flag
-    assert_equal 'linear: invalid option: --bogus', abort_message(%w[comments ABC-1 --bogus])
-  end
-
-  def test_search_rejects_unknown_flag
-    assert_equal 'linear: invalid option: --bogus', abort_message(%w[search term --bogus])
-  end
-
-  def test_list_rejects_unknown_flag
-    assert_equal 'linear: invalid option: --bogus', abort_message(%w[list --team ABC --bogus])
-  end
-
-  def test_comment_delete_rejects_unknown_flag
-    assert_equal 'linear: invalid option: --bogus', abort_message(%w[comment-delete some-id --bogus])
-  end
-
-  def test_project_list_rejects_unknown_flag
-    assert_equal 'linear: invalid option: --bogus', abort_message(%w[project-list --team ABC --bogus])
+  def test_comment_unknown_option_carries_the_body_shape_hint
+    assert_equal 'linear: invalid option: --badflag ' \
+                 '(comment takes a positional message, --body TEXT, or --body-file PATH)',
+                 abort_message(%w[comment ABC-1 --badflag])
   end
 
   def test_double_dash_terminator_protects_a_dash_leading_search_term
@@ -236,18 +202,6 @@ class UsageErrorsTest < LinearTestCase
 
   def test_search_team_requires_value
     assert_equal 'linear: missing argument: --team', abort_message(%w[search term --team])
-  end
-
-  def test_search_team_rejects_flag_shaped_value
-    # Every flag is now a candidate: --team's value is read by the same
-    # parser pass that knows --json and --limit, so neither can be
-    # swallowed as a value.
-    assert_equal 'linear: invalid argument: --team --limit', abort_message(%w[search term --team --limit 5])
-    assert_equal 'linear: invalid argument: --team --json', abort_message(%w[search term --team --json])
-  end
-
-  def test_search_team_rejects_single_dash_value
-    assert_equal 'linear: invalid argument: --team -x', abort_message(%w[search term --team -x])
   end
 
   def test_search_limit_requires_integer
@@ -310,12 +264,6 @@ class UsageErrorsTest < LinearTestCase
 
   def test_comment_with_body_but_no_identifier_shows_usage
     assert_equal COMMENT_USAGE, abort_message(%w[comment --body text])
-  end
-
-  def test_comment_rejects_unknown_flag
-    assert_equal 'linear: invalid option: --badflag ' \
-                 '(comment takes a positional message, --body TEXT, or --body-file PATH)',
-                 abort_message(%w[comment ABC-1 --badflag])
   end
 
   def test_comment_body_file_must_exist
@@ -420,6 +368,18 @@ end
 # acceptance pattern, so a mandatory-argument option would swallow a
 # following flag as its value and act on the misread command.
 class FlagShapedValueRejectionsTest < LinearTestCase
+  def test_search_team_rejects_flag_shaped_value
+    # Every flag is a candidate: --team's value is read by the same
+    # parser pass that knows --json and --limit, so neither can be
+    # swallowed as a value.
+    assert_equal 'linear: invalid argument: --team --limit', abort_message(%w[search term --team --limit 5])
+    assert_equal 'linear: invalid argument: --team --json', abort_message(%w[search term --team --json])
+  end
+
+  def test_search_team_rejects_single_dash_value
+    assert_equal 'linear: invalid argument: --team -x', abort_message(%w[search term --team -x])
+  end
+
   def test_create_rejects_flag_shaped_title
     assert_equal 'linear: invalid argument: --title --json',
                  abort_message(%w[create --team ABC --title --json --priority medium --no-project])
@@ -449,31 +409,6 @@ class FlagShapedValueRejectionsTest < LinearTestCase
   end
 end
 
-# These five subcommands used to let OptionParser's own exception
-# escape as a raw backtrace. Routing them through parse_options turns
-# each into an ordinary aborted-with-a-message failure.
-class UncaughtParseErrorRejectionsTest < LinearTestCase
-  def test_create_rejects_unknown_option
-    assert_equal 'linear: invalid option: --bogus', abort_message(%w[create --bogus])
-  end
-
-  def test_update_rejects_unknown_option
-    assert_equal 'linear: invalid option: --bogus', abort_message(%w[update ABC-1 --bogus])
-  end
-
-  def test_relate_rejects_unknown_option
-    assert_equal 'linear: invalid option: --bogus', abort_message(%w[relate ABC-1 ABC-2 --bogus])
-  end
-
-  def test_project_create_rejects_unknown_option
-    assert_equal 'linear: invalid option: --bogus', abort_message(%w[project-create --bogus])
-  end
-
-  def test_project_update_rejects_unknown_option
-    assert_equal 'linear: invalid option: --bogus', abort_message(%w[project-update --bogus])
-  end
-end
-
 # POSIXLY_CORRECT makes OptionParser#parse stop at the first
 # positional and strand everything after it. Every subcommand that
 # takes an identifier puts flags exactly there, so under #parse a
@@ -493,28 +428,30 @@ class PosixlyCorrectImmunityTest < LinearTestCase
   ].freeze
 
   def test_parsing_is_identical_with_and_without_posixly_correct
-    FLAG_AFTER_POSITIONAL.each do |argv|
-      # Each run gets its own copy: OptionParser#permute consumes the
-      # options out of the array it is handed, so a shared literal
-      # would reach the second run already picked clean.
-      unset = abort_message(argv.dup)
-      ENV['POSIXLY_CORRECT'] = '1'
-      set = abort_message(argv.dup)
-      ENV.delete('POSIXLY_CORRECT')
-      assert_equal unset, set, "#{argv.inspect} parsed differently under POSIXLY_CORRECT"
+    # Each run gets its own copy: Linear::CLI#run shifts the subcommand
+    # name off the array it is handed, so a shared literal would reach
+    # the next run already missing its first element. (teardown clears
+    # POSIXLY_CORRECT; setting it once here keeps the two passes' env
+    # handling the same as the single-case tests below.)
+    without = FLAG_AFTER_POSITIONAL.map { |argv| abort_message(argv.dup) }
+    ENV['POSIXLY_CORRECT'] = '1'
+    with = FLAG_AFTER_POSITIONAL.map { |argv| abort_message(argv.dup) }
+    FLAG_AFTER_POSITIONAL.each_with_index do |argv, i|
+      assert_equal without[i], with[i], "#{argv.inspect} parsed differently under POSIXLY_CORRECT"
     end
   end
 
   def test_a_flag_after_a_positional_is_still_a_flag
-    # Reaching parse_limit proves --limit was read as an option
-    # rather than stranded among the positionals.
+    # Reaching parse_limit proves --limit was read as an option rather
+    # than stranded among the positionals. Same shape as the first
+    # FLAG_AFTER_POSITIONAL row, pinned here to its absolute message.
     ENV['POSIXLY_CORRECT'] = '1'
-    assert_equal 'linear: --limit must be an integer, got "abc"', abort_message(%w[search term --limit abc])
+    assert_equal 'linear: --limit must be an integer, got "abc"', abort_message(%w[search term --limit abc].dup)
   end
 
   def test_the_stray_guard_still_sees_only_the_real_stray
     ENV['POSIXLY_CORRECT'] = '1'
-    assert_equal 'linear: unexpected extra arguments: "ABC-2"', abort_message(%w[update ABC-1 ABC-2 --state Done])
+    assert_equal 'linear: unexpected extra arguments: "ABC-2"', abort_message(%w[update ABC-1 ABC-2 --state Done].dup)
   end
 end
 
@@ -564,10 +501,5 @@ class PureHelpersTest < LinearTestCase
     assert_equal 'linear: invalid priority "7"; use none|urgent|high|medium|low or 0-4', error.message
     error = assert_raises(Linear::Error) { Linear.resolve_priority('nonsense') }
     assert_equal 'linear: invalid priority "nonsense"; use none|urgent|high|medium|low or 0-4', error.message
-  end
-
-  def test_pop_helpers_are_retired
-    refute Linear.respond_to?(:pop_flag!), 'pop_flag! should be gone; every subcommand parses with OptionParser'
-    refute Linear.respond_to?(:pop_option!), 'pop_option! should be gone; every subcommand parses with OptionParser'
   end
 end
