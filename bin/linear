@@ -215,7 +215,10 @@ module Linear
     given = sources.select { |_label, present| present }.keys
     return if given.size < 2
 
-    raise Error, "linear: #{given.join(' and ')} are mutually exclusive"
+    # "a and b" for two, "a, b, and c" for the comment subcommand's
+    # three-way message sources, so the rare all-three error still reads.
+    list = given.size == 2 ? given.join(' and ') : "#{given[0..-2].join(', ')}, and #{given.last}"
+    raise Error, "linear: #{list} are mutually exclusive"
   end
 
   # Reads a --*-file option's path, refusing a missing file with the

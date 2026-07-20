@@ -463,6 +463,13 @@ class ConflictingSourceRejectionsTest < LinearTestCase
                  abort_message(%w[comment ABC-1 --body inline --body-file /nonexistent-battery-file])
   end
 
+  def test_comment_rejects_all_three_message_sources_at_once
+    # The only path through the three-way join: a comma-separated list
+    # closed with "and", so the rare all-three error still reads cleanly.
+    assert_equal 'linear: a positional message, --body, and --body-file are mutually exclusive',
+                 abort_message(%w[comment ABC-1 hello --body inline --body-file /nonexistent-battery-file])
+  end
+
   def test_create_rejects_description_inline_and_file
     assert_equal 'linear: --description and --description-file are mutually exclusive',
                  abort_message(%w[create --team ABC --title T --priority low --no-project
