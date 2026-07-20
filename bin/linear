@@ -936,11 +936,13 @@ module Linear
             linear search -- -oauth
             linear comment ABC-NNN -- -1 broke the build
         '--' guards positionals only -- it cannot rescue a dash-leading
-        OPTION value. For a description, project content, or comment
-        body that starts with a dash, use the matching --*-file option
-        (--description-file, --content-file, --body-file). Every other
-        value option takes an identifier, key, or enum word that never
-        begins with a dash.
+        OPTION value. --description, project --content, and the comment
+        body each have a --*-file variant for text that begins with a
+        dash. The other free-text options (--title, --name, --state,
+        --project) have no such variant, so a value beginning with a
+        dash cannot be passed to them at all. Every remaining option
+        takes a key, id, enum word, email, or date that never begins
+        with a dash.
   TXT
 
   def cmd_list(args)

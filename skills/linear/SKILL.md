@@ -95,9 +95,12 @@ a dash needs care:
   `--description-file` / `--content-file` / `--body-file`. This is the
   safest default when composing bodies programmatically, and it already
   suits long or markdown text.
-- Every other value option (`--team`, `--state`, `--priority`,
-  `--parent`, etc.) takes an identifier, key, or enum word that never
-  begins with a dash, so none of them need escaping.
+- The remaining options split two ways. `--title`, `--name`, `--state`,
+  and `--project` are free text with no `--*-file` variant, so a value
+  that begins with a dash cannot be passed to them at all (a rare
+  limitation of the leading-dash guard). Every other option takes a key,
+  id, enum word, email, or date that never begins with a dash, so none
+  of those need escaping.
 
 ## When to use
 
