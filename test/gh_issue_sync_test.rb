@@ -800,6 +800,17 @@ class GuardsTest < Minitest::Test
     assert_match(/"43"/, error.message)
     assert_match(/"sync later"/, error.message)
   end
+
+  # Arity is checked before format: a non-digit number paired with a
+  # stray reports the stray, not the malformed number. This matches
+  # bin/linear, whose take_positionals! refuses extras before any
+  # format check.
+  def test_issue_number_guard_checks_arity_before_digits
+    error = assert_raises(GhIssueSync::Error) { GhIssueSync.parse_issue_number!(['forty', '43']) }
+    assert_match(/unexpected extra arguments/, error.message)
+    assert_match(/"43"/, error.message)
+    refute_match(/digits/, error.message)
+  end
 end
 
 class CliArgumentRejectionTest < Minitest::Test
