@@ -400,16 +400,28 @@ module GhIssueSync
           "new body would be #{body.bytesize} bytes; GitHub's issue-body limit is #{MAX_BODY_BYTES} bytes (256 KiB)"
   end
 
-  # Takes every leftover positional, not just the first: a stray token
-  # means part of the typed command was not understood, and silently
-  # dropping it would let a destructive run do half of what was typed.
-  # Strays are inspect-quoted because a mis-quoted shell line can
-  # leave one containing spaces; a bare token would read as two.
-  def parse_issue_number!(positionals)
-    number, *extras = positionals
-    raise Error, 'missing issue number' unless number
-    raise Error, "issue number must be digits, got #{number.inspect}" unless number.match?(/\A\d+\z/)
+  # Returns the first `count` positionals, refusing any beyond them and
+  # -- when `usage` is given -- refusing fewer. A stray positional means
+  # part of the typed command was not understood, and dropping it
+  # silently would let a destructive run do half of what was typed.
+  # Strays are inspect-quoted because a mis-quoted shell line can leave
+  # one containing spaces, which a bare token would read as two. Shares
+  # its shape with bin/linear's take_positionals!; the CLI adds the
+  # "gh-issue-sync:" prefix at abort, so the raise stays unprefixed.
+  def take_positionals!(rest, count, usage = nil)
+    extras = rest.drop(count)
     raise Error, "unexpected extra arguments: #{extras.map(&:inspect).join(', ')}" unless extras.empty?
+
+    taken = rest.first(count)
+    raise Error, usage if usage && taken.size < count
+
+    taken
+  end
+
+  # Issue numbers are all-digits; the arity guard above owns "how many".
+  def parse_issue_number!(positionals)
+    number = take_positionals!(positionals, 1, 'missing issue number').first
+    raise Error, "issue number must be digits, got #{number.inspect}" unless number.match?(/\A\d+\z/)
 
     number
   end
