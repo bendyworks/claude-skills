@@ -271,6 +271,29 @@ class UsageErrorsTest < LinearTestCase
                  abort_message(%w[comment ABC-1 --body-file /nonexistent-battery-file])
   end
 
+  # The other file-taking options guard a missing path the same way,
+  # rather than letting File.read escape as a raw Errno backtrace.
+  def test_create_description_file_must_exist
+    assert_equal 'linear: --description-file not found: /nonexistent-battery-file',
+                 abort_message(%w[create --team ABC --title T --priority medium --no-project
+                                  --description-file /nonexistent-battery-file])
+  end
+
+  def test_update_description_file_must_exist
+    assert_equal 'linear: --description-file not found: /nonexistent-battery-file',
+                 abort_message(%w[update ABC-1 --description-file /nonexistent-battery-file])
+  end
+
+  def test_project_create_content_file_must_exist
+    assert_equal 'linear: --content-file not found: /nonexistent-battery-file',
+                 abort_message(%w[project-create --team ABC --name N --content-file /nonexistent-battery-file])
+  end
+
+  def test_project_update_content_file_must_exist
+    assert_equal 'linear: --content-file not found: /nonexistent-battery-file',
+                 abort_message(%w[project-update --id X --content-file /nonexistent-battery-file])
+  end
+
   def test_comment_delete_requires_id
     assert_equal 'Usage: linear comment-delete COMMENT_ID (see "linear comments ABC-NNN")',
                  abort_message(['comment-delete'])
@@ -406,6 +429,17 @@ class FlagShapedValueRejectionsTest < LinearTestCase
     assert_equal 'linear: invalid argument: --body --json ' \
                  '(comment takes a positional message, --body TEXT, or --body-file PATH)',
                  abort_message(%w[comment ABC-1 --body --json])
+  end
+
+  # An empty value does not begin with a dash, so the guard must accept
+  # it: clearing a field is `--description ''`, and refusing that is a
+  # confusing way to fail. Reaching the sentinel proves the parser took
+  # the empty value.
+  def test_empty_value_is_accepted_not_treated_as_flag_shaped
+    assert_equal TOKEN_MISSING, abort_message(['update', 'ABC-1', '--description', ''])
+    assert_equal TOKEN_MISSING, abort_message(['update', 'ABC-1', '--title', ''])
+    assert_equal TOKEN_MISSING, abort_message(['project-update', '--id', 'X', '--content', ''])
+    assert_equal TOKEN_MISSING, abort_message(['search', 'term', '--team', ''])
   end
 end
 

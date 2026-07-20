@@ -138,10 +138,12 @@ module Linear
   # An option value must not begin with a dash: a mandatory-argument
   # option would otherwise swallow a following flag as its value
   # ('--team --json' parses as team "--json" with no json flag) and
-  # silently act on the misread command. Anchored end to end to state
-  # explicitly the whole-argument match optparse requires of
-  # acceptance patterns.
-  VALUE_NOT_FLAG = /\A[^-].*\z/m
+  # silently act on the misread command. A leading-dash lookahead
+  # rather than [^-] so an empty value still passes -- it does not
+  # begin with a dash, and `--description ''` is how a field is
+  # cleared. Anchored end to end to state explicitly the whole-argument
+  # match optparse requires of acceptance patterns.
+  VALUE_NOT_FLAG = /\A(?!-).*\z/m
 
   # Returns the leftover positionals. The hint rides on parse failures
   # for subcommands whose accepted shape is not obvious from the flag
@@ -200,6 +202,15 @@ module Linear
   # point of the call is the side effect of rejecting any positional.
   def reject_positionals!(rest)
     take_positionals!(rest, 0)
+  end
+
+  # Reads a --*-file option's path, refusing a missing file with the
+  # option's own name rather than letting File.read escape as a raw
+  # Errno backtrace.
+  def read_file_option!(path, flag)
+    raise Error, "linear: #{flag} not found: #{path}" unless File.exist?(path)
+
+    File.read(path)
   end
 
   # Base 10 explicitly: bare Integer() honours the literal prefixes, so
@@ -428,7 +439,7 @@ module Linear
       raise Error, "linear: --project is required (or pass --no-project to override).\n#{usage}"
     end
 
-    description = File.read(description_file) if description_file
+    description = read_file_option!(description_file, '--description-file') if description_file
 
     client = Client.new
 
@@ -529,7 +540,7 @@ module Linear
     end
     identifier = take_positionals!(rest, 1, usage).first
 
-    description = File.read(description_file) if description_file
+    description = read_file_option!(description_file, '--description-file') if description_file
 
     client = Client.new
     issue = client.resolve_issue(identifier, fields: 'id identifier team { id } assignee { id name }')
@@ -606,8 +617,7 @@ module Linear
 
     body =
       if body_file
-        raise Error, "linear: --body-file not found: #{body_file}" unless File.exist?(body_file)
-        File.read(body_file)
+        read_file_option!(body_file, '--body-file')
       elsif body_opt
         body_opt
       else
@@ -714,7 +724,7 @@ module Linear
     end
     reject_positionals!(rest)
     raise Error, usage if team_key.nil? || name.nil?
-    content = File.read(content_file) if content_file
+    content = read_file_option!(content_file, '--content-file') if content_file
 
     client = Client.new
     team_res = client.query(<<~GQL, { teamKey: team_key })
@@ -768,7 +778,7 @@ module Linear
     end
     reject_positionals!(rest)
     raise Error, usage if id.nil?
-    content = File.read(content_file) if content_file
+    content = read_file_option!(content_file, '--content-file') if content_file
 
     input = {}
     input[:name] = name if name
