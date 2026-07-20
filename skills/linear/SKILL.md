@@ -80,6 +80,25 @@ together. Guidelines:
   decision, placeholder pending triage). Must be passed explicitly; never an
   accidental default.
 
+## Dash-leading values
+
+A value that begins with `-` is read as a flag and rejected, so a
+mechanically composed comment or search term that happens to start with
+a dash needs care:
+
+- Put `--` before a dash-leading **search term** or **comment message**
+  so the rest of the line is taken literally: `linear search -- -oauth`,
+  `linear comment ABC-NNN -- -1 broke the build`.
+- `--` guards positionals only; it cannot rescue a dash-leading **option
+  value**. For a `--description`, project `--content`, or comment body
+  that could start with a dash, write it to a file and pass the matching
+  `--description-file` / `--content-file` / `--body-file`. This is the
+  safest default when composing bodies programmatically, and it already
+  suits long or markdown text.
+- Every other value option (`--team`, `--state`, `--priority`,
+  `--parent`, etc.) takes an identifier, key, or enum word that never
+  begins with a dash, so none of them need escaping.
+
 ## When to use
 
 - The user mentions a Linear identifier (ABC-NNN, etc.) and wants info on it: `linear get`.
