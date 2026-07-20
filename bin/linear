@@ -159,31 +159,47 @@ module Linear
     raise Error, "linear: #{e.message}#{hint ? " #{hint}" : ''}"
   end
 
-  # Returns `value`, refusing it when the option already has one.
-  # Last-one-wins on a repeated option silently discards the first
-  # value -- the same dropped-input shape as a stray positional, and
-  # worse when the surviving value aims the command at a different
-  # issue or project than the one typed first. Only value-taking
-  # options need this: repeating a switch discards nothing.
-  def set_once!(current, flag, value)
-    raise Error, "linear: duplicate #{flag}" unless current.nil?
+  # Declares a value-taking option carrying both guards every such
+  # option needs, so no declaration can forget either. VALUE_NOT_FLAG
+  # refuses a leading-dash value; the seen flag refuses a repeat --
+  # last-one-wins would silently discard the first value, the same
+  # dropped-input shape as a stray positional and worse when the
+  # surviving value aims the command at a different issue or project
+  # than the one typed first. The flag name is read off the spec so it
+  # cannot drift from the option it labels. Switches (--json, --all)
+  # stay on plain o.on: repeating one discards nothing.
+  def value_option(parser, spec, *desc)
+    flag = spec.split(/[ =]/, 2).first
+    seen = false
+    parser.on(spec, VALUE_NOT_FLAG, *desc) do |value|
+      raise Error, "linear: duplicate #{flag}" if seen
 
-    value
+      seen = true
+      yield value
+    end
   end
 
-  # Returns the first `count` positionals, refusing any beyond them. A
-  # stray positional means part of the typed command was not
-  # understood, and dropping it silently lets the command act on half
-  # of what was typed: `update ABC-1 ABC-2 --state Done` used to move
-  # ABC-1 alone. Strays are inspect-quoted because a mis-quoted shell
-  # line can leave one containing spaces, which a bare token would
-  # read as two. Missing positionals are not this guard's business --
-  # each subcommand reports those against its own usage banner.
-  def take_positionals!(rest, count)
+  # Returns the first `count` positionals, refusing any beyond them and
+  # -- when `usage` is given -- refusing fewer. A stray positional
+  # means part of the typed command was not understood, and dropping it
+  # silently lets the command act on half of what was typed:
+  # `update ABC-1 ABC-2 --state Done` used to move ABC-1 alone. Strays
+  # are inspect-quoted because a mis-quoted shell line can leave one
+  # containing spaces, which a bare token would read as two.
+  def take_positionals!(rest, count, usage = nil)
     extras = rest.drop(count)
     raise Error, "linear: unexpected extra arguments: #{extras.map(&:inspect).join(', ')}" unless extras.empty?
 
-    rest.first(count)
+    taken = rest.first(count)
+    raise Error, usage if usage && taken.size < count
+
+    taken
+  end
+
+  # Reads clearly at the zero-positional subcommands, where the whole
+  # point of the call is the side effect of rejecting any positional.
+  def reject_positionals!(rest)
+    take_positionals!(rest, 0)
   end
 
   # Base 10 explicitly: bare Integer() honours the literal prefixes, so
@@ -260,8 +276,7 @@ module Linear
       o.on('--full') { full = true }
       o.on('--json') { json_mode = true }
     end
-    identifier = take_positionals!(rest, 1).first
-    raise Error, usage unless identifier
+    identifier = take_positionals!(rest, 1, usage).first
 
     fields = ISSUE_CORE_FIELDS.dup
     fields << ISSUE_COMMENT_FIELDS if full
@@ -293,8 +308,7 @@ module Linear
     rest = parse_options(args, usage) do |o|
       o.on('--json') { json_mode = true }
     end
-    identifier = take_positionals!(rest, 1).first
-    raise Error, usage unless identifier
+    identifier = take_positionals!(rest, 1, usage).first
 
     client = Client.new
     team_key, number = parse_identifier!(identifier)
@@ -328,13 +342,13 @@ module Linear
     team_key = nil
     limit_str = nil
     rest = parse_options(args, usage) do |o|
-      o.on('--team KEY', VALUE_NOT_FLAG) { |v| team_key = set_once!(team_key, '--team', v) }
-      o.on('--limit N', VALUE_NOT_FLAG) { |v| limit_str = set_once!(limit_str, '--limit', v) }
+      value_option(o, '--team KEY') { |v| team_key = v }
+      value_option(o, '--limit N') { |v| limit_str = v }
       o.on('--json') { json_mode = true }
     end
     limit = limit_str ? parse_limit(limit_str) : 25
-    term = take_positionals!(rest, 1).first
-    raise Error, usage if term.nil? || term.empty?
+    term = take_positionals!(rest, 1, usage).first
+    raise Error, usage if term.empty?
 
     filter = {
       or: [
@@ -370,6 +384,9 @@ module Linear
   end
 
   def cmd_create(args)
+    usage = 'Usage: linear create --team KEY --title TITLE --priority LEVEL (--project NAME | --no-project) ' \
+            '[--description TEXT | --description-file PATH] [--state NAME] [--parent ABC-NNN] ' \
+            '[--assignee EMAIL|me] [--json]'
     team_key = nil
     project_name = nil
     title = nil
@@ -382,34 +399,21 @@ module Linear
     priority = nil
     json_mode = false
 
-    usage = 'Usage: linear create --team KEY --title TITLE --priority LEVEL (--project NAME | --no-project) ' \
-            '[--description TEXT | --description-file PATH] [--state NAME] [--parent ABC-NNN] ' \
-            '[--assignee EMAIL|me] [--json]'
     rest = parse_options(args, usage) do |o|
-      o.on('--team KEY', VALUE_NOT_FLAG) { |v| team_key = set_once!(team_key, '--team', v) }
-      o.on('--priority LEVEL', VALUE_NOT_FLAG, 'REQUIRED: urgent|high|medium|low, or an explicit none (or 0-4)') do |v|
-        priority = set_once!(priority, '--priority', v)
-      end
-      o.on('--project NAME', VALUE_NOT_FLAG) { |v| project_name = set_once!(project_name, '--project', v) }
-      o.on('--title TITLE', VALUE_NOT_FLAG) { |v| title = set_once!(title, '--title', v) }
-      o.on('--description TEXT', VALUE_NOT_FLAG) { |v| description = set_once!(description, '--description', v) }
-      o.on('--description-file PATH', VALUE_NOT_FLAG) do |v|
-        description_file = set_once!(description_file, '--description-file', v)
-      end
-      o.on('--state NAME', VALUE_NOT_FLAG, 'Workflow state (default: Todo; never Triage/Backlog)') do |v|
-        state_name = set_once!(state_name, '--state', v)
-      end
-      o.on('--parent ABC-NNN', VALUE_NOT_FLAG, 'Make the new issue a sub-issue of this parent') do |v|
-        parent_id = set_once!(parent_id, '--parent', v)
-      end
-      o.on('--assignee EMAIL|me', VALUE_NOT_FLAG,
-           'Assign the issue (required when creating in a started state like In Progress)') do |v|
-        assignee = set_once!(assignee, '--assignee', v)
-      end
+      value_option(o, '--team KEY') { |v| team_key = v }
+      value_option(o, '--priority LEVEL', 'REQUIRED: urgent|high|medium|low, or an explicit none (or 0-4)') { |v| priority = v }
+      value_option(o, '--project NAME') { |v| project_name = v }
+      value_option(o, '--title TITLE') { |v| title = v }
+      value_option(o, '--description TEXT') { |v| description = v }
+      value_option(o, '--description-file PATH') { |v| description_file = v }
+      value_option(o, '--state NAME', 'Workflow state (default: Todo; never Triage/Backlog)') { |v| state_name = v }
+      value_option(o, '--parent ABC-NNN', 'Make the new issue a sub-issue of this parent') { |v| parent_id = v }
+      value_option(o, '--assignee EMAIL|me',
+                   'Assign the issue (required when creating in a started state like In Progress)') { |v| assignee = v }
       o.on('--no-project') { no_project = true }
       o.on('--json') { json_mode = true }
     end
-    take_positionals!(rest, 0)
+    reject_positionals!(rest)
 
     raise Error, usage if team_key.nil? || title.nil?
     if priority.nil?
@@ -498,6 +502,9 @@ module Linear
   end
 
   def cmd_update(args)
+    usage = 'Usage: linear update ABC-NNN [--state NAME] [--title TITLE] ' \
+            '[--description TEXT | --description-file PATH] [--project NAME] [--parent ABC-NNN] ' \
+            '[--assignee EMAIL|me] [--priority none|urgent|high|medium|low] [--json]'
     state_name = nil
     title = nil
     description = nil
@@ -508,33 +515,19 @@ module Linear
     assignee = nil
     json_mode = false
 
-    usage = 'Usage: linear update ABC-NNN [--state NAME] [--title TITLE] ' \
-            '[--description TEXT | --description-file PATH] [--project NAME] [--parent ABC-NNN] ' \
-            '[--assignee EMAIL|me] [--priority none|urgent|high|medium|low] [--json]'
     rest = parse_options(args, usage) do |o|
-      o.on('--priority LEVEL', VALUE_NOT_FLAG, 'Set priority (none|urgent|high|medium|low or 0-4)') do |v|
-        priority = set_once!(priority, '--priority', v)
-      end
-      o.on('--state NAME', VALUE_NOT_FLAG) { |v| state_name = set_once!(state_name, '--state', v) }
-      o.on('--title TITLE', VALUE_NOT_FLAG) { |v| title = set_once!(title, '--title', v) }
-      o.on('--description TEXT', VALUE_NOT_FLAG) { |v| description = set_once!(description, '--description', v) }
-      o.on('--description-file PATH', VALUE_NOT_FLAG) do |v|
-        description_file = set_once!(description_file, '--description-file', v)
-      end
-      o.on('--project NAME', VALUE_NOT_FLAG, 'Move the issue to this project') do |v|
-        project_name = set_once!(project_name, '--project', v)
-      end
-      o.on('--parent ABC-NNN', VALUE_NOT_FLAG, 'Reparent the issue under this parent') do |v|
-        parent_id = set_once!(parent_id, '--parent', v)
-      end
-      o.on('--assignee EMAIL|me', VALUE_NOT_FLAG,
-           'Assign the issue (required when moving to a started state like In Progress)') do |v|
-        assignee = set_once!(assignee, '--assignee', v)
-      end
+      value_option(o, '--priority LEVEL', 'Set priority (none|urgent|high|medium|low or 0-4)') { |v| priority = v }
+      value_option(o, '--state NAME') { |v| state_name = v }
+      value_option(o, '--title TITLE') { |v| title = v }
+      value_option(o, '--description TEXT') { |v| description = v }
+      value_option(o, '--description-file PATH') { |v| description_file = v }
+      value_option(o, '--project NAME', 'Move the issue to this project') { |v| project_name = v }
+      value_option(o, '--parent ABC-NNN', 'Reparent the issue under this parent') { |v| parent_id = v }
+      value_option(o, '--assignee EMAIL|me',
+                   'Assign the issue (required when moving to a started state like In Progress)') { |v| assignee = v }
       o.on('--json') { json_mode = true }
     end
-    identifier = take_positionals!(rest, 1).first
-    raise Error, usage unless identifier
+    identifier = take_positionals!(rest, 1, usage).first
 
     description = File.read(description_file) if description_file
 
@@ -605,8 +598,8 @@ module Linear
     # terminator, or --body/--body-file.
     rest = parse_options(args, usage, hint: '(comment takes a positional message, ' \
                                             '--body TEXT, or --body-file PATH)') do |o|
-      o.on('--body TEXT', VALUE_NOT_FLAG) { |v| body_opt = set_once!(body_opt, '--body', v) }
-      o.on('--body-file PATH', VALUE_NOT_FLAG) { |v| body_file = set_once!(body_file, '--body-file', v) }
+      value_option(o, '--body TEXT') { |v| body_opt = v }
+      value_option(o, '--body-file PATH') { |v| body_file = v }
       o.on('--json') { json_mode = true }
     end
     identifier = rest.shift
@@ -650,8 +643,8 @@ module Linear
     rest = parse_options(args, usage) do |o|
       o.on('--json') { json_mode = true }
     end
-    comment_id = take_positionals!(rest, 1).first
-    raise Error, usage if comment_id.nil? || comment_id.empty?
+    comment_id = take_positionals!(rest, 1, usage).first
+    raise Error, usage if comment_id.empty?
 
     client = Client.new
     res = client.query(<<~GQL, { id: comment_id })
@@ -670,18 +663,14 @@ module Linear
   end
 
   def cmd_relate(args)
-    # Starts nil so the duplicate guard can tell "not yet given" from
-    # "given once"; the default lands after parsing instead.
-    type = nil
-    json_mode = false
     usage = 'Usage: linear relate ABC-AAA ABC-BBB [--type related|blocks|duplicate] [--json]'
+    type = 'related'
+    json_mode = false
     rest = parse_options(args, usage) do |o|
-      o.on('--type TYPE', VALUE_NOT_FLAG) { |v| type = set_once!(type, '--type', v) }
+      value_option(o, '--type TYPE') { |v| type = v }
       o.on('--json') { json_mode = true }
     end
-    type ||= 'related'
-    source, target = take_positionals!(rest, 2)
-    raise Error, usage if source.nil? || target.nil?
+    source, target = take_positionals!(rest, 2, usage)
 
     client = Client.new
     source_issue = client.resolve_issue(source, fields: 'id identifier')
@@ -707,29 +696,23 @@ module Linear
   end
 
   def cmd_project_create(args)
+    usage = 'Usage: linear project-create --team KEY --name NAME ' \
+            '[--description TEXT] [--content TEXT | --content-file PATH] [--json]'
     team_key = nil
     name = nil
     description = nil
     content = nil
     content_file = nil
     json_mode = false
-    usage = 'Usage: linear project-create --team KEY --name NAME ' \
-            '[--description TEXT] [--content TEXT | --content-file PATH] [--json]'
     rest = parse_options(args, usage) do |o|
-      o.on('--team KEY', VALUE_NOT_FLAG) { |v| team_key = set_once!(team_key, '--team', v) }
-      o.on('--name NAME', VALUE_NOT_FLAG) { |v| name = set_once!(name, '--name', v) }
-      o.on('--description TEXT', VALUE_NOT_FLAG, 'Short one-line project summary') do |v|
-        description = set_once!(description, '--description', v)
-      end
-      o.on('--content TEXT', VALUE_NOT_FLAG, 'Project body (markdown)') do |v|
-        content = set_once!(content, '--content', v)
-      end
-      o.on('--content-file PATH', VALUE_NOT_FLAG, 'Read project body (markdown) from a file') do |v|
-        content_file = set_once!(content_file, '--content-file', v)
-      end
+      value_option(o, '--team KEY') { |v| team_key = v }
+      value_option(o, '--name NAME') { |v| name = v }
+      value_option(o, '--description TEXT', 'Short one-line project summary') { |v| description = v }
+      value_option(o, '--content TEXT', 'Project body (markdown)') { |v| content = v }
+      value_option(o, '--content-file PATH', 'Read project body (markdown) from a file') { |v| content_file = v }
       o.on('--json') { json_mode = true }
     end
-    take_positionals!(rest, 0)
+    reject_positionals!(rest)
     raise Error, usage if team_key.nil? || name.nil?
     content = File.read(content_file) if content_file
 
@@ -767,29 +750,23 @@ module Linear
   end
 
   def cmd_project_update(args)
+    usage = 'Usage: linear project-update --id PROJECT_ID ' \
+            '[--name NAME] [--description TEXT] [--content TEXT | --content-file PATH] [--json]'
     id = nil
     name = nil
     description = nil
     content = nil
     content_file = nil
     json_mode = false
-    usage = 'Usage: linear project-update --id PROJECT_ID ' \
-            '[--name NAME] [--description TEXT] [--content TEXT | --content-file PATH] [--json]'
     rest = parse_options(args, usage) do |o|
-      o.on('--id ID', VALUE_NOT_FLAG) { |v| id = set_once!(id, '--id', v) }
-      o.on('--name NAME', VALUE_NOT_FLAG) { |v| name = set_once!(name, '--name', v) }
-      o.on('--description TEXT', VALUE_NOT_FLAG, 'Short one-line project summary') do |v|
-        description = set_once!(description, '--description', v)
-      end
-      o.on('--content TEXT', VALUE_NOT_FLAG, 'Project body (markdown)') do |v|
-        content = set_once!(content, '--content', v)
-      end
-      o.on('--content-file PATH', VALUE_NOT_FLAG, 'Read project body (markdown) from a file') do |v|
-        content_file = set_once!(content_file, '--content-file', v)
-      end
+      value_option(o, '--id ID') { |v| id = v }
+      value_option(o, '--name NAME') { |v| name = v }
+      value_option(o, '--description TEXT', 'Short one-line project summary') { |v| description = v }
+      value_option(o, '--content TEXT', 'Project body (markdown)') { |v| content = v }
+      value_option(o, '--content-file PATH', 'Read project body (markdown) from a file') { |v| content_file = v }
       o.on('--json') { json_mode = true }
     end
-    take_positionals!(rest, 0)
+    reject_positionals!(rest)
     raise Error, usage if id.nil?
     content = File.read(content_file) if content_file
 
@@ -823,10 +800,10 @@ module Linear
     json_mode = false
     team_opt = nil
     rest = parse_options(args, usage) do |o|
-      o.on('--team KEY', VALUE_NOT_FLAG) { |v| team_opt = set_once!(team_opt, '--team', v) }
+      value_option(o, '--team KEY') { |v| team_opt = v }
       o.on('--json') { json_mode = true }
     end
-    take_positionals!(rest, 0)
+    reject_positionals!(rest)
     team_key = team_opt || ENV['LINEAR_TEAM_KEY']
     raise Error, usage if team_key.nil? || team_key.empty?
     client = Client.new
@@ -929,14 +906,14 @@ module Linear
     since = nil
     limit_str = nil
     rest = parse_options(args, usage) do |o|
-      o.on('--team KEY', VALUE_NOT_FLAG) { |v| team_opt = set_once!(team_opt, '--team', v) }
-      o.on('--project NAME', VALUE_NOT_FLAG) { |v| project_name = set_once!(project_name, '--project', v) }
-      o.on('--since YYYY-MM-DD', VALUE_NOT_FLAG) { |v| since = set_once!(since, '--since', v) }
-      o.on('--limit N', VALUE_NOT_FLAG) { |v| limit_str = set_once!(limit_str, '--limit', v) }
+      value_option(o, '--team KEY') { |v| team_opt = v }
+      value_option(o, '--project NAME') { |v| project_name = v }
+      value_option(o, '--since YYYY-MM-DD') { |v| since = v }
+      value_option(o, '--limit N') { |v| limit_str = v }
       o.on('--all') { all = true }
       o.on('--json') { json_mode = true }
     end
-    take_positionals!(rest, 0)
+    reject_positionals!(rest)
     team_key = team_opt || ENV['LINEAR_TEAM_KEY']
     limit = limit_str ? parse_limit(limit_str) : 100
     raise Error, usage if team_key.nil? || team_key.empty? || (project_name.nil? && since.nil?)
@@ -990,26 +967,35 @@ module Linear
   end
 
   class CLI
+    # The subcommand table, one entry per cmd_* handler. Kept as a
+    # constant rather than an inline case so tests can iterate it and
+    # assert every subcommand carries the shared guards -- a new
+    # subcommand then cannot silently skip them.
+    COMMANDS = {
+      'get' => :cmd_get,
+      'comments' => :cmd_comments,
+      'search' => :cmd_search,
+      'list' => :cmd_list,
+      'create' => :cmd_create,
+      'update' => :cmd_update,
+      'comment' => :cmd_comment,
+      'comment-delete' => :cmd_comment_delete,
+      'relate' => :cmd_relate,
+      'project-create' => :cmd_project_create,
+      'project-update' => :cmd_project_update,
+      'project-list' => :cmd_project_list
+    }.freeze
+
     def self.run(argv)
       new.run(argv)
     end
 
     def run(argv)
       command = argv.shift
-      case command
-      when 'get'      then Linear.cmd_get(argv)
-      when 'comments' then Linear.cmd_comments(argv)
-      when 'search'   then Linear.cmd_search(argv)
-      when 'list'     then Linear.cmd_list(argv)
-      when 'create'   then Linear.cmd_create(argv)
-      when 'update'   then Linear.cmd_update(argv)
-      when 'comment'  then Linear.cmd_comment(argv)
-      when 'comment-delete' then Linear.cmd_comment_delete(argv)
-      when 'relate'   then Linear.cmd_relate(argv)
-      when 'project-create' then Linear.cmd_project_create(argv)
-      when 'project-update' then Linear.cmd_project_update(argv)
-      when 'project-list'   then Linear.cmd_project_list(argv)
-      when nil, 'help', '--help', '-h' then puts USAGE
+      if (handler = COMMANDS[command])
+        Linear.public_send(handler, argv)
+      elsif [nil, 'help', '--help', '-h'].include?(command)
+        puts USAGE
       else
         warn "linear: unknown subcommand #{command.inspect}"
         puts USAGE
