@@ -9,8 +9,8 @@ The user has finished a story to the satisfaction of clients and end-users. Spec
 
 This skill orchestrates that pass in four phases, plus an optional fifth for larger or riskier PRs:
 
-1. **Phase 0** -- pre-flight, scope, and `/code-review`
-2. **Phase 1** -- parallel sub-agent audits (report-only)
+1. **Phase 0** -- pre-flight and scope
+2. **Phase 1** -- finding sources: `/code-review`, then parallel sub-agent audits (report-only)
 3. **Phase 2** -- consolidate findings into one triaged punch list
 4. **Phase 3** -- triage with the user, then fix what they approve
 5. **Phase 4 (optional)** -- a fresh-eyes "find the bug" sub-agent on the final state
@@ -35,7 +35,7 @@ Each sub-agent should *read* the relevant CLAUDE.md(s) to inform its findings. T
 
 ---
 
-## Phase 0 -- Pre-flight, scope, and /code-review
+## Phase 0 -- Pre-flight and scope
 
 ### Step 1 -- Confirm preconditions
 
@@ -50,7 +50,7 @@ If any precondition is off, surface it and pause -- don't push forward on a brok
 
 **Non-git version control:** the commands throughout this skill assume git. If the user works in another VCS (e.g. Jujutsu colocated with git), ask them for the change range ("which revisions are the current work?") and translate the `git diff main...HEAD` commands to that tool's equivalents -- the phases themselves don't change. Don't make the user volunteer this; ask when the working-copy state looks unfamiliar.
 
-**Cost expectations:** a full run is deliberately thorough and correspondingly token-hungry -- /code-review plus five parallel audits (plus optional Phase 4) can consume a noticeable slice of a subscription session's budget. Before dispatching Phase 1, tell the user the planned agent count so they can trim (Step 4) or choose light mode; on a large diff, say explicitly that this will be an expensive pass.
+**Cost expectations:** a full run is deliberately thorough and correspondingly token-hungry -- /code-review plus five parallel audits (plus optional Phase 4) can consume a noticeable slice of a subscription session's budget. Before dispatching Phase 1, tell the user the planned agent count so they can trim (Step 3) or choose light mode; on a large diff, say explicitly that this will be an expensive pass.
 
 ### Step 2 -- Snapshot the scope
 
@@ -63,13 +63,7 @@ git diff main...HEAD --name-only
 
 Note the categories present: Ruby code, specs, JS, SCSS, migrations, Gemfile / Gemfile.lock, config. This drives which Phase 1 agents are worth spawning.
 
-### Step 3 -- Run /code-review first
-
-Invoke `/code-review` (the built-in) before anything else. It *edits* code, so running it first means Phase 1 audits review the already-cleaned state and don't waste cycles flagging things /code-review is about to rewrite.
-
-When /code-review finishes, re-snapshot the diff (`git diff main...HEAD --stat`) so Phase 1 agents see the current shape. Commit /code-review's edits separately before Phase 1 dispatches -- a clean checkpoint makes it easier to attribute later findings.
-
-### Step 4 -- Decide which Phase 1 agents to spawn
+### Step 3 -- Decide which Phase 1 agents to spawn
 
 The default set is five: `cruft`, `rspec-quality`, `idioms`, `data-validation`, `security`. Trim based on the scope snapshot:
 
@@ -83,7 +77,7 @@ The default set is five: `cruft`, `rspec-quality`, `idioms`, `data-validation`, 
 
 If the user explicitly asked to skip something ("gauntlet but skip security") or focus on one thing ("just the rspec audit"), honor that.
 
-### Step 5 -- Patch coverage on the added lines
+### Step 4 -- Patch coverage on the added lines
 
 Reviewers and CI (Codecov, etc.) flag **patch coverage**: lines *added by this branch* that no test executes. The Phase 1 audits reason about test *quality*, not line coverage, so an untested new line slips past them -- catch it here mechanically instead of in a review round-trip.
 
@@ -106,9 +100,11 @@ If the diff is under ~50 lines across fewer than ~5 files, sub-agent dispatch ov
 
 ---
 
-## Phase 1 -- Parallel audits (report-only)
+## Phase 1 -- Finding sources (report-only)
 
-Dispatch the chosen agents **in a single message** so they run concurrently. Use `Agent` with `subagent_type: "general-purpose"` unless an agent's brief calls for a different one.
+First invoke `/code-review` (the built-in) in the main agent and capture its findings for Phase 2. It is a peer finding source: it reports a findings list and makes no edits and no commits, exactly like the sub-agents below. (If a future version of the built-in applies edits instead, commit those edits and re-snapshot the diff before dispatching.)
+
+Then dispatch the chosen agents **in a single message** so they run concurrently. Use `Agent` with `subagent_type: "general-purpose"` unless an agent's brief calls for a different one.
 
 Every sub-agent prompt MUST tell the agent to:
 
@@ -231,7 +227,7 @@ The agent-specific briefs below are starting templates. Adjust wording to match 
 
 When all sub-agents return, the main agent assembles **one** punch list:
 
-0. **Fold in the Step 5 patch-coverage findings** alongside the sub-agent findings before deduping -- they belong in the same list and triage.
+0. **Fold in the Step 4 patch-coverage findings** alongside the sub-agent findings before deduping -- they belong in the same list and triage.
 1. **Dedupe.** Same `file:line` flagged by multiple agents = one entry, listing both reasons.
 2. **Sort by severity first, then by file.** `must-fix` block at the top, then `should-fix`, then `nit`.
 3. **Cross-reference.** If a finding from one agent is invalidated by another's "considered but ruled out", drop it and note the resolution.
@@ -259,7 +255,7 @@ For each accepted finding:
 
 After all accepted findings are addressed:
 
-1. Run the project's full lint+test gate again (via the project's suite-runner skill if it has one), **with coverage on**, and re-run the Step 5 patch-coverage check -- the fixes added lines too, and those should be covered before the branch leaves draft. In Targeted Spec Verification Mode, re-run the targeted-specs skill (bundled in this plugin) with coverage on instead and act on its verdict line.
+1. Run the project's full lint+test gate again (via the project's suite-runner skill if it has one), **with coverage on**, and re-run the Step 4 patch-coverage check -- the fixes added lines too, and those should be covered before the branch leaves draft. In Targeted Spec Verification Mode, re-run the targeted-specs skill (bundled in this plugin) with coverage on instead and act on its verdict line.
 2. Report the PR size in lines changed across files, and whether it's over or under the 400-line easy-review threshold.
 3. Offer Phase 4 -- ask the user, "Want to run a 'find the bug' pass? Recommended for larger or riskier PRs." Phrase it as a real option, not a default.
 4. If the user declines Phase 4, tell them the gauntlet is complete and the branch is ready for human review.
