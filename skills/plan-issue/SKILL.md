@@ -451,9 +451,14 @@ Draft a plan with:
       pass; run it before step 3 because any findings the user accepts
       should be in the PR before it leaves draft for human review. Skip
       only if the user explicitly opts out for this issue.
-   3. Open the draft PR. This kicks off GitHub CI checks and any
-      automated reviewer (e.g. claude-code-action) that runs on
-      ready-for-review or synchronize events. On GitHub-tracked repos,
+   3. Open the draft PR. Lead the PR body with a short Why
+      paragraph -- the user-visible reason the change exists,
+      carried over from the plan's opening Why -- before any
+      What/mechanism content, per the pull-requests guidance (a
+      tracker-reference line may sit above it). Opening the PR
+      kicks off GitHub CI checks and any automated reviewer (e.g.
+      claude-code-action) that runs on ready-for-review or
+      synchronize events. On GitHub-tracked repos,
       put `Closes #NNN` (or `Fixes #NNN`) in the PR body when this PR
       fully resolves the issue; when the issue outlives the PR (a
       multi-PR epic), use a plain `#NNN` reference instead. Two traps:
