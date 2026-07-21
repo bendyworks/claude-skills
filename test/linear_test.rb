@@ -11,7 +11,7 @@
 # so loading it here exposes the Linear module without executing the
 # CLI. Run: ruby test/linear_test.rb
 
-require 'minitest/autorun'
+require_relative 'cli_test_case'
 
 # The load runs the module body before any setup scrub can protect it,
 # so bin/linear's module body must stay side-effect-free: no env reads,
@@ -36,39 +36,16 @@ COMMENT_USAGE = 'Usage: linear comment ABC-NNN ("message" | --body TEXT | --body
 
 # Base class: scrubs the Linear-related environment so results do not
 # depend on this machine's token, default team, or POSIX parsing mode.
-class LinearTestCase < Minitest::Test
-  SCRUBBED_ENV = %w[LINEAR_API_TOKEN LINEAR_TEAM_KEY POSIXLY_CORRECT].freeze
-
-  def setup
-    @saved_env = SCRUBBED_ENV.to_h { |key| [key, ENV.delete(key)] }
-  end
-
-  def teardown
-    @saved_env.each { |key, value| value ? ENV[key] = value : ENV.delete(key) }
-  end
-
-  # Runs the CLI expecting an abort; returns the SystemExit message
-  # (Kernel#abort carries its message on the exception).
-  def abort_message(argv)
-    message = nil
-    capture_io do
-      error = assert_raises(SystemExit) { run_scrubbed(argv) }
-      message = error.message
-    end
-    message
-  end
-
-  # Runs the CLI expecting a clean return; returns captured stdout.
-  def cli_stdout(argv)
-    out, _err = capture_io { run_scrubbed(argv) }
-    out
+class LinearTestCase < CliTestCase
+  def scrubbed_env_keys
+    super + %w[LINEAR_API_TOKEN LINEAR_TEAM_KEY]
   end
 
   # Defense in depth: the sentinel pins only stay offline while the
   # env scrub holds, and one of them reaches a live commentDelete
   # mutation if it does not. Refuse to run the CLI with a real token
   # present (e.g. a subclass overriding setup without super).
-  def run_scrubbed(argv)
+  def run_cli(argv)
     flunk 'LINEAR_API_TOKEN leaked into the test environment' if ENV.key?('LINEAR_API_TOKEN')
     Linear::CLI.run(argv)
   end
@@ -94,7 +71,7 @@ class DispatchTest < LinearTestCase
   def test_unknown_subcommand_warns_prints_usage_and_exits_nonzero
     status = nil
     out, err = capture_io do
-      error = assert_raises(SystemExit) { run_scrubbed(['bogus-subcommand']) }
+      error = assert_raises(SystemExit) { run_cli(['bogus-subcommand']) }
       status = error.status
     end
     assert_equal 1, status
