@@ -62,6 +62,26 @@ class DuplicateKeyProbeCase < CliTestCase
   end
 end
 
+# Exercises the command shim: a shimmed command name resolving through
+# PATH must hit the shim, never a real executable. Only the outer
+# contract test arms the invocation, so autorun's extra pass over this
+# class stays green.
+class ShimProbeCase < CliTestCase
+  class << self
+    attr_accessor :armed
+  end
+
+  def shimmed_commands
+    %w[cli-test-case-fake-command]
+  end
+
+  def test_invoke_shimmed_command_when_armed
+    return unless self.class.armed
+
+    system('cli-test-case-fake-command', out: File::NULL, err: File::NULL)
+  end
+end
+
 class CliTestCaseTest < Minitest::Test
   SENTINEL_KEYS = %w[POSIXLY_CORRECT CLI_TEST_CASE_SENTINEL].freeze
 
@@ -114,5 +134,22 @@ class CliTestCaseTest < Minitest::Test
     probe = run_probe(DuplicateKeyProbeCase, :test_record_env_visibility)
     refute probe.seen[:base_key_present], 'duplicated key must still be scrubbed'
     assert_equal '1', ENV['POSIXLY_CORRECT']
+  end
+
+  def test_invoking_a_shimmed_command_flunks_the_test
+    ShimProbeCase.armed = true
+    result = ShimProbeCase.new('test_invoke_shimmed_command_when_armed').run
+    refute result.passed?, 'invoking a shimmed command must flunk the test'
+    assert_match(/intercepted by test shim/, result.failure.message)
+  ensure
+    ShimProbeCase.armed = false
+  end
+
+  def test_shim_is_gone_from_path_after_the_run
+    ShimProbeCase.armed = false
+    result = ShimProbeCase.new('test_invoke_shimmed_command_when_armed').run
+    assert result.passed?, "unarmed probe failed: #{result.failure&.message}"
+    assert_nil system('cli-test-case-fake-command', out: File::NULL, err: File::NULL),
+               'shimmed command must not resolve once the test is over'
   end
 end

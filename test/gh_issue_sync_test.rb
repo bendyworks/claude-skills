@@ -820,6 +820,13 @@ class CliArgumentRejectionTest < CliTestCase
     GhIssueSync::CLI.run(argv)
   end
 
+  # gh authenticates from the system keyring, so no env scrub can keep
+  # a test off the network; the PATH shim can. Any code path that
+  # reaches a gh invocation flunks instead of talking to GitHub.
+  def shimmed_commands
+    %w[gh]
+  end
+
   # A stray between flags still reaches the guard: OptionParser parses
   # in permutation mode, collecting every non-option token into the
   # leftover positionals regardless of position.
