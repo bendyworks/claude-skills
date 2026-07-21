@@ -25,13 +25,12 @@ lint and tests pass and the PR is genuinely ready for a human.
 ## Lead with why
 
 Open every PR description with a short Why paragraph: the
-user-visible reason the change exists, before any What or mechanism
-content. A tracker-reference line (an issue link or `Closes #NNN`)
-may sit above it, but the first prose paragraph is the Why. This is
-the same why-first principle commit titles follow (per the
-commit-messages guidance, for teams that import it): a reader
-opening the PR cold gets the motivation first instead of
-reverse-engineering it from the diff.
+user-visible outcome or the reason the change exists, before any What
+or mechanism content. A tracker-reference line (an issue link, or
+`Closes #NNN` when the PR fully resolves the issue) may sit above it,
+but the first prose paragraph is the Why. This is the same why-first
+principle commit titles follow in the commit-messages guidance:
+motivation first, mechanism second.
 
 ## Write descriptions for the reader
 
