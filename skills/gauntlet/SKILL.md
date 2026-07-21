@@ -9,8 +9,8 @@ The user has finished a story to the satisfaction of clients and end-users. Spec
 
 This skill orchestrates that pass in four phases, plus an optional fifth for larger or riskier PRs:
 
-1. **Phase 0** -- pre-flight, scope, and `/code-review`
-2. **Phase 1** -- parallel sub-agent audits (report-only)
+1. **Phase 0** -- pre-flight and scope
+2. **Phase 1** -- finding sources: `/code-review`, then parallel sub-agent audits (report-only)
 3. **Phase 2** -- consolidate findings into one triaged punch list
 4. **Phase 3** -- triage with the user, then fix what they approve
 5. **Phase 4 (optional)** -- a fresh-eyes "find the bug" sub-agent on the final state
@@ -19,7 +19,7 @@ The main agent's job is orchestration: dispatch sub-agents in parallel, merge th
 
 ## Standing pre-approval -- do NOT prompt for component steps
 
-When the user invokes the gauntlet, every component step and nested skill call is **already approved**. Run them all without pausing to ask permission: `/code-review` (Phase 0), `/security-review` (the security agent), every Phase 1 sub-agent dispatch, and the Phase 4 "find the bug" pass when requested. Never stop to ask "is it ok to run /code-review?" or "should I dispatch the audit agents?" -- just proceed through the phases.
+When the user invokes the gauntlet, every component step and nested skill call is **already approved**. Run them all without pausing to ask permission: `/code-review`, `/security-review` (the security agent), every Phase 1 sub-agent dispatch, and the Phase 4 "find the bug" pass when requested. Never stop to ask "is it ok to run /code-review?" or "should I dispatch the audit agents?" -- just proceed through the phases.
 
 The ONLY built-in pause is the **Phase 3 triage decision**, where the user chooses which findings to fix. That is a genuine decision point and stays. Everything mechanical before it runs unprompted.
 
@@ -28,14 +28,14 @@ The ONLY built-in pause is the **Phase 3 triage decision**, where the user choos
 Do not pad sub-agent prompts with rules that already live in:
 
 - **The project's CLAUDE.md files** -- testing philosophy, lint policy, commit conventions, and whatever house rules the project declares.
-- **`/code-review` (built-in)** -- generic reuse / quality / efficiency cleanup. Don't ask sub-agents to re-flag duplicate code that /code-review just rewrote, or readability micro-improvements it handled.
+- **`/code-review` (built-in)** -- generic reuse / quality / efficiency findings. That is its lane: don't ask sub-agents to duplicate it by hunting duplicated code or readability micro-improvements.
 - **`/security-review` (built-in)** -- a general security review of pending changes. The gauntlet's security agent should *invoke* `/security-review` and incorporate its findings, not redo that work from scratch.
 
 Each sub-agent should *read* the relevant CLAUDE.md(s) to inform its findings. The briefs below assume that and don't re-list the rules.
 
 ---
 
-## Phase 0 -- Pre-flight, scope, and /code-review
+## Phase 0 -- Pre-flight and scope
 
 ### Step 1 -- Confirm preconditions
 
@@ -50,7 +50,7 @@ If any precondition is off, surface it and pause -- don't push forward on a brok
 
 **Non-git version control:** the commands throughout this skill assume git. If the user works in another VCS (e.g. Jujutsu colocated with git), ask them for the change range ("which revisions are the current work?") and translate the `git diff main...HEAD` commands to that tool's equivalents -- the phases themselves don't change. Don't make the user volunteer this; ask when the working-copy state looks unfamiliar.
 
-**Cost expectations:** a full run is deliberately thorough and correspondingly token-hungry -- /code-review plus five parallel audits (plus optional Phase 4) can consume a noticeable slice of a subscription session's budget. Before dispatching Phase 1, tell the user the planned agent count so they can trim (Step 4) or choose light mode; on a large diff, say explicitly that this will be an expensive pass.
+**Cost expectations:** a full run is deliberately thorough and correspondingly token-hungry -- /code-review plus five parallel audits (plus optional Phase 4) can consume a noticeable slice of a subscription session's budget. Before starting Phase 1, tell the user the planned agent count so they can trim (Step 3) or choose light mode; on a large diff, say explicitly that this will be an expensive pass.
 
 ### Step 2 -- Snapshot the scope
 
@@ -63,13 +63,7 @@ git diff main...HEAD --name-only
 
 Note the categories present: Ruby code, specs, JS, SCSS, migrations, Gemfile / Gemfile.lock, config. This drives which Phase 1 agents are worth spawning.
 
-### Step 3 -- Run /code-review first
-
-Invoke `/code-review` (the built-in) before anything else. It *edits* code, so running it first means Phase 1 audits review the already-cleaned state and don't waste cycles flagging things /code-review is about to rewrite.
-
-When /code-review finishes, re-snapshot the diff (`git diff main...HEAD --stat`) so Phase 1 agents see the current shape. Commit /code-review's edits separately before Phase 1 dispatches -- a clean checkpoint makes it easier to attribute later findings.
-
-### Step 4 -- Decide which Phase 1 agents to spawn
+### Step 3 -- Decide which Phase 1 agents to spawn
 
 The default set is five: `cruft`, `rspec-quality`, `idioms`, `data-validation`, `security`. Trim based on the scope snapshot:
 
@@ -83,11 +77,11 @@ The default set is five: `cruft`, `rspec-quality`, `idioms`, `data-validation`, 
 
 If the user explicitly asked to skip something ("gauntlet but skip security") or focus on one thing ("just the rspec audit"), honor that.
 
-### Step 5 -- Patch coverage on the added lines
+### Step 4 -- Patch coverage on the added lines
 
 Reviewers and CI (Codecov, etc.) flag **patch coverage**: lines *added by this branch* that no test executes. The Phase 1 audits reason about test *quality*, not line coverage, so an untested new line slips past them -- catch it here mechanically instead of in a review round-trip.
 
-The clean-and-green gate in Step 1 already runs the suite; run it (or the relevant suites) **with coverage on** and capture the artifacts. In Targeted Spec Verification Mode, Step 1's coverage artifacts are reusable only if /code-review changed nothing -- its Step 3 edits land between the two steps, and stale artifacts pair the current diff's line numbers against a tree that no longer exists. After /code-review edits, run the targeted-specs skill with coverage on again at this step; if Step 1's run ESCALATED, the full gate ran and full-mode behavior applies. Subset coverage is not ground truth: one-hop selection can miss a spec that covers an added line transitively, so treat a subset-uncovered added line as a candidate to verify (or defer to CI's full-run patch coverage) rather than an automatic finding. Then intersect added lines with uncovered lines:
+The clean-and-green gate in Step 1 already runs the suite, and nothing edits the tree between Step 1 and this step -- so if that gate ran **with coverage on** against this tree, reuse its artifacts rather than re-running (in Targeted Spec Verification Mode the targeted-specs run does exactly that; if it ESCALATED, the full gate ran and full-mode behavior applies). If Step 1 ran without coverage, or was satisfied by the user's confirmation or a prior run, run the suite (or the relevant suites) with coverage on now and capture the artifacts. Subset coverage is not ground truth: one-hop selection can miss a spec that covers an added line transitively, so treat a subset-uncovered added line as a candidate to verify (or defer to CI's full-run patch coverage) rather than an automatic finding. Then intersect added lines with uncovered lines:
 
 1. **Added lines** -- `git diff main...HEAD --unified=0` (or parse `+` hunks) gives the new-file line numbers per file.
 2. **Uncovered lines** -- from the coverage run's machine-readable output:
@@ -102,13 +96,15 @@ After Phase 3 fixes, re-run coverage as part of the final gate -- fixes add line
 
 ### Light mode for small PRs
 
-If the diff is under ~50 lines across fewer than ~5 files, sub-agent dispatch overhead probably isn't worth it. Tell the user, then run the same checks **sequentially in the main agent** without spawning sub-agents. Keep the same Phase 2 / Phase 3 structure (consolidate, then triage, then fix).
+If the diff is under ~50 lines across fewer than ~5 files, sub-agent dispatch overhead probably isn't worth it. Tell the user, then run the same checks (including `/code-review`) **sequentially in the main agent** without spawning sub-agents. Keep the same Phase 2 / Phase 3 structure (consolidate, then triage, then fix).
 
 ---
 
-## Phase 1 -- Parallel audits (report-only)
+## Phase 1 -- Finding sources (report-only)
 
-Dispatch the chosen agents **in a single message** so they run concurrently. Use `Agent` with `subagent_type: "general-purpose"` unless an agent's brief calls for a different one.
+First invoke `/code-review` (the built-in) in the main agent and capture its findings for Phase 2. It is a peer finding source: it reports a findings list and makes no edits and no commits, exactly like the sub-agents below. (If a future version of the built-in applies edits instead, commit those edits, re-snapshot the diff, and redo the Step 4 patch-coverage check before dispatching.)
+
+Then dispatch the chosen agents **in a single message** so they run concurrently. Use `Agent` with `subagent_type: "general-purpose"` unless an agent's brief calls for a different one.
 
 Every sub-agent prompt MUST tell the agent to:
 
@@ -168,7 +164,7 @@ The agent-specific briefs below are starting templates. Adjust wording to match 
 
 ### Agent: idioms
 
-> Audit this branch for Rails / ActiveRecord / Capybara / CI idioms that `/code-review` is least likely to catch. /code-review handles general readability and duplication; you focus on idioms specific to *this* stack and *this* project's preferences. RSpec structure and quality belong to the rspec-quality agent -- do not comment on them here. Focus areas:
+> Audit this branch for Rails / ActiveRecord / Capybara / CI idioms that `/code-review` is least likely to catch. /code-review already covers general readability and duplication; you focus on idioms specific to *this* stack and *this* project's preferences. RSpec structure and quality belong to the rspec-quality agent -- do not comment on them here. Focus areas:
 >
 > - **Scopes vs. inline queries.** Where a named scope would dramatically improve readability or reuse, suggest one.
 > - **Associations vs. IDs.** Code passing `foo_id` instead of `foo`, or querying through ID where the association is already loaded or available.
@@ -231,10 +227,10 @@ The agent-specific briefs below are starting templates. Adjust wording to match 
 
 When all sub-agents return, the main agent assembles **one** punch list:
 
-0. **Fold in the Step 5 patch-coverage findings** alongside the sub-agent findings before deduping -- they belong in the same list and triage.
+0. **Fold in the /code-review findings and the Step 4 patch-coverage findings** alongside the sub-agent findings before deduping -- they belong in the same list and triage. Map /code-review's findings onto the severity bands by their stated severity or impact; a finding that carries neither clearly defaults to should-fix.
 1. **Dedupe.** Same `file:line` flagged by multiple agents = one entry, listing both reasons.
 2. **Sort by severity first, then by file.** `must-fix` block at the top, then `should-fix`, then `nit`.
-3. **Cross-reference.** If a finding from one agent is invalidated by another's "considered but ruled out", drop it and note the resolution.
+3. **Cross-reference.** If a finding from one agent is invalidated by another's "considered but ruled out", drop it and note the resolution. (/code-review reports findings only -- it has no "Considered but ruled out" section to cross-reference.)
 4. **Persist.** Write the consolidated list to `.claude/gauntlets/<branch-name>-gauntlet.md` so it survives a `/clear`, context compaction, or session resume. The `-gauntlet` suffix is mandatory: plan files under `.claude/plans/` often share the same slug-based basenames, and the harness permission prompt shows only the basename, so the suffix is what lets the user tell a gauntlet write from a plan write at approval time. This is a local working file -- suggest the user gitignore `.claude/gauntlets/` if it isn't already. Just write the file directly -- do NOT pre-run `mkdir -p .claude/gauntlets` as a precaution. That probe is wasted overhead on every run after the first. Only if the write fails because the directory does not exist (a project that has never run the gauntlet) do you `mkdir -p .claude/gauntlets` once and retry the write. This pushes the one-time setup onto the first-ever run and keeps the common path zero-overhead.
 5. **Present.** Show the consolidated list to the user. Lead with counts ("12 findings: 2 must-fix, 6 should-fix, 4 nit") so they can decide scope at a glance.
 
@@ -259,7 +255,7 @@ For each accepted finding:
 
 After all accepted findings are addressed:
 
-1. Run the project's full lint+test gate again (via the project's suite-runner skill if it has one), **with coverage on**, and re-run the Step 5 patch-coverage check -- the fixes added lines too, and those should be covered before the branch leaves draft. In Targeted Spec Verification Mode, re-run the targeted-specs skill (bundled in this plugin) with coverage on instead and act on its verdict line.
+1. Run the project's full lint+test gate again (via the project's suite-runner skill if it has one), **with coverage on**, and re-run the Step 4 patch-coverage check -- the fixes added lines too, and those should be covered before the branch leaves draft. In Targeted Spec Verification Mode, re-run the targeted-specs skill (bundled in this plugin) with coverage on instead and act on its verdict line.
 2. Report the PR size in lines changed across files, and whether it's over or under the 400-line easy-review threshold.
 3. Offer Phase 4 -- ask the user, "Want to run a 'find the bug' pass? Recommended for larger or riskier PRs." Phrase it as a real option, not a default.
 4. If the user declines Phase 4, tell them the gauntlet is complete and the branch is ready for human review.
@@ -276,7 +272,7 @@ The mental shift from Phase 1 is significant: Phase 1 agents look in narrow lane
 
 ### Dispatch a fresh sub-agent
 
-Use `Agent` with `subagent_type: "general-purpose"`. Do NOT pass the Phase 1 reports or the consolidated findings file to this agent -- the value is fresh eyes. Anchoring it on prior findings narrows its search.
+Use `Agent` with `subagent_type: "general-purpose"`. Do NOT pass the Phase 1 reports (including /code-review's) or the consolidated findings file to this agent -- the value is fresh eyes. Anchoring it on prior findings narrows its search.
 
 ### Sub-agent brief
 
