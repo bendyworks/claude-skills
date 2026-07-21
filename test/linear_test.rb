@@ -37,8 +37,8 @@ COMMENT_USAGE = 'Usage: linear comment ABC-NNN ("message" | --body TEXT | --body
 # Base class: scrubs the Linear-related environment so results do not
 # depend on this machine's token, default team, or POSIX parsing mode.
 class LinearTestCase < CliTestCase
-  def scrubbed_env_keys
-    super + %w[LINEAR_API_TOKEN LINEAR_TEAM_KEY]
+  def extra_scrubbed_env_keys
+    %w[LINEAR_API_TOKEN LINEAR_TEAM_KEY]
   end
 
   # Defense in depth: the sentinel pins only stay offline while the

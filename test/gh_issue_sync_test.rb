@@ -837,7 +837,7 @@ class CliArgumentRejectionTest < CliTestCase
   # OptionParser#parse only permutes while POSIXLY_CORRECT is unset;
   # the CLI pins permutation explicitly so a strict-POSIX environment
   # cannot turn valid flags into "unexpected extra arguments".
-  # (Base teardown restores the machine's original POSIXLY_CORRECT.)
+  # (The base scaffolding restores the machine's original POSIXLY_CORRECT.)
   def test_flags_parse_as_flags_even_under_posixly_correct
     ENV['POSIXLY_CORRECT'] = '1'
     message = abort_message(['checklist', '42', '--plan', '/nonexistent-plan.md'])
