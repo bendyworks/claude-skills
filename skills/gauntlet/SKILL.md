@@ -19,7 +19,7 @@ The main agent's job is orchestration: dispatch sub-agents in parallel, merge th
 
 ## Standing pre-approval -- do NOT prompt for component steps
 
-When the user invokes the gauntlet, every component step and nested skill call is **already approved**. Run them all without pausing to ask permission: `/code-review` (Phase 0), `/security-review` (the security agent), every Phase 1 sub-agent dispatch, and the Phase 4 "find the bug" pass when requested. Never stop to ask "is it ok to run /code-review?" or "should I dispatch the audit agents?" -- just proceed through the phases.
+When the user invokes the gauntlet, every component step and nested skill call is **already approved**. Run them all without pausing to ask permission: `/code-review` (Phase 1), `/security-review` (the security agent), every Phase 1 sub-agent dispatch, and the Phase 4 "find the bug" pass when requested. Never stop to ask "is it ok to run /code-review?" or "should I dispatch the audit agents?" -- just proceed through the phases.
 
 The ONLY built-in pause is the **Phase 3 triage decision**, where the user chooses which findings to fix. That is a genuine decision point and stays. Everything mechanical before it runs unprompted.
 
@@ -28,7 +28,7 @@ The ONLY built-in pause is the **Phase 3 triage decision**, where the user choos
 Do not pad sub-agent prompts with rules that already live in:
 
 - **The project's CLAUDE.md files** -- testing philosophy, lint policy, commit conventions, and whatever house rules the project declares.
-- **`/code-review` (built-in)** -- generic reuse / quality / efficiency cleanup. Don't ask sub-agents to re-flag duplicate code that /code-review just rewrote, or readability micro-improvements it handled.
+- **`/code-review` (built-in)** -- generic reuse / quality / efficiency findings. That is its lane: don't ask sub-agents to duplicate it by hunting duplicated code or readability micro-improvements; Phase 2's dedupe catches any overlap that slips through anyway.
 - **`/security-review` (built-in)** -- a general security review of pending changes. The gauntlet's security agent should *invoke* `/security-review` and incorporate its findings, not redo that work from scratch.
 
 Each sub-agent should *read* the relevant CLAUDE.md(s) to inform its findings. The briefs below assume that and don't re-list the rules.
@@ -227,10 +227,10 @@ The agent-specific briefs below are starting templates. Adjust wording to match 
 
 When all sub-agents return, the main agent assembles **one** punch list:
 
-0. **Fold in the Step 4 patch-coverage findings** alongside the sub-agent findings before deduping -- they belong in the same list and triage.
+0. **Fold in the /code-review findings and the Step 4 patch-coverage findings** alongside the sub-agent findings before deduping -- they belong in the same list and triage. Map /code-review's findings onto the severity bands by their stated severity or impact; a finding that carries neither clearly defaults to should-fix.
 1. **Dedupe.** Same `file:line` flagged by multiple agents = one entry, listing both reasons.
 2. **Sort by severity first, then by file.** `must-fix` block at the top, then `should-fix`, then `nit`.
-3. **Cross-reference.** If a finding from one agent is invalidated by another's "considered but ruled out", drop it and note the resolution.
+3. **Cross-reference.** If a finding from one agent is invalidated by another's "considered but ruled out", drop it and note the resolution. (/code-review reports findings only -- it has no "Considered but ruled out" section to cross-reference.)
 4. **Persist.** Write the consolidated list to `.claude/gauntlets/<branch-name>-gauntlet.md` so it survives a `/clear`, context compaction, or session resume. The `-gauntlet` suffix is mandatory: plan files under `.claude/plans/` often share the same slug-based basenames, and the harness permission prompt shows only the basename, so the suffix is what lets the user tell a gauntlet write from a plan write at approval time. This is a local working file -- suggest the user gitignore `.claude/gauntlets/` if it isn't already. Just write the file directly -- do NOT pre-run `mkdir -p .claude/gauntlets` as a precaution. That probe is wasted overhead on every run after the first. Only if the write fails because the directory does not exist (a project that has never run the gauntlet) do you `mkdir -p .claude/gauntlets` once and retry the write. This pushes the one-time setup onto the first-ever run and keeps the common path zero-overhead.
 5. **Present.** Show the consolidated list to the user. Lead with counts ("12 findings: 2 must-fix, 6 should-fix, 4 nit") so they can decide scope at a glance.
 
