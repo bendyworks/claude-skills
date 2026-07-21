@@ -7,7 +7,7 @@
 # so loading it here exposes the GhIssueSync module without executing
 # the CLI. Run: ruby test/gh_issue_sync_test.rb
 
-require 'minitest/autorun'
+require_relative 'cli_test_case'
 
 load File.expand_path('../bin/gh-issue-sync', __dir__)
 
@@ -813,7 +813,20 @@ class GuardsTest < Minitest::Test
   end
 end
 
-class CliArgumentRejectionTest < Minitest::Test
+# Tests that invoke CLI.run subclass CliTestCase for the abort capture
+# and env scrub; pure-helper tests stay on Minitest::Test.
+class CliArgumentRejectionTest < CliTestCase
+  def run_cli(argv)
+    GhIssueSync::CLI.run(argv)
+  end
+
+  # gh authenticates from the system keyring, so no env scrub can keep
+  # a test off the network; the PATH shim can. Any code path that
+  # reaches a gh invocation flunks instead of talking to GitHub.
+  def shimmed_commands
+    %w[gh]
+  end
+
   # A stray between flags still reaches the guard: OptionParser parses
   # in permutation mode, collecting every non-option token into the
   # leftover positionals regardless of position.
@@ -823,32 +836,20 @@ class CliArgumentRejectionTest < Minitest::Test
   # fires before any gh call, and if the guard ever regressed, the
   # next check (plan-file existence) still raises locally.
   def test_run_aborts_naming_a_stray_positional_even_between_flags
-    error = nil
-    capture_io do
-      error = assert_raises(SystemExit) do
-        GhIssueSync::CLI.run(['checklist', '42', '--plan', '/nonexistent-plan.md', '43'])
-      end
-    end
-    assert_match(/unexpected extra argument/, error.message)
-    assert_match(/"43"/, error.message)
+    message = abort_message(['checklist', '42', '--plan', '/nonexistent-plan.md', '43'])
+    assert_match(/unexpected extra argument/, message)
+    assert_match(/"43"/, message)
   end
 
   # OptionParser#parse only permutes while POSIXLY_CORRECT is unset;
   # the CLI pins permutation explicitly so a strict-POSIX environment
   # cannot turn valid flags into "unexpected extra arguments".
+  # (The base scaffolding restores the machine's original POSIXLY_CORRECT.)
   def test_flags_parse_as_flags_even_under_posixly_correct
-    prior = ENV['POSIXLY_CORRECT']
     ENV['POSIXLY_CORRECT'] = '1'
-    error = nil
-    capture_io do
-      error = assert_raises(SystemExit) do
-        GhIssueSync::CLI.run(['checklist', '42', '--plan', '/nonexistent-plan.md'])
-      end
-    end
-    refute_match(/unexpected extra argument/, error.message)
-    assert_match(/plan file not found/, error.message)
-  ensure
-    prior.nil? ? ENV.delete('POSIXLY_CORRECT') : ENV['POSIXLY_CORRECT'] = prior
+    message = abort_message(['checklist', '42', '--plan', '/nonexistent-plan.md'])
+    refute_match(/unexpected extra argument/, message)
+    assert_match(/plan file not found/, message)
   end
 
   # A mandatory-argument option must not swallow a following flag as
@@ -859,14 +860,9 @@ class CliArgumentRejectionTest < Minitest::Test
   # nonexistent --file path keeps the pre-guard failure local, so the
   # test never reaches the network.
   def test_run_aborts_when_an_option_swallows_a_following_flag_as_its_value
-    error = nil
-    capture_io do
-      error = assert_raises(SystemExit) do
-        GhIssueSync::CLI.run(['section', '42', '--file', '/nonexistent.md', '--slug', '--delete'])
-      end
-    end
-    assert_match(/--slug/, error.message)
-    assert_match(/--delete/, error.message)
+    message = abort_message(['section', '42', '--file', '/nonexistent.md', '--slug', '--delete'])
+    assert_match(/--slug/, message)
+    assert_match(/--delete/, message)
   end
 
   # Last-wins would silently discard the first value -- the same
@@ -875,12 +871,7 @@ class CliArgumentRejectionTest < Minitest::Test
   # nonexistent plan paths keep the pre-guard failure local, so the
   # test never reaches the network.
   def test_run_aborts_on_a_repeated_value_option_instead_of_last_wins
-    error = nil
-    capture_io do
-      error = assert_raises(SystemExit) do
-        GhIssueSync::CLI.run(['checklist', '42', '--plan', '/nonexistent-plan.md', '--plan', '/other-nonexistent.md'])
-      end
-    end
-    assert_match(/duplicate --plan/, error.message)
+    message = abort_message(['checklist', '42', '--plan', '/nonexistent-plan.md', '--plan', '/other-nonexistent.md'])
+    assert_match(/duplicate --plan/, message)
   end
 end
