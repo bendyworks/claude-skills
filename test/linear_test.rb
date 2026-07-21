@@ -520,7 +520,9 @@ class PosixlyCorrectImmunityTest < LinearTestCase
   end
 end
 
-class PureHelpersTest < LinearTestCase
+# Pure-helper tests stay on Minitest::Test: they never invoke the CLI,
+# so they need neither the env scrub nor the abort capture.
+class PureHelpersTest < Minitest::Test
   def test_parse_limit_accepts_base_ten
     assert_equal 25, Linear.parse_limit('25')
   end
