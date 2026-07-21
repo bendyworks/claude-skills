@@ -30,6 +30,7 @@ class CliTestCase < Minitest::Test
   end
 
   def teardown
+    flunk 'CliTestCase#setup did not run -- subclass setup must call super' if @saved_env.nil?
     @saved_env.each { |key, value| value ? ENV[key] = value : ENV.delete(key) }
   end
 
