@@ -82,6 +82,22 @@ class ShimProbeCase < CliTestCase
   end
 end
 
+# A shim name the installer cannot write (slash inside a command name)
+# makes before_setup raise mid-install; the scaffolding must fail that
+# test alone, not corrupt PATH for the rest of the process. Armed by
+# the outer contract test only, so autorun's extra pass stays green.
+class BrokenShimProbeCase < CliTestCase
+  class << self
+    attr_accessor :armed
+  end
+
+  def shimmed_commands
+    self.class.armed ? %w[bad/shim-name] : []
+  end
+
+  def test_body_never_reached_when_install_raises; end
+end
+
 class CliTestCaseTest < Minitest::Test
   SENTINEL_KEYS = %w[POSIXLY_CORRECT CLI_TEST_CASE_SENTINEL].freeze
 
@@ -146,10 +162,24 @@ class CliTestCaseTest < Minitest::Test
   end
 
   def test_shim_is_gone_from_path_after_the_run
+    path_before = ENV.fetch('PATH')
     ShimProbeCase.armed = false
     result = ShimProbeCase.new('test_invoke_shimmed_command_when_armed').run
     assert result.passed?, "unarmed probe failed: #{result.failure&.message}"
+    assert_equal path_before, ENV.fetch('PATH', nil),
+                 'PATH must be restored to its exact pre-test value'
     assert_nil system('cli-test-case-fake-command', out: File::NULL, err: File::NULL),
                'shimmed command must not resolve once the test is over'
+  end
+
+  def test_shim_install_failure_leaves_path_intact
+    path_before = ENV.fetch('PATH')
+    BrokenShimProbeCase.armed = true
+    result = BrokenShimProbeCase.new('test_body_never_reached_when_install_raises').run
+    refute result.passed?, 'a broken shim install must fail the probe test'
+    assert_equal path_before, ENV.fetch('PATH', nil),
+                 'a mid-install failure must not corrupt PATH for later tests'
+  ensure
+    BrokenShimProbeCase.armed = false
   end
 end

@@ -83,6 +83,10 @@ class CliTestCase < Minitest::Test
   def install_command_shims
     return if shimmed_commands.empty?
 
+    # Saved before any fallible work: if anything below raises,
+    # remove_command_shims must restore PATH from a real value, never
+    # assign nil over it.
+    @saved_path = ENV.fetch('PATH')
     @shim_dir = Dir.mktmpdir('cli-test-shims')
     shim_log = File.join(@shim_dir, 'invocations.log')
     shimmed_commands.each do |command|
@@ -95,7 +99,6 @@ class CliTestCase < Minitest::Test
       SCRIPT
       File.chmod(0o755, shim_path)
     end
-    @saved_path = ENV['PATH']
     ENV['PATH'] = "#{@shim_dir}#{File::PATH_SEPARATOR}#{@saved_path}"
   end
 
