@@ -81,7 +81,7 @@ If the user explicitly asked to skip something ("gauntlet but skip security") or
 
 Reviewers and CI (Codecov, etc.) flag **patch coverage**: lines *added by this branch* that no test executes. The Phase 1 audits reason about test *quality*, not line coverage, so an untested new line slips past them -- catch it here mechanically instead of in a review round-trip.
 
-The clean-and-green gate in Step 1 already runs the suite; run it (or the relevant suites) **with coverage on** and capture the artifacts. Nothing edits the tree between Step 1 and this step, so Step 1's coverage artifacts are reusable here -- in Targeted Spec Verification Mode too (and if Step 1's run ESCALATED, the full gate ran and full-mode behavior applies). Subset coverage is not ground truth: one-hop selection can miss a spec that covers an added line transitively, so treat a subset-uncovered added line as a candidate to verify (or defer to CI's full-run patch coverage) rather than an automatic finding. Then intersect added lines with uncovered lines:
+The clean-and-green gate in Step 1 already runs the suite, and nothing edits the tree between Step 1 and this step -- so if that gate ran **with coverage on** against this tree, reuse its artifacts rather than re-running (in Targeted Spec Verification Mode the targeted-specs run does exactly that; if it ESCALATED, the full gate ran and full-mode behavior applies). If Step 1 ran without coverage, or was satisfied by the user's confirmation or a prior run, run the suite (or the relevant suites) with coverage on now and capture the artifacts. Subset coverage is not ground truth: one-hop selection can miss a spec that covers an added line transitively, so treat a subset-uncovered added line as a candidate to verify (or defer to CI's full-run patch coverage) rather than an automatic finding. Then intersect added lines with uncovered lines:
 
 1. **Added lines** -- `git diff main...HEAD --unified=0` (or parse `+` hunks) gives the new-file line numbers per file.
 2. **Uncovered lines** -- from the coverage run's machine-readable output:
@@ -102,7 +102,7 @@ If the diff is under ~50 lines across fewer than ~5 files, sub-agent dispatch ov
 
 ## Phase 1 -- Finding sources (report-only)
 
-First invoke `/code-review` (the built-in) in the main agent and capture its findings for Phase 2. It is a peer finding source: it reports a findings list and makes no edits and no commits, exactly like the sub-agents below. (If a future version of the built-in applies edits instead, commit those edits and re-snapshot the diff before dispatching.)
+First invoke `/code-review` (the built-in) in the main agent and capture its findings for Phase 2. It is a peer finding source: it reports a findings list and makes no edits and no commits, exactly like the sub-agents below. (If a future version of the built-in applies edits instead, commit those edits, re-snapshot the diff, and redo the Step 4 patch-coverage check before dispatching.)
 
 Then dispatch the chosen agents **in a single message** so they run concurrently. Use `Agent` with `subagent_type: "general-purpose"` unless an agent's brief calls for a different one.
 
