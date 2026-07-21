@@ -128,9 +128,9 @@ outside world and rescues to `abort`, dispatched behind
 `if $PROGRAM_NAME == __FILE__` -- the test file under `test/` can then
 `load` the bin file without executing the CLI, and CI runs it with a
 bare `ruby test/<name>_test.rb`. Shared test scaffolding for
-CLI-invoking tests lives in `test/cli_test_case.rb`, named to sit
-outside CI's `test/*_test.rb` glob so the runner never executes the
-base class as a suite of its own.
+CLI-invoking tests lives in `test/cli_test_case.rb`; its header
+comment explains the naming that keeps it outside CI's
+`test/*_test.rb` glob.
 
 When adding a mode to an existing CLI, place it by this convention: a
 new mode of one resource rides a flag on that resource's subcommand
