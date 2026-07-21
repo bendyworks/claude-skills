@@ -46,18 +46,23 @@ class CliTestCase < Minitest::Test
   end
 
   def before_setup
+    super
     keys = (BASE_SCRUBBED_ENV_KEYS + extra_scrubbed_env_keys).uniq
     @saved_env = keys.to_h { |key| [key, ENV.delete(key)] }
     install_command_shims
-    super
   end
 
   def after_teardown
-    super
     remove_command_shims
-    # nil only when before_setup itself raised -- that failure already
-    # reported loudly, and nothing was scrubbed in that case.
+    # nil only when before_setup raised before the env snapshot was
+    # taken (a broken extra_scrubbed_env_keys override) -- that
+    # failure already reported loudly, and nothing was scrubbed. A
+    # later raise (a failed shim install) leaves the snapshot in
+    # place, and this restore still runs.
     @saved_env&.each { |key, value| value ? ENV[key] = value : ENV.delete(key) }
+    super
+    # The verdict comes after super so a flunk cannot skip an
+    # ancestor's cleanup.
     flunk "command intercepted by test shim (live call refused):\n#{@shim_hits}" if @shim_hits
   end
 
