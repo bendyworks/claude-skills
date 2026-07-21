@@ -19,7 +19,7 @@ The main agent's job is orchestration: dispatch sub-agents in parallel, merge th
 
 ## Standing pre-approval -- do NOT prompt for component steps
 
-When the user invokes the gauntlet, every component step and nested skill call is **already approved**. Run them all without pausing to ask permission: `/code-review` (Phase 1), `/security-review` (the security agent), every Phase 1 sub-agent dispatch, and the Phase 4 "find the bug" pass when requested. Never stop to ask "is it ok to run /code-review?" or "should I dispatch the audit agents?" -- just proceed through the phases.
+When the user invokes the gauntlet, every component step and nested skill call is **already approved**. Run them all without pausing to ask permission: `/code-review`, `/security-review` (the security agent), every Phase 1 sub-agent dispatch, and the Phase 4 "find the bug" pass when requested. Never stop to ask "is it ok to run /code-review?" or "should I dispatch the audit agents?" -- just proceed through the phases.
 
 The ONLY built-in pause is the **Phase 3 triage decision**, where the user chooses which findings to fix. That is a genuine decision point and stays. Everything mechanical before it runs unprompted.
 
@@ -28,7 +28,7 @@ The ONLY built-in pause is the **Phase 3 triage decision**, where the user choos
 Do not pad sub-agent prompts with rules that already live in:
 
 - **The project's CLAUDE.md files** -- testing philosophy, lint policy, commit conventions, and whatever house rules the project declares.
-- **`/code-review` (built-in)** -- generic reuse / quality / efficiency findings. That is its lane: don't ask sub-agents to duplicate it by hunting duplicated code or readability micro-improvements; Phase 2's dedupe catches any overlap that slips through anyway.
+- **`/code-review` (built-in)** -- generic reuse / quality / efficiency findings. That is its lane: don't ask sub-agents to duplicate it by hunting duplicated code or readability micro-improvements.
 - **`/security-review` (built-in)** -- a general security review of pending changes. The gauntlet's security agent should *invoke* `/security-review` and incorporate its findings, not redo that work from scratch.
 
 Each sub-agent should *read* the relevant CLAUDE.md(s) to inform its findings. The briefs below assume that and don't re-list the rules.
@@ -50,7 +50,7 @@ If any precondition is off, surface it and pause -- don't push forward on a brok
 
 **Non-git version control:** the commands throughout this skill assume git. If the user works in another VCS (e.g. Jujutsu colocated with git), ask them for the change range ("which revisions are the current work?") and translate the `git diff main...HEAD` commands to that tool's equivalents -- the phases themselves don't change. Don't make the user volunteer this; ask when the working-copy state looks unfamiliar.
 
-**Cost expectations:** a full run is deliberately thorough and correspondingly token-hungry -- /code-review plus five parallel audits (plus optional Phase 4) can consume a noticeable slice of a subscription session's budget. Before dispatching Phase 1, tell the user the planned agent count so they can trim (Step 3) or choose light mode; on a large diff, say explicitly that this will be an expensive pass.
+**Cost expectations:** a full run is deliberately thorough and correspondingly token-hungry -- /code-review plus five parallel audits (plus optional Phase 4) can consume a noticeable slice of a subscription session's budget. Before starting Phase 1, tell the user the planned agent count so they can trim (Step 3) or choose light mode; on a large diff, say explicitly that this will be an expensive pass.
 
 ### Step 2 -- Snapshot the scope
 
