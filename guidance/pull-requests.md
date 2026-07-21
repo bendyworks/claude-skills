@@ -22,6 +22,16 @@ keeping it small before it drifts large.
 Always create PRs in draft mode first. Mark ready for review only once
 lint and tests pass and the PR is genuinely ready for a human.
 
+## Lead with why
+
+Open every PR description with a short Why paragraph: the
+user-visible outcome or the reason the change exists, before any What
+or mechanism content. A tracker-reference line (an issue link, or
+`Closes #NNN` when the PR fully resolves the issue) may sit above it,
+but the first prose paragraph is the Why. This is the same why-first
+principle commit titles follow in the commit-messages guidance:
+motivation first, mechanism second.
+
 ## Write descriptions for the reader
 
 When a PR description mentions an outside resource -- a spec, a
