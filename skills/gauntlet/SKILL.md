@@ -96,7 +96,7 @@ After Phase 3 fixes, re-run coverage as part of the final gate -- fixes add line
 
 ### Light mode for small PRs
 
-If the diff is under ~50 lines across fewer than ~5 files, sub-agent dispatch overhead probably isn't worth it. Tell the user, then run the same checks **sequentially in the main agent** without spawning sub-agents. Keep the same Phase 2 / Phase 3 structure (consolidate, then triage, then fix).
+If the diff is under ~50 lines across fewer than ~5 files, sub-agent dispatch overhead probably isn't worth it. Tell the user, then run the same checks (including `/code-review`) **sequentially in the main agent** without spawning sub-agents. Keep the same Phase 2 / Phase 3 structure (consolidate, then triage, then fix).
 
 ---
 
@@ -164,7 +164,7 @@ The agent-specific briefs below are starting templates. Adjust wording to match 
 
 ### Agent: idioms
 
-> Audit this branch for Rails / ActiveRecord / Capybara / CI idioms that `/code-review` is least likely to catch. /code-review handles general readability and duplication; you focus on idioms specific to *this* stack and *this* project's preferences. RSpec structure and quality belong to the rspec-quality agent -- do not comment on them here. Focus areas:
+> Audit this branch for Rails / ActiveRecord / Capybara / CI idioms that `/code-review` is least likely to catch. /code-review already covers general readability and duplication; you focus on idioms specific to *this* stack and *this* project's preferences. RSpec structure and quality belong to the rspec-quality agent -- do not comment on them here. Focus areas:
 >
 > - **Scopes vs. inline queries.** Where a named scope would dramatically improve readability or reuse, suggest one.
 > - **Associations vs. IDs.** Code passing `foo_id` instead of `foo`, or querying through ID where the association is already loaded or available.
@@ -272,7 +272,7 @@ The mental shift from Phase 1 is significant: Phase 1 agents look in narrow lane
 
 ### Dispatch a fresh sub-agent
 
-Use `Agent` with `subagent_type: "general-purpose"`. Do NOT pass the Phase 1 reports or the consolidated findings file to this agent -- the value is fresh eyes. Anchoring it on prior findings narrows its search.
+Use `Agent` with `subagent_type: "general-purpose"`. Do NOT pass the Phase 1 reports (including /code-review's) or the consolidated findings file to this agent -- the value is fresh eyes. Anchoring it on prior findings narrows its search.
 
 ### Sub-agent brief
 
