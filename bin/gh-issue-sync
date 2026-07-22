@@ -308,6 +308,15 @@ module GhIssueSync
   # heading (assert_not_checklist_shaped! refuses it). Skipping blank
   # lines keeps the kind stable when a hand edit reflows whitespace
   # under the marker.
+  #
+  # This inference is sound for exactly two kinds and collapses the
+  # moment a third exists. Never add another first-line inference:
+  # a third kind means migrating NEW sections to markers that name
+  # their kind (spelled, like today's markers, only in
+  # open_marker_line/close_marker_line), while the old marker format
+  # keeps meaning "checklist" as a total, migration-free back-compat
+  # rule -- every old-format marker in the wild wraps a checklist or
+  # came from these renderers. Decision record: issue #38.
   def checklist_section?(section)
     first_content_line = section.each_line.lazy.drop(1).find { |line| !line.strip.empty? }
     first_content_line ? TODOS_HEADING.match?(first_content_line.chomp) : false

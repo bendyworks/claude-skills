@@ -45,6 +45,8 @@ class LinearTestCase < CliTestCase
   # env scrub holds, and one of them reaches a live commentDelete
   # mutation if it does not. Refuse to run the CLI with a real token
   # present (e.g. a subclass overriding setup without super).
+  # The next env-token-authenticated CLI suite should not copy this
+  # wrapper by hand: hoist it into CliTestCase instead (issue #55).
   def run_cli(argv)
     flunk 'LINEAR_API_TOKEN leaked into the test environment' if ENV.key?('LINEAR_API_TOKEN')
     Linear::CLI.run(argv)
