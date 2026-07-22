@@ -27,8 +27,8 @@ descriptions are just two words.
 ## The type(scope) prefix
 
 - `type` names the mechanism category: `feat`, `fix`, `build`, `chore`,
-  `ci`, `docs`, `style`, `refactor`, `perf`, or `test` -- plus
-  `revert` for revert commits (see Reverts below).
+  `ci`, `docs`, `style`, `refactor`, `perf`, `test`, or `revert`
+  (see Reverts below).
 - `scope` is optional: a short app-area noun in parentheses, e.g.
   `feat(marketplace):`. Keep scope names consistent within a project;
   drifting spellings (`marketplace` one week, `mktpl` the next) quietly
@@ -60,7 +60,9 @@ descriptions are just two words.
   The same logic makes `refactor` legitimate as a type even though it
   is a poor description verb: `refactor(billing): One Fee Calculation
   Path` says what the cleanup achieved; the prefix already says it was
-  a refactor.
+  a refactor. `revert` works the same way: the type says a commit was
+  undone, freeing the description to name what the tree is back to
+  (see Reverts).
 - Don't stack library jargon or internal nouns in the description. If
   a technical term is genuinely needed, it goes in the body; the
   description stays plain.
@@ -117,27 +119,25 @@ following the body (a value may wrap onto continuation lines):
   (`feat(api)!:`), but prefer the explicit footer: with a bare `!` and
   no footer, the spec routes the breaking-change description into the
   first line, displacing the outcome phrase.
-- `Co-authored-by: Name <email>` credits co-authors (GitHub's
-  documented spelling of the trailer).
+- `Co-authored-by: Name <email>` credits co-authors, one trailer
+  line per person (GitHub's documented spelling of the trailer).
 - `Reverts: <sha>` names a reverted commit, one trailer line per
-  commit (the same repeated-token idiom as `Co-authored-by:`). Use
-  the full 40-character SHA -- short SHAs go ambiguous as a repo
-  grows. Several `Reverts:` lines are legitimate exactly when the
-  reverted commits were one logical change (a bad PR's commits),
-  not license to batch unrelated reverts. `Refs:` keeps its
-  tracker-issue meaning; the two carry different facts and may
-  appear together.
+  commit, the same one-line-per-value form as `Co-authored-by:`.
+  Use the full 40-character SHA -- short SHAs go ambiguous as a
+  repo grows -- and read the trailers back with
+  `git log --format='%(trailers:key=Reverts,valueonly)'`. The
+  policy for revert commits lives in Reverts below.
 
 ## Reverts
 
 A revert follows the same shape as any other commit, with type
-`revert` -- the approach the spec's
+`revert`, as the spec's
 [FAQ answer on reverts](https://www.conventionalcommits.org/en/v1.0.0/#how-does-conventional-commits-handle-revert-commits)
-recommends, with the footer token adapted (see `Reverts:` in
-Footers):
+recommends (the footer token here is `Reverts:`, not the FAQ's
+`Refs:`):
 
 ```
-revert(marketplace): Full-Field Public Search
+revert: Full-Field Public Search
 
 Rolling back the allowlist tightening: it broke saved searches for
 existing marketplace users.
@@ -148,19 +148,29 @@ Reverts: 676104e3e5f38e34b04e4f56581df8d6f6ef7a01
 Refs: #123
 ```
 
-- The description is a bare noun phrase naming what is restored. A
-  leading verb repeats the type -- `revert: Restore Search
-  Allowlists` has the same redundancy as `fix: Fix Broken CSV
-  Export` -- and git's default `Revert "<old title>"` names what was
-  undone rather than the outcome the tree is back to.
+- The description names the restored outcome -- what the tree is
+  back to -- never the reverted commit's title, which is what git's
+  default `Revert "<old title>"` carries and names only what was
+  undone. Prefer a bare noun phrase; an outcome verb is fine when
+  it does not repeat the type (see Descriptions). In an unprefixed
+  title, a leading `Revert` or `Restore` does the type's job.
 - Keep git's generated "This reverts commit <sha>." sentence in the
-  body and write the why-prose around it. The sentence is the body's
-  WHAT line, and conventional-changelog's revert detection (in the
-  conventionalcommits preset) requires it verbatim -- rewriting it
-  away silently turns that tooling off.
-- On a revert, `Refs:` names the motivating issue -- the incident or
-  bug that forced the revert -- per the footer's usual "the one
-  issue this commit serves" rule.
+  body and write the why-prose around it. conventional-changelog's
+  revert detection (the conventionalcommits preset) needs both that
+  sentence and an unscoped `revert:` start to the first line -- a
+  scope like `revert(marketplace):` silently turns detection off,
+  so keep revert headers unscoped where that tooling matters.
+- Revert commit-by-commit by default: `git revert A B C` produces
+  one commit per SHA, each with its own generated sentence. A
+  single commit carrying several `Reverts:` lines is the exception
+  for commits that were one logical change (per Practices); git's
+  `revert --no-commit` generates no message for it, so each "This
+  reverts commit <sha>." sentence is written by hand.
+- `Refs:` names the motivating issue when one exists -- the
+  incident or bug that forced the revert.
+- A generated revert message that is already pushed (GitHub's
+  Revert button, a scripted rollback) stays as-is: pushed history
+  is not rewritten for message shape (see Practices).
 
 ## Practices
 
@@ -172,8 +182,7 @@ Refs: #123
   exception: a seam or an extraction is justified by the change it
   enables, not by the status quo.
 - Generated messages are exempt from this shape: merge commits and
-  bot commits keep their generators' formats, because they are
-  typically never editor-touched. Reverts are not exempt -- `git
-  revert` drops the author into an editor anyway, so reshaping the
-  message costs nothing (see Reverts).
+  bot commits keep their generators' formats, which are themselves
+  conventions other tooling and readers rely on (`git log
+  --merges`, bot changelogs). Reverts are not exempt (see Reverts).
 - Never amend or rewrite pushed commits without an explicit request.
