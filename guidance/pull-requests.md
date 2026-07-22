@@ -30,9 +30,9 @@ or mechanism content. A tracker-reference line (an issue link, or
 `Closes #NNN` when the PR fully resolves the issue) may sit above it,
 but the first prose paragraph is the Why. This is the same why-first
 principle commit titles follow in the commit-messages guidance:
-motivation first, mechanism second. And as in commit bodies, the
-strongest Why names the concrete cost of leaving things as they were,
-not just a fact about the new state.
+motivation first, mechanism second. For a change that remedies
+something, the strongest Why names the concrete cost of leaving
+things as they were.
 
 ## Write descriptions for the reader
 
