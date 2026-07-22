@@ -122,18 +122,22 @@ following the body (a value may wrap onto continuation lines):
 - `Reverts: <sha>` names a reverted commit, one trailer line per
   commit (the same repeated-token idiom as `Co-authored-by:`). Use
   the full 40-character SHA -- short SHAs go ambiguous as a repo
-  grows. `Refs:` keeps its tracker-issue meaning; the two carry
-  different facts and may appear together.
+  grows. Several `Reverts:` lines are legitimate exactly when the
+  reverted commits were one logical change (a bad PR's commits),
+  not license to batch unrelated reverts. `Refs:` keeps its
+  tracker-issue meaning; the two carry different facts and may
+  appear together.
 
 ## Reverts
 
 A revert follows the same shape as any other commit, with type
 `revert` -- the approach the spec's
 [FAQ answer on reverts](https://www.conventionalcommits.org/en/v1.0.0/#how-does-conventional-commits-handle-revert-commits)
-recommends:
+recommends, with the footer token adapted (see `Reverts:` in
+Footers):
 
 ```
-revert(marketplace): Public Search Allowlists
+revert(marketplace): Full-Field Public Search
 
 Rolling back the allowlist tightening: it broke saved searches for
 existing marketplace users.
