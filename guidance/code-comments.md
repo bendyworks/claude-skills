@@ -46,3 +46,15 @@ the future reader, not for insiders of the current moment.
 - Prefer plain, concrete language over academic or testing-theory
   jargon. Say what the code or spec actually does ("pins the current
   report output") rather than naming the technique behind it.
+- Before reaching for an analogy word (spelling, alias, flavor,
+  clone), ask whether a developer describing the construct aloud
+  would use it. `belongs_to :x` and `belongs_to :x, optional: false`
+  are two declaration forms, not "two spellings". When in doubt,
+  prefer the plain category noun: "form", "way to declare", "call
+  shape".
+- Never present a term coined during the working session as if it
+  names something in the repo. "The optionality registry" for what
+  the code calls `audited_required` reads like real machinery, but a
+  future reader cannot grep for it. If the coined name is genuinely
+  better, rename the thing in code first, in its own commit, then use
+  the new name everywhere.

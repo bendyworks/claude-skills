@@ -78,15 +78,27 @@ descriptions are just two words.
 
 - After the blank line, cover the WHAT and the HOW: which files and
   mechanisms changed, the technical details, and any non-obvious
-  tradeoffs. Multiple paragraphs are fine.
-- Keep the body focused on the permanent record: motivation, mechanism,
-  tradeoffs. Reviewer pointers ("start with file X", "the key test to
-  scrutinize is Y") and out-of-scope notes ("filed as ABC-123",
-  "deferred to the next PR") belong in the PR description instead.
-  Commits live in `git log` forever and are read in many contexts;
-  PR-scoped guidance decays badly when separated from its PR.
-  The footer's `Refs:` names the one issue this commit serves;
-  cross-references to any other issue stay at the PR level.
+  tradeoffs. Multiple paragraphs are fine. When the point of the
+  change rests on in-repo machinery (e.g. a guard spec), spend a
+  sentence or two saying what that machinery does before describing
+  how the change alters it -- a body that only makes sense after
+  opening the file it references has not carried its weight in
+  `git log`.
+- Keep the body focused on the permanent record: motivation,
+  mechanism, tradeoffs. The strongest motivation names the concrete
+  cost or risk of leaving the code as it was: "X and Y now mean the
+  same thing" states a fact, while "keeping both invites drift" names
+  the cost that justifies the commit. For a change that adds
+  something new, the user-visible outcome is motivation enough.
+- Reviewer pointers ("start with file X", "the key test to scrutinize
+  is Y") and out-of-scope notes ("filed as ABC-123", "deferred to the
+  next PR") belong in the PR description instead. Commits live in
+  `git log` forever and are read in many contexts; PR-scoped guidance
+  decays badly when separated from its PR. The footer's `Refs:` names
+  the one issue this commit serves; cross-references to any other
+  issue stay at the PR level.
+- For word choice throughout the message, follow the Plain language
+  rules in the code-comments guidance.
 
 ## Footers
 
@@ -112,6 +124,10 @@ following the body (a value may wrap onto continuation lines):
 - Prefer more, smaller, targeted commits over fewer, larger ones; each
   commit represents one logical change. A commit that seems to need
   two types is the same smell wearing a prefix: split it.
+- If you cannot name a cost of leaving the code as it was, the change
+  may not deserve a commit at all. Preparatory commits are the
+  exception: a seam or an extraction is justified by the change it
+  enables, not by the status quo.
 - Generated messages are exempt from this shape: merge commits,
   revert commits, and bot commits keep their generators' formats.
 - Never amend or rewrite pushed commits without an explicit request.
