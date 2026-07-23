@@ -13,9 +13,10 @@ when wiring up imports.
 
 The check lints only the pull request's own commits against the live
 base branch -- an out-of-date branch update never flags mainline
-commits -- and `--no-merges` exempts merge commits structurally, per
-the generated-message exemption in the commit-messages guidance's
-Practices section:
+commits -- and fails closed: a range that cannot be resolved errors
+the step instead of passing green. Its check logic is battery-tested
+against scratch git ranges, and the workflow itself has been
+smoke-tested in a live repository:
 
 ```yaml
 on: pull_request
@@ -31,7 +32,8 @@ jobs:
         run: |
           set -euo pipefail
           pattern='^(feat|fix|build|chore|ci|docs|style|refactor|perf|test|revert)(\([a-z0-9-]+\))?!?: .+'
-          violations=$(git log --no-merges --format=%s "origin/${BASE_REF}..HEAD" \
+          subjects=$(git log --no-merges --format=%s "origin/${BASE_REF}..HEAD")
+          violations=$(printf '%s\n' "$subjects" \
             | grep -Ev '^(Revert|Reapply) "' \
             | grep -Ev "$pattern" || true)
           if [ -n "$violations" ]; then
@@ -49,10 +51,15 @@ jobs:
   outcome verbs and WHY-quality are beyond any tool.
   `fixup!`/`squash!` subjects fail on purpose -- the red check forces
   the autosquash before merge.
-- The `Revert "..."`/`Reapply "..."` skip covers generated messages
-  that are already pushed (see that guidance's Reverts section); a
-  hand-typed revert keeping git's default subject slips through with
-  them -- a boundary of shape-checking, not an endorsement.
+- Merge commits (`--no-merges`) and pushed generated revert messages
+  (the `Revert "..."`/`Reapply "..."` skip; see the commit-messages
+  guidance's Reverts section) are the gate's slice of that guidance's
+  generated-message exemption. A hand-typed revert keeping git's
+  default subject slips through with them -- a boundary of
+  shape-checking, not an endorsement -- and other generated subjects
+  (GitHub's "Apply suggestions from code review" batch commit, a
+  github-actions[bot] auto-commit) are not exempt: reword them on the
+  PR, or add a deliberate team-chosen skip for bot authors.
 - Dependabot conforms instead of needing an exemption: set
   [`commit-message`](https://docs.github.com/en/code-security/dependabot/working-with-dependabot/dependabot-options-reference#commit-message)
   `{ prefix: "build", include: "scope" }` in `dependabot.yml` to get
