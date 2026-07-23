@@ -31,10 +31,11 @@ jobs:
           BASE_REF: ${{ github.base_ref }}
         run: |
           set -euo pipefail
-          pattern='^(feat|fix|build|chore|ci|docs|style|refactor|perf|test|revert)(\([a-z0-9-]+\))?!?: .+'
-          subjects=$(git log --no-merges --format=%s "origin/${BASE_REF}..HEAD")
+          export LC_ALL=C
+          pattern='^[0-9a-f]+ (feat|fix|build|chore|ci|docs|style|refactor|perf|test|revert)(\([a-z0-9-]+\))?!?: .+'
+          subjects=$(git log --no-merges --format='%h %s' "origin/${BASE_REF}..HEAD")
           violations=$(printf '%s\n' "$subjects" \
-            | grep -Ev '^(Revert|Reapply) "' \
+            | grep -Ev '^[0-9a-f]+ (Revert|Reapply) "' \
             | grep -Ev "$pattern" || true)
           if [ -n "$violations" ]; then
             printf 'Commit subjects not in type(scope): shape:\n%s\n' "$violations"
@@ -46,20 +47,29 @@ jobs:
   [ruleset](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-rulesets/about-rulesets);
   unrequired, the mandate is advisory. The job name is the contract:
   renaming it strands the requirement as a check stuck "Expected".
-- The gate checks shape only: scopes are lowercase and hyphenated,
-  length stays the commit-messages guidance's soft "roughly 72", and
-  outcome verbs and WHY-quality are beyond any tool.
-  `fixup!`/`squash!` subjects fail on purpose -- the red check forces
-  the autosquash before merge.
+  A merge-queue repo also adds `merge_group` to the trigger, or the
+  required check never reports on queue branches and the queue
+  stalls.
+- The regex enforces shape alone: the eleven types, a
+  lowercase-hyphenated scope, and a non-empty description. Everything
+  else stays advisory -- length remains the commit-messages
+  guidance's soft "roughly 72", and outcome verbs and WHY-quality are
+  beyond any tool. `fixup!`/`squash!` subjects fail on purpose -- the
+  red check forces the autosquash before merge. (The `LC_ALL=C` line
+  keeps grep's output literal when a subject carries stray non-UTF-8
+  bytes.)
 - Merge commits (`--no-merges`) and pushed generated revert messages
   (the `Revert "..."`/`Reapply "..."` skip; see the commit-messages
   guidance's Reverts section) are the gate's slice of that guidance's
   generated-message exemption. A hand-typed revert keeping git's
   default subject slips through with them -- a boundary of
   shape-checking, not an endorsement -- and other generated subjects
-  (GitHub's "Apply suggestions from code review" batch commit, a
-  github-actions[bot] auto-commit) are not exempt: reword them on the
-  PR, or add a deliberate team-chosen skip for bot authors.
+  are not exempt. GitHub's "Apply suggestions from code review" batch
+  commit is human-authored: reword it on the PR. Bot-authored commits
+  (a github-actions[bot] auto-commit) keep their generators' formats
+  per that guidance, so give them a deliberate skip instead -- match
+  on authors (e.g. `--format='%an%x09%h %s'`), since the check as
+  written sees hashes and subjects only.
 - Dependabot conforms instead of needing an exemption: set
   [`commit-message`](https://docs.github.com/en/code-security/dependabot/working-with-dependabot/dependabot-options-reference#commit-message)
   `{ prefix: "build", include: "scope" }` in `dependabot.yml` to get
