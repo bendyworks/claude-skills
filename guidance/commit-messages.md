@@ -186,3 +186,12 @@ Refs: #123
   conventions other tooling and readers rely on (`git log
   --merges`, bot changelogs). Reverts are not exempt (see Reverts).
 - Never amend or rewrite pushed commits without an explicit request.
+
+## Enforcing the prefix in CI
+
+A team that mandates the prefix can enforce it in CI with a
+dependency-free workflow check; the copyable, tested snippet and its
+variants (squash-merge title lint, Dependabot prefixes, branch
+protection) live in
+[enforcing-commit-prefix.md](enforcing-commit-prefix.md), a setup
+reference for humans that needs no session import.
