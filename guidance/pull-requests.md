@@ -79,12 +79,23 @@ automated one:
 A stacked chain (each PR based on the previous PR's branch) merges in
 order, and the cascade is driven by branch deletion, not by merging:
 
-- **GitHub retargets the next PR only when the merged PR's head branch
-  is deleted.** Merging without deleting leaves the next PR aimed at
-  the stale branch -- and merging that PR then lands its work on a side
-  branch instead of the real target, silently and successfully. The
-  per-link ritual is: merge, delete the head branch, confirm the next
-  PR's base actually flipped, and only then merge it.
+- **Deleting the merged PR's head branch is what triggers the
+  automatic retarget -- the merge itself never does.** When the head
+  branch of a merged PR is deleted, GitHub retargets open PRs that
+  targeted it to the merged PR's own base (the
+  [pull request retargeting changelog](https://github.blog/changelog/2020-05-19-pull-request-retargeting/)
+  describes the behavior). Merging without deleting leaves the next
+  PR aimed at the stale branch -- and merging that PR then lands its
+  work on a side branch instead of the real target, silently and
+  successfully. The per-slice sequence is: merge, delete the head
+  branch, confirm the next PR's base actually flipped, and only then
+  merge it. The confirm step earns its place: `gh pr merge
+  --delete-branch` has a long-standing race that can skip the
+  retarget ([cli/cli#1168](https://github.com/cli/cli/issues/1168)),
+  and a base that did not flip is set by hand with
+  `gh pr edit <number> --base <target>` or the Edit button on the PR
+  page. The "Automatically delete head branches" repo setting moves
+  the deletion -- and the same race -- to merge time.
 - **Expect approvals to drop at each retarget.** On repos that dismiss
   reviews when the base branch changes, every retarget dismisses the
   existing approvals ("The base branch was changed") even though the
