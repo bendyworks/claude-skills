@@ -80,9 +80,9 @@ A stacked chain (each PR based on the previous PR's branch) merges in
 order, and the cascade is driven by branch deletion, not by merging.
 One invariant protects every step: **never merge a PR whose base is
 not the branch its work should land on.** Once every slice below a PR
-is merged, its base must be the mainline -- a base still naming an
-already-merged slice's branch means stop and retarget before doing
-anything else:
+is merged, its base must be the mainline (the repo's default branch)
+-- a base still naming an already-merged slice's branch means stop
+and retarget before doing anything else:
 
 - **Deleting the merged PR's head branch is what triggers the
   automatic retarget -- the merge itself never does.** When the head
@@ -93,9 +93,9 @@ anything else:
   PR aimed at the stale branch -- and merging that PR then lands its
   work on a side branch instead of the real target, silently and
   successfully. The per-slice sequence that maintains the invariant:
-  check this PR's base is the mainline (retarget it if not), merge,
-  delete the head branch, and confirm the next PR's base actually
-  flipped. The confirm steps earn their place: `gh pr merge
+  check that this PR's base is the mainline (retarget it if not),
+  merge, delete the head branch, and confirm the next PR's base
+  actually flipped. The confirm steps earn their place: `gh pr merge
   --delete-branch` has a long-standing race that can skip the
   retarget or close the dependent PR outright
   ([cli/cli#1168](https://github.com/cli/cli/issues/1168)). A base
