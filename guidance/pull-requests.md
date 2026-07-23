@@ -97,22 +97,29 @@ anything else:
   delete the head branch, and confirm the next PR's base actually
   flipped. The confirm steps earn their place: `gh pr merge
   --delete-branch` has a long-standing race that can skip the
-  retarget ([cli/cli#1168](https://github.com/cli/cli/issues/1168)),
-  and a base that did not flip is set by hand with
+  retarget or close the dependent PR outright
+  ([cli/cli#1168](https://github.com/cli/cli/issues/1168)). A base
+  that did not flip is set by hand with
   `gh pr edit <number> --base <target>` or the Edit button on the PR
-  page. The "Automatically delete head branches" repo setting moves
-  the deletion -- and the same race -- to merge time.
+  page; a PR the race closed is reopened first (closed is not
+  merged, so reopening works while its head branch survives) or
+  replaced with a fresh PR from the same branch. The "Automatically
+  delete head branches" repo setting moves the deletion -- and the
+  same race -- to merge time.
 - **Expect approvals to drop at each retarget.** GitHub marks an
-  approval stale when the PR's merge base changes, and a repo with
-  stale-review dismissal enabled dismisses it outright even though
-  the diff is unchanged (the
+  approval stale when a retarget moves the PR's merge base in a way
+  that changes what the approval covered -- squash and rebase merges
+  below it guarantee this; a clean merge-commit chain can escape it
+  -- and a repo with stale-review dismissal enabled dismisses stale
+  approvals outright (the
   [required-approvals security changelog](https://github.blog/changelog/2023-06-06-security-enhancements-to-required-approvals-on-pull-requests/)
   describes the mechanism). Plan for a quick re-approval per slice;
   asking for it while CI runs keeps the chain moving.
-- **A retarget alone triggers no new CI run.** Changing a PR's base
-  is not one of the events that starts workflows, and required
-  checks are named in the target branch's protection rules, not in
-  the branch under test -- so a retargeted PR whose existing runs
+- **A retarget alone triggers no new CI run.** A base change is not
+  among the `pull_request` activity types workflows listen to by
+  default (only a workflow that opts into `edited` sees it), and
+  required checks are named in the target branch's protection rules,
+  not in the branch under test -- so a retargeted PR whose existing runs
   never reported a newly required or renamed check waits forever on
   a context marked "Expected". Workflow files do ride the branch
   under test, so a stale branch also runs outdated CI config. Both
