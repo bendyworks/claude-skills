@@ -255,7 +255,7 @@ For each accepted finding:
 
 After all accepted findings are addressed:
 
-1. Run the project's full lint+test gate again (via the project's suite-runner skill if it has one; one that already captures this way satisfies the capture rule), **with coverage on**, capturing complete output to a uniquely-named log under /tmp to grep for follow-ups -- never re-run just to re-read output. Then re-run the Step 4 patch-coverage check -- the fixes added lines too, and those should be covered before the branch leaves draft. In Targeted Spec Verification Mode, re-run the targeted-specs skill (bundled in this plugin) with coverage on instead and act on its verdict line.
+1. Run the project's full lint+test gate again (via the project's suite-runner skill if it has one), **with coverage on**, capturing complete output to a uniquely-named log under /tmp to grep for follow-ups -- never re-run just to re-read output (a suite-runner that already captures this way satisfies the capture rule). Then re-run the Step 4 patch-coverage check -- the fixes added lines too, and those should be covered before the branch leaves draft. In Targeted Spec Verification Mode, re-run the targeted-specs skill (bundled in this plugin) with coverage on instead and act on its verdict line.
 2. Report the PR size in lines changed across files, and whether it's over or under the 400-line easy-review threshold.
 3. Offer Phase 4 -- ask the user, "Want to run a 'find the bug' pass? Recommended for larger or riskier PRs." Phrase it as a real option, not a default.
 4. If the user declines Phase 4, tell them the gauntlet is complete and the branch is ready for human review.

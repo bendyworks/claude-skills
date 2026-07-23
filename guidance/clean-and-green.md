@@ -110,4 +110,5 @@ first time it runs:
   Re-running a suite just to re-read its output is forbidden: it
   costs minutes per run and produces no new information.
 - A suite-runner skill or script that already captures this way
-  satisfies the rule as-is; don't add a second capture on top of it.
+  satisfies this capture rule as-is; don't add a second capture on
+  top of it.

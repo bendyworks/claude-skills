@@ -139,7 +139,7 @@ For each PR in order:
 3. Install dependencies with the ecosystem's standard command (`bundle install`,
    `npm ci`, `pip install -r ...`, etc.)
 4. Run the verify command, capturing complete output to a uniquely-named log under /tmp to grep for follow-ups -- never re-run just to re-read output
-   (wrap the command in `2>&1 | tee /tmp/<name>.log`; a verify command
+   (wrap the command in `2>&1 | tee /tmp/<name>-$(date +%s).log`; a verify command
    that already captures this way satisfies the clean-and-green
    guidance's capture rule, where a team imports it). The dial
    `verify_command` in `dependabot-autonomy.yml` overrides the default
