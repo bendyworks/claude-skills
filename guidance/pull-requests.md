@@ -96,11 +96,13 @@ order, and the cascade is driven by branch deletion, not by merging:
   `gh pr edit <number> --base <target>` or the Edit button on the PR
   page. The "Automatically delete head branches" repo setting moves
   the deletion -- and the same race -- to merge time.
-- **Expect approvals to drop at each retarget.** On repos that dismiss
-  reviews when the base branch changes, every retarget dismisses the
-  existing approvals ("The base branch was changed") even though the
-  diff is unchanged. Plan for a quick re-approval per slice; asking for
-  it while CI runs keeps the chain moving.
+- **Expect approvals to drop at each retarget.** GitHub marks an
+  approval stale when the PR's merge base changes, and a repo with
+  stale-review dismissal enabled dismisses it outright even though
+  the diff is unchanged (the
+  [required-approvals security changelog](https://github.blog/changelog/2023-06-06-security-enhancements-to-required-approvals-on-pull-requests/)
+  describes the mechanism). Plan for a quick re-approval per slice;
+  asking for it while CI runs keeps the chain moving.
 - **A retarget alone triggers no new CI run.** Changing a PR's base
   is not one of the events that starts workflows, and required
   checks are named in the target branch's protection rules, not in
