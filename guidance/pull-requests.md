@@ -117,3 +117,10 @@ order, and the cascade is driven by branch deletion, not by merging:
   not transfer between PRs.** Recovering from a wrong-base merge means
   a fresh PR from the same head branch (the content is intact); the
   old PR's approval is evidence to cite, not something to carry over.
+
+Two adjacent traps: on a squash-merge repo, a retargeted PR shows the
+just-merged slice's commits in its diff again until the branch is
+updated from the default branch (the squashed copy is a new commit
+the fork point predates); and auto-merge armed on the next PR before
+its base flips is the wrong-base merge with no human in the loop --
+arm it only after confirming the retarget.
