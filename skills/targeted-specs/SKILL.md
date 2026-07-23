@@ -292,7 +292,8 @@ bundle exec rspec <selected files> 2>&1 | tee -a "$LOG"
    invocation with coverage instrumentation on; keep the coverage
    artifacts alongside the log for the caller to consume. Grep the
    captured log for details; never re-run the subset just to re-read
-   its output.
+   its output (the clean-and-green guidance's capture rule, where a
+   team imports it).
 3. An **empty subset skips the spec invocation entirely, however it got
    empty** -- only no-spec-impact files, only named gaps, only deleted
    specs, and no pins. Lint alone decides, and the verdict reports 0 spec

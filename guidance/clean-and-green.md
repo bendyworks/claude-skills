@@ -92,3 +92,23 @@ What targeted mode does NOT change:
   from its diff, the targeted procedure escalates -- declaring that
   this branch needs the full suite locally, just as in Full
   Verification Mode.
+
+## Capture the run's output
+
+Any suite or lint run that gates work -- the full gate, a targeted
+subset, a post-fix re-run -- has its complete output captured the
+first time it runs:
+
+- Tee all stdout and stderr (`2>&1 | tee`) to a uniquely-named log
+  under `/tmp` (e.g. `/tmp/rake-$(date +%s).log`) so a later run
+  never overwrites an earlier one.
+- When the command runs inside a container, capture on the host
+  side, outside the container's filesystem:
+  `docker exec <container> ... 2>&1 | tee /tmp/rake-$(date +%s).log`.
+- Answer every follow-up question -- which spec failed, how many
+  offenses, what the backtrace said -- by grepping the captured log.
+  Re-running a suite just to re-read its output is forbidden: it
+  costs minutes per run and produces no new information.
+- A suite-runner skill or script that already captures this way
+  satisfies this capture rule as-is; don't add a second capture on
+  top of it.
