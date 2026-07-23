@@ -73,3 +73,30 @@ automated one:
   thread resolved (GraphQL `resolveReviewThread`). Only resolve
   threads that are genuinely resolved; leave open anything still
   pending the developer's or reviewer's input.
+
+## Merging stacked pull requests
+
+A stacked chain (each PR based on the previous PR's branch) merges in
+order, and the cascade is driven by branch deletion, not by merging:
+
+- **GitHub retargets the next PR only when the merged PR's head branch
+  is deleted.** Merging without deleting leaves the next PR aimed at
+  the stale branch -- and merging that PR then lands its work on a side
+  branch instead of the real target, silently and successfully. The
+  per-link ritual is: merge, delete the head branch, confirm the next
+  PR's base actually flipped, and only then merge it.
+- **Expect approvals to drop at each retarget.** On repos that dismiss
+  reviews when the base branch changes, every retarget dismisses the
+  existing approvals ("The base branch was changed") even though the
+  diff is unchanged. Plan for a quick re-approval per slice; asking for
+  it while CI runs keeps the chain moving.
+- **CI config rides the branch under test.** A stacked branch runs its
+  own checked-in CI config, so default-branch config changes (renamed
+  jobs, new required checks) do not apply to it until the default
+  branch is merged down into it. If a required check was renamed, an
+  un-updated branch waits forever on a context it can never report --
+  update each branch from the default branch before merging it.
+- **A merged PR can never be reopened or retargeted, and approvals do
+  not transfer between PRs.** Recovering from a wrong-base merge means
+  a fresh PR from the same head branch (the content is intact); the
+  old PR's approval is evidence to cite, not something to carry over.
