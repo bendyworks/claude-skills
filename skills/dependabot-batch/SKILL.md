@@ -138,17 +138,15 @@ For each PR in order:
    - If rebase conflicts, stop and surface to the user
 3. Install dependencies with the ecosystem's standard command (`bundle install`,
    `npm ci`, `pip install -r ...`, etc.)
-4. Run the verify command, capturing complete output to a
-   uniquely-named log under /tmp to grep for follow-ups -- never re-run
-   just to re-read output (wrap the command in `2>&1 | tee
-   /tmp/<name>.log`; a verify command that already captures this way
-   satisfies the clean-and-green guidance's capture rule, where a team
-   imports it). The dial `verify_command` in `dependabot-autonomy.yml`
-   overrides the default command; if unset, use the project's standard
-   "lint + test" entry point (e.g. `bundle exec rake` for Ruby/Rails
-   projects with a default rake task, `npm test && npm run lint` for
-   Node projects, or whatever the project's CLAUDE.md says). Output
-   must be clean.
+4. Run the verify command, capturing complete output to a uniquely-named log under /tmp to grep for follow-ups -- never re-run just to re-read output
+   (wrap the command in `2>&1 | tee /tmp/<name>.log`; a verify command
+   that already captures this way satisfies the clean-and-green
+   guidance's capture rule, where a team imports it). The dial
+   `verify_command` in `dependabot-autonomy.yml` overrides the default
+   command; if unset, use the project's standard "lint + test" entry
+   point (e.g. `bundle exec rake` for Ruby/Rails projects with a
+   default rake task, `npm test && npm run lint` for Node projects, or
+   whatever the project's CLAUDE.md says). Output must be clean.
    - If linting surfaces new offenses (e.g. from a new cop / rule introduced
      by a linter-plugin bump), fix at source in one attempt. Never silence
      with disable-comments. If not cleanly fixable in one pass, stop and ask.
