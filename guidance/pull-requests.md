@@ -87,9 +87,13 @@ order, and the cascade is driven by branch deletion, not by merging:
   describes the behavior). Merging without deleting leaves the next
   PR aimed at the stale branch -- and merging that PR then lands its
   work on a side branch instead of the real target, silently and
-  successfully. The per-slice sequence is: merge, delete the head
-  branch, confirm the next PR's base actually flipped, and only then
-  merge it. The confirm step earns its place: `gh pr merge
+  successfully. The invariant: never merge a PR whose base is not
+  the branch its work should land on -- once every earlier slice is
+  in, that is the mainline, so a base still naming a merged slice's
+  branch means stop and retarget before anything else. The per-slice
+  sequence that maintains it: confirm this PR's base, merge, delete
+  the head branch, and confirm the next PR's base actually flipped.
+  The confirm steps earn their place: `gh pr merge
   --delete-branch` has a long-standing race that can skip the
   retarget ([cli/cli#1168](https://github.com/cli/cli/issues/1168)),
   and a base that did not flip is set by hand with
