@@ -96,22 +96,25 @@ and retarget before doing anything else:
   check that this PR's base is the mainline (retarget it if not),
   merge, delete the head branch, and confirm the next PR's base
   actually flipped. The confirm steps earn their place: `gh pr merge
-  --delete-branch` has a long-standing race that can skip the
-  retarget or close the dependent PR outright
+  --delete-branch` runs a client-side merge-then-delete sequence
+  with a long-standing race that can skip the retarget or close the
+  dependent PR outright
   ([cli/cli#1168](https://github.com/cli/cli/issues/1168)). A base
   that did not flip is set by hand with
   `gh pr edit <number> --base <target>` or the Edit button on the PR
-  page; a PR the race closed is reopened first (closed is not
-  merged, so reopening works while its head branch survives) or
-  replaced with a fresh PR from the same branch. The "Automatically
-  delete head branches" repo setting moves the deletion -- and the
-  same race -- to merge time.
+  page. A PR the race closed cannot simply be reopened -- GitHub
+  refuses while the PR's base branch no longer exists, and a closed
+  PR's base cannot be edited -- so restore the deleted branch (the
+  merged PR's "Restore branch" button), reopen, retarget, and delete
+  the branch again, or open a fresh PR from the same head branch.
+  The "Automatically delete head branches" repo setting moves the
+  deletion to merge time; keep the confirm step there too.
 - **Expect approvals to drop at each retarget.** GitHub marks an
   approval stale when a retarget moves the PR's merge base in a way
   that changes what the approval covered -- squash and rebase merges
-  below it guarantee this; a clean merge-commit chain can escape it
-  -- and a repo with stale-review dismissal enabled dismisses stale
-  approvals outright (the
+  below it all but guarantee this; a clean merge-commit chain can
+  escape it -- and a repo with stale-review dismissal enabled
+  dismisses stale approvals outright (the
   [required-approvals security changelog](https://github.blog/changelog/2023-06-06-security-enhancements-to-required-approvals-on-pull-requests/)
   describes the mechanism). Plan for a quick re-approval per slice;
   asking for it while CI runs keeps the chain moving.
