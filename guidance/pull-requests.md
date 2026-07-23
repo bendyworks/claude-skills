@@ -101,12 +101,16 @@ order, and the cascade is driven by branch deletion, not by merging:
   existing approvals ("The base branch was changed") even though the
   diff is unchanged. Plan for a quick re-approval per slice; asking for
   it while CI runs keeps the chain moving.
-- **CI config rides the branch under test.** A stacked branch runs its
-  own checked-in CI config, so default-branch config changes (renamed
-  jobs, new required checks) do not apply to it until the default
-  branch is merged down into it. If a required check was renamed, an
-  un-updated branch waits forever on a context it can never report --
-  update each branch from the default branch before merging it.
+- **A retarget alone triggers no new CI run.** Changing a PR's base
+  is not one of the events that starts workflows, and required
+  checks are named in the target branch's protection rules, not in
+  the branch under test -- so a retargeted PR whose existing runs
+  never reported a newly required or renamed check waits forever on
+  a context marked "Expected". Workflow files do ride the branch
+  under test, so a stale branch also runs outdated CI config. Both
+  problems share one remedy: update each branch from the default
+  branch before merging it, which refreshes the workflows and
+  triggers a fresh run.
 - **A merged PR can never be reopened or retargeted, and approvals do
   not transfer between PRs.** Recovering from a wrong-base merge means
   a fresh PR from the same head branch (the content is intact); the
