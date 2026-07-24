@@ -24,11 +24,14 @@ unless ENV['COVERAGE'].to_s.empty?
 
   begin
     require 'simplecov'
+    # Declared as a runtime dependency of simplecov, so the install
+    # hint below covers it too; inside the rescue so a partial
+    # install aborts with the hint instead of a raw LoadError.
+    require 'simplecov_json_formatter'
   rescue LoadError
     abort "coverage_helper: COVERAGE is set but simplecov is not " \
           "installed; run: gem install simplecov -v #{simplecov_version}"
   end
-  require 'simplecov_json_formatter'
 
   # Root and the tracked glob are both pinned to absolute paths:
   # SimpleCov resolves each against the current working directory by
