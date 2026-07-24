@@ -34,11 +34,40 @@ jobs:
       - uses: ruby/setup-ruby@v1
         with:
           ruby-version: '3.4'
-      - name: Run bin helper tests
+      # Pin must match the install hint in test/coverage_helper.rb;
+      # update both together.
+      - name: Install SimpleCov
+        run: gem install simplecov -v 0.22.0
+      - name: Run bin helper tests with coverage
+        env:
+          COVERAGE: '1'
         run: |
           for test_file in test/*_test.rb; do
             ruby "$test_file" || exit 1
           done
+      # Guards artifact integrity, not a coverage percentage: every
+      # regression that breaks measurement (helper require drift, root
+      # or glob resolution, command_name collisions) fails silently
+      # with a green suite and an empty artifact.
+      - name: Assert coverage artifact integrity
+        run: |
+          ruby -rjson -e '
+            files = JSON.parse(File.read("coverage/coverage.json")).fetch("coverage")
+            %w[bin/linear bin/gh-issue-sync].each do |cli|
+              path = files.keys.find { |key| key.end_with?(cli) }
+              abort "coverage.json is missing #{cli}" unless path
+              covered = files.fetch(path).fetch("lines").count { |hits| hits.to_i.positive? }
+              abort "coverage.json has no covered lines for #{cli}" unless covered.positive?
+            end
+          '
+      # Success-only upload on purpose: the test loop exits at the
+      # first red file, so a partial artifact would mislead.
+      - name: Upload coverage artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage
+          path: coverage/
+          retention-days: 14
 
   validate-plugin:
     runs-on: ubuntu-latest
