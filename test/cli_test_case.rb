@@ -18,6 +18,10 @@
 # invocation hits a failing PATH shim and flunks -- no env scrub could
 # cover gh's keyring-based auth.
 
+# Coverage must load first: SimpleCov has to start before any bin/
+# file is loaded and before minitest/autorun registers its at_exit.
+require_relative 'coverage_helper'
+
 require 'fileutils'
 require 'minitest/autorun'
 require 'tmpdir'
