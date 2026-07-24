@@ -34,11 +34,62 @@ jobs:
       - uses: ruby/setup-ruby@v1
         with:
           ruby-version: '3.4'
-      - name: Run bin helper tests
+      # The simplecov pin must match the install hint in
+      # test/coverage_helper.rb and the tripwire assertion in
+      # test/coverage_helper_test.rb; update all three together. The
+      # json formatter is installed first at a pinned version because
+      # the integrity guard below depends on coverage.json's schema.
+      # That pins what is installed, not what is activated: simplecov
+      # constrains the formatter only as ~> 0.1, so a runner image
+      # shipping a newer 0.x would activate that instead.
+      - name: Install SimpleCov
+        run: |
+          gem install simplecov_json_formatter -v 0.1.4
+          gem install simplecov -v 0.22.0
+      - name: Run bin helper tests with coverage
+        env:
+          COVERAGE: '1'
         run: |
           for test_file in test/*_test.rb; do
             ruby "$test_file" || exit 1
           done
+      # Uploaded before the integrity guard runs, so a guard failure
+      # still ships the artifact needed to diagnose it. The step is
+      # success-only with respect to the test loop above, which exits
+      # at the first red file: a partial artifact would mislead.
+      # include-hidden-files carries .resultset.json, the per-process
+      # raw data the docs contrast against coverage.json; v4 drops
+      # dotfiles otherwise.
+      - name: Upload coverage artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage
+          path: coverage/
+          retention-days: 14
+          include-hidden-files: true
+      # Guards artifact integrity, not a coverage percentage: a
+      # measurement regression that leaves the artifact shaped right
+      # (root or glob resolution, command_name collisions) otherwise
+      # ships with a green suite. The file set mirrors the helper's
+      # bin/* glob, which matches neither dotfiles nor directories.
+      # Require order is NOT guarded here -- it survives every check
+      # this script can make, so test/coverage_helper_test.rb owns it.
+      # The script is single-quoted for the shell, so keep apostrophes
+      # out of its body; move it to a scripts/ file if it grows.
+      - name: Assert coverage artifact integrity
+        run: |
+          ruby -rjson -e '
+            files = JSON.parse(File.read("coverage/coverage.json")).fetch("coverage")
+            clis = Dir.children("bin").reject { |entry| entry.start_with?(".") }
+            clis = clis.select { |entry| File.file?(File.join("bin", entry)) }.sort
+            abort "no CLIs found under bin/" if clis.empty?
+            clis.each do |cli|
+              path = files.keys.find { |key| key.end_with?("/bin/#{cli}") }
+              abort "coverage.json is missing bin/#{cli}" unless path
+              covered = files.fetch(path).fetch("lines").count { |hits| hits.to_i.positive? }
+              abort "coverage.json has no covered lines for bin/#{cli}" unless covered.positive?
+            end
+          '
 
   validate-plugin:
     runs-on: ubuntu-latest
