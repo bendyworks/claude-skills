@@ -137,8 +137,10 @@ above is about the CLIs' runtime and is unaffected. Requiring
 `test/cli_test_case.rb` first is the convention every test file
 follows, and it is also what turns coverage on: it loads
 `test/coverage_helper.rb`, which starts SimpleCov only when the
-`COVERAGE` env var is set (`gem install simplecov -v 0.22.0` once,
-then e.g. `COVERAGE=1 ruby test/linear_test.rb`). Delete `coverage/`
+`COVERAGE` env var is set to a non-empty value (install SimpleCov
+once; when it is missing the helper aborts naming the exact pinned
+install command, then e.g. `COVERAGE=1 ruby test/linear_test.rb`).
+Delete `coverage/`
 before a measuring run: SimpleCov merges per-process results within a
 time window, so leftovers from an earlier session can leak into or
 silently shrink the union. Read uncovered lines from
