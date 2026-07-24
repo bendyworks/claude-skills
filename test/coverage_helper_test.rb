@@ -43,7 +43,8 @@ class CoverageHelperTest < Minitest::Test
         RbConfig.ruby, '-e', "require #{HELPER.dump}",
         chdir: REPO_ROOT
       )
-      assert_equal 1, status.exitstatus, 'the missing-gem path must abort (exit 1), not crash'
+      assert_equal 1, status.exitstatus, 'the missing-gem path must exit 1'
+      refute_includes err, 'LoadError', 'the abort must replace the raw LoadError, not follow it'
       # The version is hardcoded on purpose: a bump to the pins in
       # test/coverage_helper.rb and .github/workflows/checks.yml must
       # consciously touch this tripwire too, so the three sites cannot
@@ -69,5 +70,26 @@ class CoverageHelperTest < Minitest::Test
     skip 'simplecov not installed in this environment' if err.include?('gem install simplecov')
     assert status.success?, "helper subprocess failed: #{err}"
     assert_equal [REPO_ROOT, 3600].inspect, out
+  end
+
+  # The require order in cli_test_case.rb is load-bearing and no
+  # artifact check can stand in for it. SimpleCov's Minitest plugin
+  # reports from Minitest.after_run, but Minitest.run only installs
+  # that plugin when minitest loads AFTER SimpleCov has started;
+  # required the other way round, SimpleCov's own at_exit harvests
+  # coverage before a single test body runs. Every bin/ file still
+  # gets its module body measured at load time, so the artifact keeps
+  # its shape and CI's integrity guard stays green while roughly
+  # four fifths of real measurement silently disappears.
+  def test_cli_test_case_requires_coverage_helper_before_minitest
+    source = File.read(File.join(REPO_ROOT, 'test', 'cli_test_case.rb'))
+    helper_require = source.index("require_relative 'coverage_helper'")
+    minitest_require = source.index("require 'minitest/autorun'")
+
+    refute_nil helper_require, 'cli_test_case.rb must require the coverage helper'
+    refute_nil minitest_require, 'cli_test_case.rb must require minitest/autorun'
+    assert helper_require < minitest_require,
+           'coverage_helper must be required before minitest/autorun, or coverage ' \
+           'collapses to load-time-only while every artifact check stays green'
   end
 end

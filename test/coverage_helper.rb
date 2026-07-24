@@ -6,8 +6,13 @@
 # gems and the bin/ CLIs' stdlib-only posture is untouched.
 #
 # Required at the very top of test/cli_test_case.rb, above
-# minitest/autorun, so coverage starts before any bin/ file is loaded
-# and SimpleCov's at_exit report runs after Minitest's.
+# minitest/autorun, so coverage starts before any bin/ file is
+# loaded. That order is load-bearing, not cosmetic: simplecov reports
+# through a Minitest plugin that Minitest.run installs only when
+# minitest loads after SimpleCov has started. Required the other way
+# round, SimpleCov's own at_exit harvests coverage before any test
+# body runs, leaving load-time-only numbers that still look like a
+# valid artifact. test/coverage_helper_test.rb pins the order.
 #
 # CI runs each test/*_test.rb as its own process, so every process
 # records its own resultset entry (keyed by command_name below) and
@@ -36,7 +41,10 @@ unless ENV['COVERAGE'].to_s.empty?
   # Root and the tracked glob are both pinned to absolute paths:
   # SimpleCov resolves each against the current working directory by
   # default, and a test run started from inside test/ would silently
-  # drop all bin/ coverage.
+  # drop all bin/ coverage. The glob assumes bin/ holds only files --
+  # SimpleCov reads every tracked path line by line to simulate
+  # coverage for the ones no test loaded, so a subdirectory there
+  # would end each measuring run in Errno::EISDIR.
   repo_root = File.expand_path('..', __dir__)
 
   SimpleCov.start do

@@ -19,7 +19,9 @@
 # cover gh's keyring-based auth.
 
 # Coverage must load first: SimpleCov has to start before any bin/
-# file is loaded and before minitest/autorun registers its at_exit.
+# file is loaded, and before minitest loads, since minitest installs
+# the reporting plugin only when it loads second. See the header of
+# coverage_helper.rb; the order is pinned by a contract test.
 require_relative 'coverage_helper'
 
 require 'fileutils'
