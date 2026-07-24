@@ -1,7 +1,8 @@
 # frozen_string_literal: true
 
 # Opt-in SimpleCov bootstrap for the bin/ CLI test suite. Does nothing
-# unless the COVERAGE env var is set, so a plain test run needs no
+# unless the COVERAGE env var is set to a non-empty value (matching
+# how bin/linear treats env tokens), so a plain test run needs no
 # gems and the bin/ CLIs' stdlib-only posture is untouched.
 #
 # Required at the very top of test/cli_test_case.rb, above
@@ -15,16 +16,17 @@
 # per-process raw data, where a tracked-but-unloaded file shows as all
 # zeros -- do not read uncovered lines from it directly.
 
-if ENV['COVERAGE']
+unless ENV['COVERAGE'].to_s.empty?
   # Must match the pinned install in .github/workflows/checks.yml
-  # (ruby-tests job); update both together.
-  SIMPLECOV_VERSION = '0.22.0'
+  # (ruby-tests job) and the tripwire assertion in
+  # test/coverage_helper_test.rb; update all three together.
+  simplecov_version = '0.22.0'
 
   begin
     require 'simplecov'
   rescue LoadError
     abort "coverage_helper: COVERAGE is set but simplecov is not " \
-          "installed; run: gem install simplecov -v #{SIMPLECOV_VERSION}"
+          "installed; run: gem install simplecov -v #{simplecov_version}"
   end
   require 'simplecov_json_formatter'
 
