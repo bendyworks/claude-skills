@@ -34,11 +34,16 @@ jobs:
       - uses: ruby/setup-ruby@v1
         with:
           ruby-version: '3.4'
-      # Pin must match the install hint in test/coverage_helper.rb and
-      # the tripwire assertion in test/coverage_helper_test.rb; update
-      # all three together.
+      # The simplecov pin must match the install hint in
+      # test/coverage_helper.rb and the tripwire assertion in
+      # test/coverage_helper_test.rb; update all three together. The
+      # json formatter is pinned here too (installed first, so
+      # simplecov's loose ~> 0.1 constraint is already satisfied):
+      # the integrity guard below depends on coverage.json's schema.
       - name: Install SimpleCov
-        run: gem install simplecov -v 0.22.0
+        run: |
+          gem install simplecov_json_formatter -v 0.1.4
+          gem install simplecov -v 0.22.0
       - name: Run bin helper tests with coverage
         env:
           COVERAGE: '1'
@@ -56,11 +61,13 @@ jobs:
         run: |
           ruby -rjson -e '
             files = JSON.parse(File.read("coverage/coverage.json")).fetch("coverage")
-            %w[bin/linear bin/gh-issue-sync].each do |cli|
-              path = files.keys.find { |key| key.end_with?(cli) }
-              abort "coverage.json is missing #{cli}" unless path
+            clis = Dir.children("bin").sort
+            abort "no CLIs found under bin/" if clis.empty?
+            clis.each do |cli|
+              path = files.keys.find { |key| key.end_with?("/bin/#{cli}") }
+              abort "coverage.json is missing bin/#{cli}" unless path
               covered = files.fetch(path).fetch("lines").count { |hits| hits.to_i.positive? }
-              abort "coverage.json has no covered lines for #{cli}" unless covered.positive?
+              abort "coverage.json has no covered lines for bin/#{cli}" unless covered.positive?
             end
           '
       # Success-only upload on purpose: the test loop exits at the
