@@ -140,14 +140,14 @@ follows, and it is also what turns coverage on: it loads
 `COVERAGE` env var is set to a non-empty value (install SimpleCov
 once; when it is missing the helper aborts naming the exact pinned
 install command, then e.g. `COVERAGE=1 ruby test/linear_test.rb`).
-Delete `coverage/`
-before a measuring run: SimpleCov merges per-process results within a
-time window, so leftovers from an earlier session can leak into or
-silently shrink the union. Read uncovered lines from
-`coverage/coverage.json` (the merged union), not
+Delete `coverage/` before a measuring run: SimpleCov merges
+per-process results within a time window, so leftovers from an
+earlier session can leak into or silently shrink the union. Read
+uncovered lines from `coverage/coverage.json` (the merged union), not
 `coverage/.resultset.json` (per-process raw data). CI runs the test
-loop with coverage on, asserts both `bin/` CLIs appear in the
-artifact, and uploads `coverage/` on every green run.
+loop with coverage on, uploads `coverage/` on every run that gets
+that far, and then asserts every `bin/` CLI appears in the artifact
+with covered lines.
 
 When adding a mode to an existing CLI, place it by this convention: a
 new mode of one resource rides a flag on that resource's subcommand
