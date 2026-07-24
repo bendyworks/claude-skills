@@ -132,6 +132,21 @@ CLI-invoking tests lives in `test/cli_test_case.rb`; its header
 comment explains the naming that keeps it outside CI's
 `test/*_test.rb` glob.
 
+Coverage measurement is opt-in and test-only; the stdlib-only posture
+above is about the CLIs' runtime and is unaffected. Requiring
+`test/cli_test_case.rb` first is the convention every test file
+follows, and it is also what turns coverage on: it loads
+`test/coverage_helper.rb`, which starts SimpleCov only when the
+`COVERAGE` env var is set (`gem install simplecov -v 0.22.0` once,
+then e.g. `COVERAGE=1 ruby test/linear_test.rb`). Delete `coverage/`
+before a measuring run: SimpleCov merges per-process results within a
+time window, so leftovers from an earlier session can leak into or
+silently shrink the union. Read uncovered lines from
+`coverage/coverage.json` (the merged union), not
+`coverage/.resultset.json` (per-process raw data). CI runs the test
+loop with coverage on, asserts both `bin/` CLIs appear in the
+artifact, and uploads `coverage/` on every green run.
+
 When adding a mode to an existing CLI, place it by this convention: a
 new mode of one resource rides a flag on that resource's subcommand
 (like `gh-issue-sync section --delete`), while an operation with its
