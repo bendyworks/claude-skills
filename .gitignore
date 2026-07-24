@@ -4,3 +4,6 @@
 
 # direnv per-machine environment (e.g. ITERM_BG_COLOR); never repo content.
 .envrc
+
+# SimpleCov output from COVERAGE=1 test runs (see test/coverage_helper.rb).
+coverage/
