@@ -81,18 +81,29 @@ If the user explicitly asked to skip something ("gauntlet but skip security") or
 
 Reviewers and CI (Codecov, etc.) flag **patch coverage**: lines *added by this branch* that no test executes. The Phase 1 audits reason about test *quality*, not line coverage, so an untested new line slips past them -- catch it here mechanically instead of in a review round-trip.
 
-The clean-and-green gate in Step 1 already runs the suite, and nothing edits the tree between Step 1 and this step -- so if that gate ran **with coverage on** against this tree, reuse its artifacts rather than re-running (in Targeted Spec Verification Mode the targeted-specs run does exactly that; if it ESCALATED, the full gate ran and full-mode behavior applies). If Step 1 ran without coverage, or was satisfied by the user's confirmation or a prior run, run the suite (or the relevant suites) with coverage on now and capture the artifacts. Subset coverage is not ground truth: one-hop selection can miss a spec that covers an added line transitively, so treat a subset-uncovered added line as a candidate to verify (or defer to CI's full-run patch coverage) rather than an automatic finding. Then intersect added lines with uncovered lines:
+The clean-and-green gate in Step 1 already runs the suite, and nothing edits the tree between Step 1 and this step -- so if that gate ran **with coverage on** against this tree, reuse its artifacts rather than re-running (in Targeted Spec Verification Mode the targeted-specs run does exactly that; if it ESCALATED, the full gate ran and full-mode behavior applies). If Step 1 ran without coverage, or was satisfied by the user's confirmation or a prior run, **delete `coverage/` first**, then run the suite (or the relevant suites) with coverage on now, capturing the artifacts. Deleting is not housekeeping: raw results are keyed by a per-process command name, so an entry from an earlier session whose name this run does not reproduce is never overwritten and merges into the union as stale coverage -- which hides a genuinely uncovered added line, the exact miss this step exists to catch. Subset coverage is not ground truth: one-hop selection can miss a spec that covers an added line transitively, so treat a subset-uncovered added line as a candidate to verify (or defer to CI's full-run patch coverage) rather than an automatic finding. Then intersect added lines with uncovered lines:
 
 1. **Added lines** -- `git diff main...HEAD --unified=0` (or parse `+` hunks) gives the new-file line numbers per file.
-2. **Uncovered lines** -- from the coverage run's machine-readable output:
-   - Ruby / SimpleCov -> `coverage/.resultset.json` (or `coverage/coverage.json`); a line with hit count `0` is uncovered, `null` is non-executable.
-   - JS / Istanbul / nyc -> `coverage/**/cobertura-coverage.xml` or `lcov.info` (`<line number=.. hits="0"/>` / `DA:line,0`). Note JS coverage is usually a **separate** run from the Ruby suite (e.g. an `npm test` invocation with coverage on) -- run it too when the diff touches JS, or the JS patch stays invisible.
-   - Other stacks: `coverage.py` (`coverage json`), `go test -coverprofile`, etc.
-3. **Intersect.** Added line numbers that appear as hit-count `0` are the uncovered patch. Watch the file-path matching (cobertura/lcov paths can be repo-relative or absolute) and the new-vs-old line numbering (use the diff's `+` side).
+2. **Uncovered lines** -- from the coverage run's machine-readable output. **Always read the tool's *merged* artifact, never per-process raw data.** A suite that forks (parallel runners, per-file loops, sharded CI) writes one raw entry per process, and in each entry the files that process never loaded are *simulated* as all zeros. Read one of those entries directly and an entire untouched file looks uncovered.
+   - Ruby / SimpleCov -> merge before reading. `coverage/coverage.json` is already merged, but it exists only when the project enables the JSON formatter (SimpleCov adds it only when `CC_TEST_REPORTER_ID` is set), so usually only `coverage/.resultset.json` is on disk. Merge it read-only -- this neither re-runs the suite nor modifies the file:
+
+     ```ruby
+     # ruby -rsimplecov -e '...'
+     res = SimpleCov::ResultMerger.merge_results("coverage/.resultset.json", ignore_timeout: true)
+     res.files.each do |f|
+       uncovered = f.lines.select { |l| l.coverage == 0 }.map(&:line_number)
+       puts "#{f.filename}: #{uncovered.inspect}"
+     end
+     ```
+
+     `ignore_timeout: true` matters: SimpleCov's own merge silently drops entries older than `merge_timeout` (default 600s), so a slow per-file loop can otherwise lose its earliest processes. Hit count `0` is uncovered, `null` is non-executable, and `coverage.json` also uses the string `"ignored"` for a `:nocov:` skip. **Do not sum hit counts across entries by hand.** SimpleCov merges nil-wins (`nil + 0 = nil`), and a simulated entry marks far more lines executable than a real measurement does, so summing reports non-executable lines as uncovered -- on a two-process run of this plugin's own suite, summing claimed 189 uncovered lines against a true 53.
+   - JS / Istanbul / nyc -> merge with `nyc report` (`.nyc_output/*.json` is per-process raw data, the same trap), then read `coverage/**/cobertura-coverage.xml` or `lcov.info` (`<line number=.. hits="0"/>` / `DA:line,0`). Note JS coverage is usually a **separate** run from the Ruby suite (e.g. an `npm test` invocation with coverage on) -- run it too when the diff touches JS, or the JS patch stays invisible.
+   - Other stacks: `coverage.py` (`coverage combine` before `coverage json`), `go test -coverprofile`, etc.
+3. **Intersect.** Added line numbers that the merged artifact reports as hit-count `0` are the uncovered patch. Watch the file-path matching (cobertura/lcov paths can be repo-relative or absolute) and the new-vs-old line numbering (use the diff's `+` side).
 
 Surface each uncovered added line as a **should-fix** coverage finding in the Phase 2 list (`file:line -- added by this branch, no test exercises it`). Beware two traps the categorical agents won't: a *partial* branch (line runs but one side of a conditional never does -- still a gap a reviewer will flag), and a new line landing inside a method that had **no** prior coverage (easy to miss because the whole method reads as "unchanged-looking"). If a line is genuinely not worth testing (defensive guard, logging), say so explicitly rather than leaving it unexplained.
 
-After Phase 3 fixes, re-run coverage as part of the final gate -- fixes add lines too, and those should be covered before the branch leaves draft.
+After Phase 3 fixes, re-run coverage as part of the final gate -- fixes add lines too, and those should be covered before the branch leaves draft. Delete `coverage/` before that run as well: the fixes have shifted line numbers, so results carried over from the pre-fix run describe a file that no longer exists.
 
 ### Light mode for small PRs
 
