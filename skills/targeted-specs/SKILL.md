@@ -289,8 +289,11 @@ bundle exec rspec <selected files> 2>&1 | tee -a "$LOG"
    log. Adapt both commands to the project's usual runners (container,
    binstub, parallel runner). A caller standing in for a
    coverage-bearing gate (e.g. the gauntlet) may ask for this
-   invocation with coverage instrumentation on; keep the coverage
-   artifacts alongside the log for the caller to consume. Grep the
+   invocation with coverage instrumentation on; delete the previous
+   run's raw coverage results first (for SimpleCov,
+   `coverage/.resultset.json` and its `.lock`) so the caller reads
+   this run rather than a union with an earlier one, then keep the
+   coverage artifacts alongside the log for it to consume. Grep the
    captured log for details; never re-run the subset just to re-read
    its output (the clean-and-green guidance's capture rule, where a
    team imports it).

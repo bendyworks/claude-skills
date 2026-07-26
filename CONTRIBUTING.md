@@ -140,11 +140,14 @@ follows, and it is also what turns coverage on: it loads
 `COVERAGE` env var is set to a non-empty value (install SimpleCov
 once; when it is missing the helper aborts naming the exact pinned
 install command, then e.g. `COVERAGE=1 ruby test/linear_test.rb`).
-Delete `coverage/` before a measuring run: SimpleCov merges
-per-process results within a time window, so leftovers from an
-earlier session can leak into or silently shrink the union. Read
-uncovered lines from `coverage/coverage.json` (the merged union), not
-`coverage/.resultset.json` (per-process raw data). CI runs the test
+Delete `coverage/.resultset.json` and its `.lock` before a measuring
+run: SimpleCov merges per-process results within a time window, so
+leftovers from an earlier session can leak into or silently shrink
+the union. Delete those two rather than all of `coverage/`, which
+would also remove `.last_run.json` and disable any coverage-drop
+gate. Read uncovered lines from the merged union -- this repo's
+`coverage/coverage.json` -- never from `coverage/.resultset.json`,
+which is per-process raw data. CI runs the test
 loop with coverage on, uploads `coverage/` on every run that gets
 that far, and then asserts every `bin/` CLI appears in the artifact
 with covered lines.
