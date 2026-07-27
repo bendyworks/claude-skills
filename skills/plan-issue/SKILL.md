@@ -72,20 +72,25 @@ A project that declares nothing is in the default, where merge and
 production deploy are distinct events and every gate below applies as
 written -- never infer the mode from a project's shape (no version
 file, auto-merge enabled, a deploy workflow present). A silent
-inference is exactly how a real gate gets dropped, so an undeclared
-project stays in the default and is not prompted about the mode.
+inference is exactly how a real gate gets dropped. A project whose
+files say nothing on the subject is never prompted about the mode; the
+one case worth a question is the project above, whose files gesture at
+the mode without declaring it.
 
-**Check for the declaration once, before drafting the ship tail in
-create Step 6**, and say which answer came back. The declaration may
-live in a rules file rather than an auto-loaded CLAUDE.md, so it is not
-safe to assume it would already be in front of you; and a session that
-half-remembers the mode from conversation rather than from the
-project's files is the one most likely to apply it where it does not
-hold.
+**Establish the mode from the project's checked-in files at every site
+that consumes it**, and say which answer came back. Both the ship tail
+in create Step 6 and the production precondition in finish Step 1
+depend on the answer, and finish is a standalone entry point that never
+runs create. The declaration may live in a rules file rather than an
+auto-loaded CLAUDE.md, so it is not safe to assume it is already in
+front of you -- and a session that half-remembers the mode from
+conversation rather than from the project's files is the one most
+likely to apply it where it does not hold. A conversational memory of
+the mode does not count as establishing it.
 
-**Verify the premise before declaring the mode, or before recommending
-it.** The premise is that nothing after the merge can still fail or be
-skipped. The mis-declaration to rule out by name: a merge that
+**Verify the premise before declaring the mode, before recommending it,
+and before acting on a declaration someone else wrote.** The premise is
+that nothing after the merge can still fail or be skipped. The mis-declaration to rule out by name: a merge that
 *triggers* an automatic deploy pipeline which can itself go red is
 **not** Deploy-on-Merge -- there is a gap and it can fail. Declaring the
 mode there fails silently, because the housekeeping pass would delete
@@ -500,9 +505,11 @@ Draft a plan with:
    user say "do task 13" and lets you cite "Task 13" against something
    they can actually find in the file. The standard tail of the list --
    the "ship the work" steps -- runs in the order below, which exists
-   for a wall-clock reason. Which items the tail carries varies (step 5
-   is conditional, and step 6 is absent in Deploy-on-Merge Mode); their
-   relative order does not. The numbers below index *this* list, not the
+   for a wall-clock reason. Several items are conditional -- step 2 can
+   be opted out of, step 4 collapses to nothing on a tracker with no
+   review state, step 5 applies only to stakeholder-visible changes, and
+   step 6 is absent in Deploy-on-Merge Mode -- but their relative order
+   does not change. The numbers below index *this* list, not the
    plan's to-dos: a tail that omits an item still numbers the plan's
    to-dos consecutively, leaving no gap.
 
@@ -591,8 +598,7 @@ Draft a plan with:
 
       **Omit this item entirely in Deploy-on-Merge Mode.** There the
       merge in step 4 is the deploy, so the item could never be
-      independently true or false -- it would only restate the step
-      above it. The tail then ends with the run-housekeeping item
+      independently true or false -- it would only restate step 4. The tail then ends with the run-housekeeping item
       below, which still keeps the post-ship work visibly pending.
    7. **Run finished-issue-housekeeping (finish phase,
       user-triggered).** The final ship-tail entry; use that wording
@@ -853,11 +859,21 @@ Deploy-on-Merge Mode there is a second gap to wait out first, between
 
 ### Step 1 -- Confirm preconditions
 
-Walk through these checks (the housekeeping skill will re-verify, but
-catching a "no" here lets you exit early before invoking it):
+**First establish whether the project is in Deploy-on-Merge Mode**, by
+reading its checked-in CLAUDE.md and rules files now -- check 2 depends
+on the answer, and this phase is a standalone entry point, so nothing
+earlier in this session necessarily established it. A conversational
+memory of the mode does not count. The Deploy-on-Merge Mode section
+above carries the recognition floor, the never-infer rule, and the
+default for a project that declares nothing.
+
+Then walk through these checks (the housekeeping skill will re-verify,
+but catching a "no" here lets you exit early before invoking it):
 
 1. **PR is merged to main.** Verify with `gh pr view <PR#> --json state,mergedAt,mergeCommit` (or whichever forge the project uses).
-2. **The merged code is live in production.** In Deploy-on-Merge Mode -- once you have confirmed the premise still holds, that nothing after the merge can fail or be skipped -- check 1 satisfies this one, because the merge *is* the deploy. A project whose merge triggers a deploy that can go red does not qualify however its rules read. Otherwise it is a project-specific check:
+2. **The merged code is live in production.** Before taking any shortcut, confirm the premise: nothing after the merge can still fail or be skipped. A project whose merge *triggers* a deploy that can go red does not qualify however its rules read.
+
+   With that premise confirmed, in Deploy-on-Merge Mode check 1 satisfies this one, because the merge *is* the deploy. Otherwise it is a project-specific check:
    - Heroku-deployed apps: `heroku releases -a <prod-app>` and confirm a release after the merge commit.
    - Other deploy targets: ask the user, or look at the deploy log / dashboard.
    - When in doubt, ask the user to confirm rather than guess.
