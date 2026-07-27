@@ -10,7 +10,8 @@ description, a whole new audit lane in gauntlet.
 - All changes land through pull requests against `main`.
 - **Merged means shipped.** The plugin has no version field, so every
   commit on `main` is immediately installable by everyone via
-  `/plugin marketplace update bendyworks`. Review accordingly.
+  `/plugin marketplace update bendyworks`. Review accordingly. This is
+  what [CLAUDE.md](CLAUDE.md) declares as Deploy-on-Merge Mode.
 - Maintainer: Stephen Anderson (@bendycode) merges. If a PR sits for more
   than a few days, nudge him.
 - **Announce guidance changes.** A substantive change to a `guidance/`
@@ -76,6 +77,18 @@ entirely (a scratch directory works; a rename in place does not --
 discovery keys off SKILL.md frontmatter, not the directory name), run
 the test, then move them back. The tell that a run was contaminated:
 it cites skill wording that matches main rather than your branch.
+
+**Mind the CLAUDE.md a run inherits.** A session started from a
+directory inside this repo picks up the root `CLAUDE.md`, including its
+Deploy-on-Merge declaration, and a session started anywhere picks up
+your personal global one. Both can hand the run an answer the skill
+under test was supposed to supply, which quietly turns a test into a
+tautology. Run each arm from a throwaway project directory that carries
+exactly the rules that arm is meant to have, and pass
+`--setting-sources project` so the global file stays out. The related
+trap when writing a project declaration for an arm: state the *fact*
+the project is asserting, never the behavior you expect the skill to
+produce, or the session will simply follow your wording.
 
 **Trigger injection.** To force a specific code path (an escalation
 rule, an edge case), plant an untracked dummy file that matches the
