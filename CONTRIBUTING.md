@@ -11,8 +11,7 @@ description, a whole new audit lane in gauntlet.
 - **Merged means shipped.** The plugin has no version field, so every
   commit on `main` is immediately installable by everyone via
   `/plugin marketplace update bendyworks`. Review accordingly. This is
-  what [CLAUDE.md](CLAUDE.md) declares as Deploy-on-Merge Mode, which is
-  why a plan's ship tail here carries no separate confirm-shipped step.
+  what [CLAUDE.md](CLAUDE.md) declares as Deploy-on-Merge Mode.
 - Maintainer: Stephen Anderson (@bendycode) merges. If a PR sits for more
   than a few days, nudge him.
 - **Announce guidance changes.** A substantive change to a `guidance/`

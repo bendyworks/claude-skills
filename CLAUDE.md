@@ -17,6 +17,10 @@ get. An installer running `/plugin marketplace update bendyworks` later is
 adoption, not a deploy step that could fail, so nothing stands between a merge
 and the change being live.
 
+The `checks.yml` workflow that runs on pushes to `main` is not a step in the
+way: it verifies what installers already have and cannot withhold a commit
+from them, so a red run there is a bug to fix, not a deploy that failed.
+
 ## Tracker
 
 GitHub Issues is this repo's tracker of record. Plan files, branches, and PRs

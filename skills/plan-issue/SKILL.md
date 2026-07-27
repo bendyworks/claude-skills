@@ -60,13 +60,28 @@ wording like:
 > is the production deploy, with no later step that could still fail or
 > be skipped.
 
-Recognize the declaration by meaning, not by exact string. A project
-that declares nothing is in the default, where merge and production
-deploy are distinct events and every gate below applies as written --
-never infer the mode from a project's shape (no version file,
-auto-merge enabled, a deploy workflow present). A silent inference is
-exactly how a real gate gets dropped, so an undeclared project stays in
-the default and is not prompted about the mode.
+Recognize the declaration by meaning rather than by exact string, but
+hold a floor: it must be an explicit statement of the fact, naming the
+mode or saying unambiguously that merging to the default branch is the
+deploy. Prose that merely *describes* how the project happens to work
+("we deploy on every merge", "merged means shipped") is a shape
+observation, not a declaration -- treat that project as undeclared and
+ask the user rather than deciding for them.
+
+A project that declares nothing is in the default, where merge and
+production deploy are distinct events and every gate below applies as
+written -- never infer the mode from a project's shape (no version
+file, auto-merge enabled, a deploy workflow present). A silent
+inference is exactly how a real gate gets dropped, so an undeclared
+project stays in the default and is not prompted about the mode.
+
+**Check for the declaration once, before drafting the ship tail in
+create Step 6**, and say which answer came back. The declaration may
+live in a rules file rather than an auto-loaded CLAUDE.md, so it is not
+safe to assume it would already be in front of you; and a session that
+half-remembers the mode from conversation rather than from the
+project's files is the one most likely to apply it where it does not
+hold.
 
 **Verify the premise before declaring the mode, or before recommending
 it.** The premise is that nothing after the merge can still fail or be
@@ -74,8 +89,13 @@ skipped. The mis-declaration to rule out by name: a merge that
 *triggers* an automatic deploy pipeline which can itself go red is
 **not** Deploy-on-Merge -- there is a gap and it can fail. Declaring the
 mode there fails silently, because the housekeeping pass would delete
-the branch and close the issue while the pipeline is red. Distinguish
-availability from adoption too: for a versionless package or plugin,
+the branch and close the issue while the pipeline is red.
+
+Two things that look like disqualifying steps but are not. A post-merge
+job that only *verifies* the merged commit -- a test or lint run that
+reports on what users already have and cannot withhold it from them --
+is not a deploy step, so it does not break the premise. And
+availability is not adoption: for a versionless package or plugin,
 merging makes the new code available and that is the whole deploy;
 downstream installers pulling it later is not a step that can fail.
 
@@ -94,8 +114,8 @@ authoritative answer per behavior instead of two that can disagree.
 - **Review, CI, and the draft-PR flow** are untouched; the mode says
   nothing about what has to be true *before* a merge.
 - **Existing plans need no rewriting.** A plan written before the
-  declaration keeps its confirm-shipped item, and the merge satisfies
-  it.
+  declaration keeps its confirm-shipped item; the housekeeping skill
+  (bundled in this plugin) owns what satisfies it.
 
 ## One canonical title; three artifacts share it by default
 
@@ -482,7 +502,9 @@ Draft a plan with:
    the "ship the work" steps -- runs in the order below, which exists
    for a wall-clock reason. Which items the tail carries varies (step 5
    is conditional, and step 6 is absent in Deploy-on-Merge Mode); their
-   relative order does not:
+   relative order does not. The numbers below index *this* list, not the
+   plan's to-dos: a tail that omits an item still numbers the plan's
+   to-dos consecutively, leaving no gap.
 
    1. Run the project's full lint+test suite once, capturing complete output to a uniquely-named log under /tmp to grep for follow-ups -- never re-run just to re-read output
       (use the project's suite-runner skill if it provides one; one
@@ -520,14 +542,24 @@ Draft a plan with:
       deploy; and a plain reference is NOT enough to prevent it when
       the branch came from `gh issue develop` -- a PR from a linked
       branch auto-closes the issue at merge with no keyword at all. A
-      team that wants the issue open past merge (done-at-deploy,
-      multi-PR epics) should disable the repo setting "Auto-close
-      issues with merged linked pull requests" (Settings > General >
-      Issues), or unlink the PR from the issue's Development section
-      before merging, and close the issue manually in the finish
-      phase. In Deploy-on-Merge Mode a single-PR issue wants the
-      opposite: auto-close at merge lands the issue in its terminal
-      state at exactly the right moment, so leave the setting on.
+      team that wants the issue open past merge (a project outside
+      Deploy-on-Merge Mode, or any multi-PR epic) should disable the
+      repo setting "Auto-close issues with merged linked pull
+      requests" (Settings > General > Issues), or unlink the PR from
+      the issue's Development section before merging, and close the
+      issue manually in the finish phase.
+
+      That setting is repo-wide, so it belongs to the team's
+      predominant issue shape rather than to any one issue; the
+      per-issue lever is unlinking. In Deploy-on-Merge Mode auto-close
+      lands a single-PR issue in its terminal state at close to the
+      right moment, which is why such a team usually leaves it on --
+      but name the tradeoff rather than treating it as free. It closes
+      the issue before the finish phase can STOP on unfinished work,
+      so a story with an outstanding to-do ends up closed with no
+      board signal; and it permanently spends one of the three signals
+      housekeeping uses to detect a half-run pass. A multi-PR epic on
+      such a team still needs unlinking, or its first merge closes it.
    4. Move the issue to PR Review; wait for human review and merge.
       In Targeted Spec Verification Mode, CI's full-suite run on the
       PR is the full gate: confirm it is green before marking the PR
@@ -560,8 +592,8 @@ Draft a plan with:
       **Omit this item entirely in Deploy-on-Merge Mode.** There the
       merge in step 4 is the deploy, so the item could never be
       independently true or false -- it would only restate the step
-      above it. The tail then ends at step 7, which still keeps the
-      post-ship work visibly pending.
+      above it. The tail then ends with the run-housekeeping item
+      below, which still keeps the post-ship work visibly pending.
    7. **Run finished-issue-housekeeping (finish phase,
       user-triggered).** The final ship-tail entry; use that wording
       verbatim. Newly-discovered work may append after it by number
@@ -666,15 +698,14 @@ toggleable view of progress (Ctrl-T) alongside the markdown plan file.
   one -- each is independently substantial and independently checkable.
 - The trailing ship-the-work steps are each their **own** task, not a single
   bundled one: the suite gate (full or targeted per the project's mode),
-  the gauntlet skill, open draft PR, move to PR Review, confirm shipped
-  (PR merged, live in production) unless the project is in Deploy-on-Merge
-  Mode, and run finished-issue-housekeeping
-  are separate tasks so the toggle view shows the whole arc and each
-  completes on its own. Mirror whatever tail the plan carries; do not add
-  a task the plan omits. The finish-tail tasks stay pending until the
-  user triggers the finish phase; the housekeeping pass completes
-  them itself, mirroring its plan-file flips via `TaskUpdate` before
-  its task-cleanup step deletes them. When the change is stakeholder-visible (a report,
+  the gauntlet skill, open draft PR, move to PR Review, and run
+  finished-issue-housekeeping are separate tasks so the toggle view shows
+  the whole arc and each completes on its own. Outside Deploy-on-Merge
+  Mode the confirm-shipped item is one too. Mirror whatever tail the plan
+  carries; do not add a task the plan omits. The finish-tail tasks stay
+  pending until the user triggers the finish phase; the housekeeping pass
+  completes whichever of them the plan carries, mirroring its plan-file
+  flips via `TaskUpdate` before its task-cleanup step deletes them. When the change is stakeholder-visible (a report,
   receipt, statement, mailer, or screen a client stakeholder relies on) and
   the project provides a change-highlights-style skill, add a further own
   task for the before/after summary and its communication to the
@@ -826,7 +857,7 @@ Walk through these checks (the housekeeping skill will re-verify, but
 catching a "no" here lets you exit early before invoking it):
 
 1. **PR is merged to main.** Verify with `gh pr view <PR#> --json state,mergedAt,mergeCommit` (or whichever forge the project uses).
-2. **The merged code is live in production.** In Deploy-on-Merge Mode, check 1 satisfies this one -- the merge *is* the deploy, so there is nothing further to verify. Otherwise it is a project-specific check:
+2. **The merged code is live in production.** In Deploy-on-Merge Mode -- once you have confirmed the premise still holds, that nothing after the merge can fail or be skipped -- check 1 satisfies this one, because the merge *is* the deploy. A project whose merge triggers a deploy that can go red does not qualify however its rules read. Otherwise it is a project-specific check:
    - Heroku-deployed apps: `heroku releases -a <prod-app>` and confirm a release after the merge commit.
    - Other deploy targets: ask the user, or look at the deploy log / dashboard.
    - When in doubt, ask the user to confirm rather than guess.
@@ -854,9 +885,10 @@ via the Skill tool. It will:
 - Add a Done entry to `MEMORY.md` and remove the issue from Active
   Work if it was there.
 - Move the tracker issue to its terminal Done state (on GitHub,
-  verify the auto-close or close manually -- the done-at-deploy
-  path's manual close happens here; in Deploy-on-Merge Mode the
-  auto-close at merge already did it, so this is a verification).
+  verify the auto-close or close manually -- outside Deploy-on-Merge
+  Mode the manual close happens here; in the mode the auto-close at
+  merge has usually already done it, so this is normally a
+  verification).
 - Ask whether anything is worth saving as a tech-note memory or
   a new skill, and create it if so.
 - Verify sibling-audit follow-ups got filed.
