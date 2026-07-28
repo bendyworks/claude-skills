@@ -77,22 +77,39 @@ If no plan file (skill invoked ad-hoc), skip this step.
 
 ## Step 3 -- Local branch deletion
 
+Resolve the default branch once and reuse it everywhere below -- this step and Step 3b both depend on it, and `main` is not always the answer:
+
 ```bash
-git checkout main          # or master / project's main branch
-git pull
-git branch -d <branch-name>
+DEFAULT=$(git symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null | sed 's|^origin/||')
+DEFAULT=${DEFAULT:-$(gh repo view --json defaultBranchRef -q '.defaultBranchRef.name')}
 ```
 
-**Use `-d`, NOT `-D`.** If `-d` refuses with "branch is not fully merged":
+If neither command yields a name, stop and ask rather than assuming `main`.
 
-- Most common cause: the PR was squash-merged or rebase-merged, so the branch's commits do not appear by SHA in `main`'s history. Establish that nothing on the branch is absent from `main` before forcing, using either proof in Step 3b below; a merged pull request on its own does not establish it, because the branch can carry commits made after its last push.
+Refresh remote-tracking state **before** deleting anything, so the checks below read current state rather than a remote ref that was deleted on the forge weeks ago:
+
+```bash
+git fetch --prune
+git checkout "$DEFAULT"
+git pull --ff-only
+```
+
+Then delete the branch, gating on evidence rather than on a command's refusal:
+
+```bash
+git merge-base --is-ancestor <branch-name> "origin/$DEFAULT" && git branch -d <branch-name>
+```
+
+**`-d` is not a safety net, and must not be used as one.** It refuses only when a branch is unmerged into HEAD *or its own upstream* -- so a fully-pushed branch whose work never reached the default branch deletes with exit 0 and nothing but a warning. Establish that nothing on the branch is absent from the default branch, using the ancestor check above or either proof in Step 3b, and use `-d` for the deletion itself.
+
+If the branch is not an ancestor:
+
+- Most common cause: the PR was squash-merged or rebase-merged, so the branch's commits do not appear by SHA in the default branch's history. Clear it with either proof in Step 3b before forcing with `-D`; a merged pull request on its own does not establish it, because the branch can carry commits made after its last push.
 - Less common: there is genuine unmerged work on the local branch that did not make it into the PR. **Stop and investigate before forcing.**
-
-`-d`'s refusal is the safety net for the second case. A silent `-D` would lose work.
 
 Do NOT delete the *remote* branch. GitHub's auto-delete-on-merge usually handles it, and external tooling (trackers, deploy logs, PR cross-references) may still link to the remote ref. If the user wants the remote gone, they will ask.
 
-If multiple local branches relate to the issue (parent + follow-up branches), delete each with `-d`.
+If multiple local branches relate to the issue (parent + follow-up branches), each one gets its own evidence check -- a follow-up branch is exactly the case where the work may not have landed.
 
 ## Step 3b -- Prune other stale local branches (repo-wide)
 
@@ -100,76 +117,85 @@ Shipping a story is a natural moment to sweep the whole local branch list, not j
 
 The bar for deleting a branch is evidence that **nothing on it is absent from the default branch**. A deleted remote ref is not that evidence: it is equally consistent with a merge, an abandoned pull request, a branch cleaned up by hand, or a rename. Two proofs below meet the bar, and either one alone is enough.
 
-First refresh remote-tracking state:
-
-```bash
-git fetch --prune
-```
+Step 3 already resolved `$DEFAULT` and ran `git fetch --prune`; reuse both. Every command below names `$DEFAULT` rather than a literal `main` -- a repo defaulting to `master`, `develop`, or `trunk` is common, and a repo where `main` still exists but is *not* the default (gitflow, a half-finished rename) makes a hardcoded `origin/main` measure against the wrong branch and clear work that never landed.
 
 ### Protected set -- never a candidate, whatever the passes below say
 
-- The current branch, and the default branch (`main`/`master`).
+- The current branch, and the default branch (`$DEFAULT`).
 - **Any branch checked out in another worktree** (`git worktree list --porcelain`). Both `-d` and `-D` refuse these outright, so leaving them in the candidate list only produces a mid-sweep error.
 - Intentional backup branches (names ending in `-backup`, or otherwise clearly a manual safety net). Mention them, but leave them unless the user names them explicitly.
 - Any branch the user has flagged as in-progress this session.
 
-Enumerate candidates with `git for-each-ref`:
+Enumerate candidates with `git for-each-ref`, and carry full refnames through:
 
 ```bash
-git for-each-ref --format='%(refname:short)' refs/heads/
+git for-each-ref --format='%(refname)' refs/heads/
 ```
+
+A tag sharing a branch's name makes `%(refname:short)` yield `heads/<name>` and makes a bare `git rev-parse <name>` resolve to the *tag*, not the branch -- so carry the full `refs/heads/<name>` ref, and derive the short name from it where a command needs one:
+
+```bash
+short="${ref#refs/heads/}"
+```
+
+Use the full ref for anything that resolves an object (`git rev-parse "$ref"`, `git merge-tree ... "$ref"`) and the short name for `git branch -d`/`-D` and `gh pr list --head`. **`git branch -d refs/heads/<name>` does not work** -- it reports `branch 'refs/heads/<name>' not found` and exits 1, so a sweep written the other way silently deletes nothing at all.
 
 Do **not** enumerate with `git branch -vv | grep ': gone]'`. That matches a branch whose upstream is a deleted *local* branch, and a branch whose *commit subject* merely contains the text -- both typically never-pushed work -- and it stays silent until someone runs `git fetch --prune`.
 
 ### Pass 1 -- already an ancestor of the default branch
 
 ```bash
-git branch --merged origin/main --format='%(refname:short)'
+git branch --merged "origin/$DEFAULT" --format='%(refname)'
 ```
 
-Delete each with `git branch -d <branch>`, minus the protected set. `-d` succeeds here because the commits are reachable from `origin/main`. Its refusal is a live safety net -- never escalate a Pass 1 refusal to `-D`.
+Delete each with `git branch -d "$short"`, minus the protected set.
 
-### Pass 2 -- everything else
+`-d` can still refuse one of these, and the refusal does not mean the work is at risk: `-d` measures against HEAD or the branch's own upstream, never against `origin/$DEFAULT`. A local default branch sitting behind the freshly-fetched remote is the usual cause, which is why Step 3 runs `git pull --ff-only` first. If a Pass 1 branch is refused anyway, it is already proven an ancestor by the enumeration above, so delete it with `git branch -D "$short"` -- the proof, not the tool's opinion, is what authorizes it.
+
+### Pass 2 -- candidates Pass 1 did not list
 
 A squash or rebase merge leaves the branch tip a non-ancestor of the default branch, so `-d` refuses even though the work landed. Use `git branch -D` only where **either** proof below holds; otherwise keep the branch and report why.
 
 **Proof (a) -- the content is already in the default branch.** Local, offline, and immune to squash and rebase merges:
 
 ```bash
-tree=$(git merge-tree --write-tree origin/main "$branch") || tree=CONFLICT
-[ "$tree" = "$(git rev-parse origin/main^{tree})" ] && echo "nothing at risk"
+tree=$(git merge-tree --write-tree "origin/$DEFAULT" "$ref") || tree=CONFLICT
+[ "$tree" = "$(git rev-parse "origin/$DEFAULT^{tree}")" ] && echo "nothing at risk"
 ```
 
 If merging the branch into the default branch would produce the default branch's own tree, the branch adds nothing. This mode arrived in git 2.38; below that, skip proof (a) and rely on proof (b).
 
-`git merge-tree` **exits non-zero on conflict while still printing a tree object id**, so the exit status has to gate the comparison -- git's own documentation wraps it in `$(...) || { ... }` for exactly this reason. A bare assignment compares a conflicted tree and reports a false "nothing at risk".
+**Quote `"origin/$DEFAULT^{tree}"`.** Unquoted, zsh with `extendedglob` set (common, and the default in some shell frameworks) treats it as a glob, fails with `no matches found`, and yields an empty substitution -- the comparison is then false for every branch, so proof (a) silently clears nothing and there is no error a session would notice.
+
+`git merge-tree` **exits non-zero on conflict**, so the exit status gates the comparison -- git's own documentation wraps it in `$(...) || { ... }` for exactly this reason. Without the guard the failure is silent rather than dangerous: on conflict the command prints the tree id *plus* the conflicted stages, so the captured value is multi-line and simply never matches. Keep the guard anyway, both to say what happened and because any variant that trims the output to its first line would turn that safe mismatch into a false "nothing at risk".
 
 A conflict is not evidence of anything. It usually means the default branch later edited the same lines. It means only that proof (a) cannot clear this branch, so fall through to proof (b).
 
-**Proof (b) -- the forge merged this exact tip into the default branch.** One query covers every branch:
+**Proof (b) -- the forge merged this exact tip into the default branch.** Query per branch, not once for the repo:
 
 ```bash
-gh pr list --state all --limit 200 \
-  --json number,state,headRefName,headRefOid,baseRefName,mergedAt,isCrossRepository
+gh pr list --head "${ref#refs/heads/}" --state all --limit 100 \
+  --json number,state,headRefOid,baseRefName,mergedAt,isCrossRepository
 ```
 
-A branch clears proof (b) when the results carry a pull request whose `headRefName` is that branch and where **all** of the following hold:
+A branch clears proof (b) when its results carry a pull request where **all** of the following hold:
 
 - `state` is `MERGED`;
-- `baseRefName` is the repo's default branch (`gh repo view --json defaultBranchRef`), so a merge into some *other* feature branch never counts -- a stacked child branch merged into its parent has not reached the default branch;
+- `baseRefName` is `$DEFAULT`, so a merge into some *other* feature branch never counts -- a stacked child branch merged into its parent has not reached the default branch;
 - `isCrossRepository` is `false`;
-- `headRefOid` is **string-equal** to `git rev-parse <branch>`;
+- `headRefOid` is **string-equal** to `git rev-parse "$ref"`;
 
-and where **no** pull request for that branch name is `OPEN`.
+and where **no** pull request for that branch is `OPEN`.
 
-Four traps in that query:
+Query per branch rather than fetching the repo's pull requests in one call. A single bulk call has to be bounded by `--limit`, and `gh` returns the most *recently created* pull requests -- so the ones that fall off the end are the oldest, which is precisely the population a stale-branch sweep is about. A truncated merged pull request reads as "no pull request at all", and the report would then state that as fact. Scoped to one branch the result cannot meaningfully truncate, and the OPEN check reads from the same result set.
 
-- `--limit` defaults to 30 and truncates silently; a truncated merged pull request reads as "no pull request at all".
+Three traps in that query:
+
 - `--head` matches on branch *name* only and cannot be scoped to an owner (the `<owner>:<branch>` form returns `[]` rather than an error), so pull requests from forks share the result set with yours. That is what `isCrossRepository` filters out.
 - **Never resolve `headRefOid` as a git object.** On a squash-merge repo it is routinely absent from an ordinary clone. Compare the two strings and nothing more: `git rev-parse --verify <40-hex>` exits 0 on an object that does not exist, so it cannot screen for presence, and `git merge-base --is-ancestor` exits 128 on an absent commit, which an `if` reads as a plain "no".
 - In a clone of a fork carrying an `upstream` remote, `gh` queries the *parent* repo. A team running its own pull requests inside a fork gets no matches; name the repo explicitly with `--repo` there.
 
-**A failed query is not an answer.** `gh` missing, unauthenticated, offline, rate-limited, or pointed at a non-GitHub remote all exit non-zero, whereas a genuine no-match is `[]` with exit 0. On a non-zero exit, proof (b) is unavailable for every branch: say so, keep everything proof (a) could not clear, and never substitute a weaker signal.
+**A failed query is not an answer.** `gh` missing, unauthenticated, offline, rate-limited, or pointed at a non-GitHub remote all exit non-zero, whereas a genuine no-match is `[]` with exit 0. Never let a non-zero exit collapse into the "no pull request" reading: that reading is what the report states as fact. On the first failure, treat proof (b) as unavailable for the whole sweep rather than retrying per branch -- these causes are all repo-wide, not branch-specific -- say so plainly, keep everything proof (a) could not clear, and never substitute a weaker signal.
 
 ### Report
 
