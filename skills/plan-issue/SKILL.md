@@ -567,7 +567,12 @@ Draft a plan with:
       board signal; and it permanently spends one of the three signals
       housekeeping uses to detect a half-run pass. A multi-PR epic on
       such a team still needs unlinking, or its first merge closes it.
-   4. Move the issue to PR Review; wait for human review and merge.
+   4. Move the issue to PR Review, then hand off: the review and the
+      merge are both the human's. Say plainly what the PR is waiting
+      on rather than offering to merge it, and do not arm auto-merge
+      -- the pull-requests guidance, where the team imports it, owns
+      that rule and the narrow declaration that opts a project out of
+      it.
       In Targeted Spec Verification Mode, CI's full-suite run on the
       PR is the full gate: confirm it is green before marking the PR
       ready for review or moving the issue, and own a red run exactly

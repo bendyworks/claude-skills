@@ -42,6 +42,22 @@ deploy_command: ~
 # known-flakes.md: free-form fingerprint entries (see Flake-registry upkeep).
 ```
 
+**The merge dials are an opt-in, and they are the reason this skill may
+merge at all.** Merging to the default branch is otherwise a human action
+(the pull-requests guidance, where a team imports it, carries that rule and
+the project-wide declaration that lifts it). Setting
+`merge_dev_only_with_green_ci` or `merge_runtime_bumps` to `auto` in a
+checked-in `dependabot-autonomy.yml` is a narrower opt-in of the same shape:
+explicit, committed where every teammate reads it, and scoped to bot pull
+requests that clear the hard-veto list below. Never infer it -- an absent
+file means `ask`, which is why the missing-config rule above is written the
+way it is.
+
+`deploy_after_batch` authorizes something larger and is deliberately left
+alone here; whether one dial should stand between a green batch and
+production is open in
+[#83](https://github.com/bendyworks/claude-skills/issues/83).
+
 ## Hard veto (policy, not a dial)
 
 These categories **always** downgrade to "ask" regardless of dials or
