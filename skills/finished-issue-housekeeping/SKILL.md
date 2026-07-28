@@ -85,7 +85,7 @@ git branch -d <branch-name>
 
 **Use `-d`, NOT `-D`.** If `-d` refuses with "branch is not fully merged":
 
-- Most common cause: the PR was squash-merged or rebase-merged, so the branch's commits do not appear by SHA in `main`'s history. Confirm via the merge commit on the forge (`gh pr view <PR#> --json mergeCommit`); if confirmed, `-D` is safe.
+- Most common cause: the PR was squash-merged or rebase-merged, so the branch's commits do not appear by SHA in `main`'s history. Establish that nothing on the branch is absent from `main` before forcing, using either proof in Step 3b below; a merged pull request on its own does not establish it, because the branch can carry commits made after its last push.
 - Less common: there is genuine unmerged work on the local branch that did not make it into the PR. **Stop and investigate before forcing.**
 
 `-d`'s refusal is the safety net for the second case. A silent `-D` would lose work.
@@ -96,49 +96,97 @@ If multiple local branches relate to the issue (parent + follow-up branches), de
 
 ## Step 3b -- Prune other stale local branches (repo-wide)
 
-Shipping a story is a natural moment to sweep the whole local branch list, not just this story's branch. Stale local branches from long-finished work pile up and make `git branch` noise. Do a repo-wide prune of branches whose work has clearly landed.
+Shipping a story is a natural moment to sweep the whole local branch list, not just this story's branch. Stale local branches from long-finished work pile up and make `git branch` noise. Prune the branches whose work has demonstrably landed; keep everything else.
 
-First refresh remote-tracking state so the "upstream gone" signal is accurate:
+The bar for deleting a branch is evidence that **nothing on it is absent from the default branch**. A deleted remote ref is not that evidence: it is equally consistent with a merge, an abandoned pull request, a branch cleaned up by hand, or a rename. Two proofs below meet the bar, and either one alone is enough.
+
+First refresh remote-tracking state:
 
 ```bash
 git fetch --prune
 ```
 
-Then classify every local branch (except the current branch and `main`/`master`) into tiers. **Delete the safe tiers; surface the judgment calls; never touch the protected set.**
+### Protected set -- never a candidate, whatever the passes below say
 
-**Tier 1 -- merged into main (safe, `-d`).** Branches whose commits are ancestors of `origin/main`:
-
-```bash
-git branch --merged origin/main | grep -vE '^[* ]*(main|master)$'
-```
-
-Delete each with `git branch -d <branch>` (it will succeed because they are merged).
-
-**Tier 2 -- upstream gone (merged via squash/rebase, then auto-deleted on the forge).** Branches whose remote-tracking ref was deleted:
-
-```bash
-git branch -vv | grep ': gone]'
-```
-
-On a team that auto-deletes the remote branch on merge, a gone upstream is a reliable "this PR merged" signal. These were pushed at some point (they once tracked a remote), so there is no unpushed local-only work at risk, and reflog recovers anything for ~90 days. Delete with `git branch -D <branch>` (squash/rebase merges leave the tip non-ancestor of main, so `-d` refuses). **Exclude the protected set below before deleting.**
-
-**Tier 3 -- no deleted upstream, not merged.** For each remaining branch, check the forge for its PR:
-
-```bash
-gh pr list --head <branch> --state all --json number,state -q '.[0] | "\(.number) \(.state)"'
-```
-
-- **PR MERGED** -> work is in main; safe to delete with `-D`.
-- **PR OPEN** -> keep. Mention it (and how stale it is) so the user can decide whether to abandon it.
-- **No PR / local-only / recently active** -> **do not auto-delete.** Surface it with its age, commits-ahead-of-main, and your read, and let the user decide. Recent un-PR'd branches are often unfinished follow-up work.
-
-**Protected set -- never auto-delete, even if a tier would otherwise catch them:**
-
-- The current branch and `main`/`master`.
+- The current branch, and the default branch (`main`/`master`).
+- **Any branch checked out in another worktree** (`git worktree list --porcelain`). Both `-d` and `-D` refuse these outright, so leaving them in the candidate list only produces a mid-sweep error.
 - Intentional backup branches (names ending in `-backup`, or otherwise clearly a manual safety net). Mention them, but leave them unless the user names them explicitly.
 - Any branch the user has flagged as in-progress this session.
 
-Report the prune as a small table: how many deleted (by tier) and the surviving judgment-call branches with one-line reads. The user makes the final call on Tier 3 keepers and the protected set -- do not delete those without an explicit instruction.
+Enumerate candidates with `git for-each-ref`:
+
+```bash
+git for-each-ref --format='%(refname:short)' refs/heads/
+```
+
+Do **not** enumerate with `git branch -vv | grep ': gone]'`. That matches a branch whose upstream is a deleted *local* branch, and a branch whose *commit subject* merely contains the text -- both typically never-pushed work -- and it stays silent until someone runs `git fetch --prune`.
+
+### Pass 1 -- already an ancestor of the default branch
+
+```bash
+git branch --merged origin/main --format='%(refname:short)'
+```
+
+Delete each with `git branch -d <branch>`, minus the protected set. `-d` succeeds here because the commits are reachable from `origin/main`. Its refusal is a live safety net -- never escalate a Pass 1 refusal to `-D`.
+
+### Pass 2 -- everything else
+
+A squash or rebase merge leaves the branch tip a non-ancestor of the default branch, so `-d` refuses even though the work landed. Use `git branch -D` only where **either** proof below holds; otherwise keep the branch and report why.
+
+**Proof (a) -- the content is already in the default branch.** Local, offline, and immune to squash and rebase merges:
+
+```bash
+tree=$(git merge-tree --write-tree origin/main "$branch") || tree=CONFLICT
+[ "$tree" = "$(git rev-parse origin/main^{tree})" ] && echo "nothing at risk"
+```
+
+If merging the branch into the default branch would produce the default branch's own tree, the branch adds nothing. This mode arrived in git 2.38; below that, skip proof (a) and rely on proof (b).
+
+`git merge-tree` **exits non-zero on conflict while still printing a tree object id**, so the exit status has to gate the comparison -- git's own documentation wraps it in `$(...) || { ... }` for exactly this reason. A bare assignment compares a conflicted tree and reports a false "nothing at risk".
+
+A conflict is not evidence of anything. It usually means the default branch later edited the same lines. It means only that proof (a) cannot clear this branch, so fall through to proof (b).
+
+**Proof (b) -- the forge merged this exact tip into the default branch.** One query covers every branch:
+
+```bash
+gh pr list --state all --limit 200 \
+  --json number,state,headRefName,headRefOid,baseRefName,mergedAt,isCrossRepository
+```
+
+A branch clears proof (b) when the results carry a pull request whose `headRefName` is that branch and where **all** of the following hold:
+
+- `state` is `MERGED`;
+- `baseRefName` is the repo's default branch (`gh repo view --json defaultBranchRef`), so a merge into some *other* feature branch never counts -- a stacked child branch merged into its parent has not reached the default branch;
+- `isCrossRepository` is `false`;
+- `headRefOid` is **string-equal** to `git rev-parse <branch>`;
+
+and where **no** pull request for that branch name is `OPEN`.
+
+Four traps in that query:
+
+- `--limit` defaults to 30 and truncates silently; a truncated merged pull request reads as "no pull request at all".
+- `--head` matches on branch *name* only and cannot be scoped to an owner (the `<owner>:<branch>` form returns `[]` rather than an error), so pull requests from forks share the result set with yours. That is what `isCrossRepository` filters out.
+- **Never resolve `headRefOid` as a git object.** On a squash-merge repo it is routinely absent from an ordinary clone. Compare the two strings and nothing more: `git rev-parse --verify <40-hex>` exits 0 on an object that does not exist, so it cannot screen for presence, and `git merge-base --is-ancestor` exits 128 on an absent commit, which an `if` reads as a plain "no".
+- In a clone of a fork carrying an `upstream` remote, `gh` queries the *parent* repo. A team running its own pull requests inside a fork gets no matches; name the repo explicitly with `--repo` there.
+
+**A failed query is not an answer.** `gh` missing, unauthenticated, offline, rate-limited, or pointed at a non-GitHub remote all exit non-zero, whereas a genuine no-match is `[]` with exit 0. On a non-zero exit, proof (b) is unavailable for every branch: say so, keep everything proof (a) could not clear, and never substitute a weaker signal.
+
+### Report
+
+Report the sweep as a small table -- branch, outcome, and the reason -- because the keepers need different follow-up from each other:
+
+| branch | outcome | reason |
+|---|---|---|
+| `old-feature` | deleted | content already in `main` |
+| `squashed-thing` | deleted | pull request #41 merged this tip |
+| `half-done` | kept | commits not in `main`, no pull request |
+| `awaiting-review` | kept | pull request #52 still open |
+| `abandoned-spike` | kept | pull request #48 closed unmerged |
+| `local-tweaks` | kept | tip differs from the tip the forge recorded |
+
+Word that last reason as what is actually known. A tip that differs from `headRefOid` may be ahead of it, behind it, or diverged, and only the first is unpushed work -- claiming "commits made after the last push" is wrong for a branch that is merely behind.
+
+The user makes the final call on every keeper and on the protected set; do not delete those without an explicit instruction.
 
 ## Step 4 -- Update auto-memory
 
