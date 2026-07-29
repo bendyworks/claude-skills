@@ -17,6 +17,11 @@ get. An installer running `/plugin marketplace update bendyworks` later is
 adoption, not a deploy step that could fail, so nothing stands between a merge
 and the change being live.
 
+Merging here is the maintainer's, not a session's: this project declares no
+Session-Merge Mode, so a session prepares a PR and hands it off. That matters
+more here than on most repos, because the merge it would be claiming is the
+production deploy above.
+
 The `checks.yml` workflow that runs on pushes to `main` is not a step in the
 way: it verifies what installers already have and cannot withhold a commit
 from them, so a red run there is a bug to fix, not a deploy that failed.

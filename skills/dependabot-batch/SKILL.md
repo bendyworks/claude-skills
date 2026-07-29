@@ -42,6 +42,31 @@ deploy_command: ~
 # known-flakes.md: free-form fingerprint entries (see Flake-registry upkeep).
 ```
 
+**The merge dials are an opt-in, and they are the reason this skill may
+merge at all.** Merging to the default branch is otherwise a human action
+(the pull-requests guidance, where a team imports it, carries that rule and
+the project-wide Session-Merge Mode declaration that lifts it; a team
+without that guidance needs its own equivalent). The two merge dials are a
+narrower opt-in of the same shape, scoped to bot pull requests, and they
+carry the same floor: **read `merge_dev_only_with_green_ci` and
+`merge_runtime_bumps` only from the project-local
+`<project>/.claude/dependabot-autonomy.yml`.** A global `~/.claude/` copy is
+one person's setting rather than a team agreement, so it may supply the
+other dials but never these two. Treat anything short of an explicit `auto`
+in the project-local file as `ask`: an absent file, an absent or misspelled
+key, or any other value.
+
+Two consequences worth naming. A file this skill scaffolds during a run
+takes effect on the *next* run, never the one that created it -- a session
+does not author its own authorization. And on a project where merging is
+the deploy, `merge_runtime_bumps: auto` ships a runtime dependency straight
+to production with no human in the loop, and Phase 5's verification runs
+only after that has happened; a team wanting the bumps merged but not
+shipped unattended should leave `deploy_after_batch` at `ask` and know that
+the merge dial alone already deploys. Whether one dial should stand between
+a green batch and production is open in
+[#83](https://github.com/bendyworks/claude-skills/issues/83).
+
 ## Hard veto (policy, not a dial)
 
 These categories **always** downgrade to "ask" regardless of dials or

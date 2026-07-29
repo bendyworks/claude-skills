@@ -37,7 +37,7 @@ To pick up updates later:
 | `architecture-survey` | Identify the biggest improvement opportunities in your application - prioritizing the largest and most daunting pain points you've been paying a large maintenance tax on already. Domain-first architectural-simplification survey of a mature codebase, producing a ranked, tracker-ready refactoring backlog. Can create an epic of fixes in your story tracker of choice. |
 | `markdown-to-pdf` | Convert Markdown files to clean, print-styled PDFs. |
 | `linear` | Read and write Linear issues via a bundled CLI (create, comment, search, transition) instead of raw GraphQL. Requires Ruby and a `LINEAR_API_TOKEN` env var. |
-| `dependabot-batch` | Triage, verify, merge, and deploy a batch of open Dependabot PRs with tuneable autonomy. |
+| `dependabot-batch` | Triage, verify, and (behind opt-in dials) merge and deploy a batch of open Dependabot PRs. |
 | `bug-cluster-ledger` | Mine a time window of tracker issues and cluster them upward to root causes per subsystem, with prevention analysis. Used by architecture-survey. |
 | `app-wind-down` | Wind down a hosted app safely and reversibly: caretaker mode first, then hibernation to ~$0 with full restore assets. |
 | `targeted-specs` | Run just the specs a feature branch plausibly affects instead of the full local suite, leaning on CI for the full run. Escalates to "this branch needs a full run" when blast-radius files are touched, announces the subset for your veto, and never subsets lint. Rails/RSpec-first. |

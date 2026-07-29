@@ -3,7 +3,7 @@
 #
 # For contributors who also keep un-namespaced local copies of these
 # skills (instead of installing the plugin). The repo is the source of
-# truth: edit skills HERE, merge, then sync outward. A local edit that
+# truth: edit skills HERE, land the change on the default branch, then
 # never lands in the repo is drift -- the only remedy this script offers
 # is showing you the diff so you can move the edit into the repo.
 #

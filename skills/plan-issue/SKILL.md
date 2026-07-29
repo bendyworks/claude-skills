@@ -567,7 +567,21 @@ Draft a plan with:
       board signal; and it permanently spends one of the three signals
       housekeeping uses to detect a half-run pass. A multi-PR epic on
       such a team still needs unlinking, or its first merge closes it.
-   4. Move the issue to PR Review; wait for human review and merge.
+   4. Hand the PR off for review and merge, then move the issue to PR
+      Review. The hand-off happens on every tracker, including the
+      ones where the state move below is a no-op: say plainly what the
+      PR is waiting on rather than offering to merge it.
+
+      **Who merges depends on a declaration, so establish it from the
+      project's checked-in files here and say which answer came back.**
+      By default the merge and the review are both the human's, and
+      arming auto-merge is merging -- the pull-requests guidance, where
+      the team imports it, owns that rule. A project that has declared
+      Session-Merge Mode has authorized the merge itself; recognize
+      only an explicit declaration and never infer it from the repo's
+      shape, exactly as with Deploy-on-Merge Mode above. On a project
+      that declares both, merging is deploying, which is the larger
+      claim of the two.
       In Targeted Spec Verification Mode, CI's full-suite run on the
       PR is the full gate: confirm it is green before marking the PR
       ready for review or moving the issue, and own a red run exactly
@@ -597,8 +611,9 @@ Draft a plan with:
       deploy checks just for the checkbox.
 
       **Omit this item entirely in Deploy-on-Merge Mode.** There the
-      merge in step 4 is the deploy, so the item could never be
-      independently true or false -- it would only restate step 4. The tail then ends with the run-housekeeping item
+      merge that step 4 hands off is the deploy, so the item could
+      never be independently true or false -- it would only restate
+      step 4. The tail then ends with the run-housekeeping item
       below, which still keeps the post-ship work visibly pending.
    7. **Run finished-issue-housekeeping (finish phase,
       user-triggered).** The final ship-tail entry; use that wording
