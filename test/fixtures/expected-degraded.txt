@@ -1,0 +1,67 @@
+# Expected verdicts for the flat fixture, as the sweep should report them
+# when pull-request lookups are unavailable -- no GitHub CLI, not
+# authenticated, offline, or a remote that is not GitHub at all.
+#
+# One row per local branch. Columns are whitespace-separated: the branch
+# name, the verdict, the reason key the report must carry, and free prose
+# saying why the row exists.
+#
+# The reason keys, and the order the sweep decides them in. The prefix
+# names the stage that reached the verdict, which is what makes a row's
+# assertion say more than "this branch survived":
+#
+#   protected:default      the repository's default branch
+#   protected:current      the branch HEAD is on
+#   protected:worktree     checked out in another worktree
+#   protected:long-lived   a name teams keep: develop, staging,
+#                          production, gh-pages, main, master, release/*
+#   protected:backup       a name ending in -backup
+#   pass1:ancestor         already an ancestor of the default branch
+#   proof-a:content-landed merging it into the default branch would
+#                          produce the default branch's own tree
+#   proof-a:conflict       that merge conflicts, so the check cannot say
+#                          either way, and nothing offline can clear it
+#   kept:not-landed        the merge runs cleanly and produces a
+#                          different tree, so the branch definitely adds
+#                          something the default branch does not have
+#
+# proof-a:conflict and kept:not-landed both end in a keep, and the
+# difference between them is the point: the first is an unanswered
+# question, the second is a positive local fact. Only b-main-edited and
+# j-two-merged conflict, and they are exactly the two rows a merged pull
+# request would clear -- so they are the two that change verdict once the
+# forge can be reached.
+#
+# No row's reason may read "no pull request". Nothing here consulted a
+# forge, and reporting an absence that was never checked is the specific
+# mistake this fixture exists to catch.
+#
+# q-open-but-landed is DELETE here and must become KEEP once open pull
+# requests are consulted. That flip is the whole reason the branch exists;
+# see the full-forge oracle.
+#
+# branch                 verdict  reason                  why
+main                     KEEP     protected:default       the default branch, and where HEAD sits
+develop                  KEEP     protected:long-lived    an ancestor; only the name saves it
+staging                  KEEP     protected:long-lived    an ancestor; only the name saves it
+production               KEEP     protected:long-lived    an ancestor; only the name saves it
+gh-pages                 KEEP     protected:long-lived    an ancestor; only the name saves it
+r-spike-backup           KEEP     protected:backup        an ancestor; only the -backup suffix saves it
+n-worktree               KEEP     protected:worktree      an ancestor, and checked out elsewhere
+p1-ancestor              DELETE   pass1:ancestor          merged with a real merge commit
+a-squash-clean           DELETE   proof-a:content-landed  squash-merged; the default branch later moved on
+c-merged-main-back       DELETE   proof-a:content-landed  squash-merged, then the default branch merged back in
+q-open-but-landed        DELETE   proof-a:content-landed  landed by another pull request; its own is still open
+b-main-edited            KEEP     proof-a:conflict        squash-merged, then the same lines were edited
+j-two-merged             KEEP     proof-a:conflict        squash-merged, then the same lines were edited
+d-unpushed               KEEP     kept:not-landed         carries a commit made after the last push
+e-parent                 KEEP     kept:not-landed         never merged anywhere
+e-stacked-child          KEEP     kept:not-landed         merged into its parent, not the default branch
+f-closed                 KEEP     kept:not-landed         work never landed
+g-open                   KEEP     kept:not-landed         work never landed
+h-no-pr                  KEEP     kept:not-landed         work never landed
+i-cross-fork             KEEP     kept:not-landed         work never landed
+k-merged-and-open        KEEP     kept:not-landed         work never landed
+l-tracks-deleted-local   KEEP     kept:not-landed         never pushed; upstream was a deleted local branch
+m-gone-in-subject        KEEP     kept:not-landed         never pushed; the marker text is in its commit subject
+s-tag-shadow             KEEP     kept:not-landed         work never landed; a tag of the same name points at the default branch

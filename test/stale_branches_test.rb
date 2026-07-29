@@ -124,6 +124,59 @@ class OracleTestCase < CliTestCase
   end
 end
 
+class FlatFixtureOracleTest < OracleTestCase
+  ORACLE = File.expand_path('fixtures/expected-degraded.txt', __dir__)
+
+  # The oracle and the fixture drift apart silently otherwise: a branch
+  # the table forgets is never asserted on, and a branch the table invents
+  # reads as "missing from the report", which blames the sweep for the
+  # table's mistake. This one needs no CLI, so it stays green while the
+  # rest of the file is red.
+  def test_the_oracle_lists_exactly_the_branches_the_fixture_builds
+    Dir.mktmpdir('stale-branches-coverage') do |dir|
+      repo = Fixtures::BranchRepo.new(File.join(dir, 'flat')).build
+      built = repo.local_refs.map { |ref| ref.sub('refs/heads/', '') }.sort
+      listed = Oracle.load(ORACLE).map(&:branch).sort
+      assert_equal built, listed, 'the oracle table and the fixture disagree about which branches exist'
+    end
+  end
+
+  def test_report_matches_the_oracle_with_no_forge_available
+    Dir.mktmpdir('stale-branches-flat') do |dir|
+      repo = Fixtures::BranchRepo.new(File.join(dir, 'flat')).build
+      result = sweep(repo)
+      assert_matches_oracle(Oracle.load(ORACLE), result)
+      refute_git_complaints(result)
+    end
+  end
+
+  # Standing on a branch must protect it, whatever the evidence says.
+  # a-squash-clean is otherwise deleted by the content check, so it is the
+  # branch that tells current-branch protection from no protection at all.
+  def test_the_checked_out_branch_is_protected_even_when_deletable
+    Dir.mktmpdir('stale-branches-head') do |dir|
+      repo = Fixtures::BranchRepo.new(File.join(dir, 'flat')).build
+      repo.checkout('a-squash-clean')
+      row = sweep(repo).rows.find { |candidate| candidate.branch == 'a-squash-clean' }
+      refute_nil row, 'the checked-out branch is missing from the report'
+      assert_equal 'KEEP', row.verdict
+      assert_equal 'protected:current', row.reason
+    end
+  end
+
+  # With HEAD detached there is no current branch to protect, and the
+  # sweep must not mistake the empty answer for a branch named "HEAD".
+  def test_a_detached_head_leaves_every_other_verdict_unchanged
+    Dir.mktmpdir('stale-branches-detached') do |dir|
+      repo = Fixtures::BranchRepo.new(File.join(dir, 'flat')).build
+      repo.detach_head
+      result = sweep(repo)
+      refute_includes result.rows.map(&:branch), 'HEAD', 'a detached HEAD was reported as a branch'
+      assert_matches_oracle(Oracle.load(ORACLE), result)
+    end
+  end
+end
+
 class GitflowOracleTest < OracleTestCase
   ORACLE = File.expand_path('fixtures/gitflow-expected-degraded.txt', __dir__)
 
