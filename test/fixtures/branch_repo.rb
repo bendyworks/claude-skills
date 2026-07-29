@@ -4,6 +4,11 @@
 # stale-branch decision table, so the sweep's verdicts can be graded
 # against a known oracle rather than against reasoning about git.
 #
+# Every branch name in this file belongs to that throwaway repo, which is
+# created under a temporary directory and deleted when the test ends. None
+# of them is a branch of the repository this file is checked into, and
+# nothing here reads or writes it.
+#
 # This file lives under test/fixtures/ rather than test/ so CI's
 # test/*_test.rb glob does not run it as a suite of its own; it defines
 # no tests.
@@ -58,9 +63,32 @@ module Fixtures
       k-merged-and-open
     ].freeze
 
+    # Pushed to the throwaway repo's remote and left in place, matching the
+    # canned forge data that gives this branch a still-open pull request.
+    # There is no real pull request anywhere; the sweep's forge lookups are
+    # answered by a stub.
+    PUSHED_AND_KEPT = %w[q-open-but-landed].freeze
+
     # Branches carrying content that never reached the default branch,
     # distinguished from each other only by their pull-request history.
     CONTENT_NEVER_LANDED = %w[f-closed g-open h-no-pr i-cross-fork k-merged-and-open].freeze
+
+    # Stand-ins for the long-lived branches a team keeps regardless of what
+    # any signal says. Each is built as a plain ancestor of the throwaway
+    # repo's default branch, so the cheap first pass lists every one of
+    # them and only the protected set stands between them and deletion.
+    LONG_LIVED = %w[develop staging production gh-pages].freeze
+
+    # Stands in for a manual safety net, protected by its name alone. Also
+    # an ancestor, for the same reason as the branches above.
+    BACKUP = 'r-spike-backup'
+
+    # A branch sharing its name with a tag that points at the throwaway
+    # repo's default branch, so a bare-name lookup resolves to the tag and
+    # reports the branch as holding nothing. The branch's own work has not
+    # landed, which makes the mistake a wrongful deletion rather than a
+    # wrongful keep.
+    TAG_SHADOWED = 's-tag-shadow'
 
     attr_reader :root, :work, :origin
 
@@ -82,6 +110,9 @@ module Fixtures
       build_stacked_pair
       build_unlanded_branches
       build_two_merged_branch
+      build_open_but_landed
+      build_protected_lookalikes
+      build_tag_shadowed_branch
       publish_and_delete_remote_branches
       build_gone_lookalikes
       build_worktree_branch
@@ -93,6 +124,19 @@ module Fixtures
     # Full refnames, the form the sweep is specified to enumerate.
     def local_refs
       git('for-each-ref', '--format=%(refname)', 'refs/heads/').lines.map(&:strip)
+    end
+
+    # Moves HEAD, for the arms that ask what the sweep does when the
+    # developer is standing somewhere other than the default branch.
+    def checkout(branch)
+      git('checkout', '-q', branch)
+    end
+
+    # Detaches HEAD, where the current branch is the empty string rather
+    # than a name. `git symbolic-ref -q --short HEAD` exits non-zero here
+    # while `rev-parse --abbrev-ref HEAD` cheerfully prints "HEAD".
+    def detach_head
+      git('checkout', '-q', '--detach')
     end
 
     def git(*args, dir: work)
@@ -235,10 +279,41 @@ module Fixtures
       git('commit', '-qam', "main edits j's lines")
     end
 
+    # Content already in the default branch by another route, with its own
+    # pull request still open. This is the row that decides whether open
+    # pull requests are consulted at all: every other branch carrying an
+    # open pull request also fails the content comparison, so a sweep that
+    # deletes whatever that comparison clears -- never asking the forge --
+    # gets every one of them right by accident, and only this branch
+    # catches it.
+    def build_open_but_landed
+      git('checkout', '-q', 'main')
+      git('checkout', '-qb', 'q-open-but-landed')
+      commit('q.txt', 'q', 'q work')
+      squash_into_main('q-open-but-landed', 'squash q via another pull request')
+    end
+
+    # Branches whose only defense is the protected set. Each is a plain
+    # ancestor of the default branch and so appears in the first pass's
+    # own output, which is what makes the protection load-bearing rather
+    # than decorative.
+    def build_protected_lookalikes
+      git('checkout', '-q', 'main')
+      (LONG_LIVED + [BACKUP]).each { |branch| git('branch', '-q', branch) }
+    end
+
+    def build_tag_shadowed_branch
+      git('checkout', '-q', 'main')
+      git('checkout', '-qb', TAG_SHADOWED)
+      commit('s.txt', 's', 's work that never landed')
+      git('checkout', '-q', 'main')
+      git('tag', TAG_SHADOWED, git('rev-parse', 'main').strip)
+    end
+
     def publish_and_delete_remote_branches
       git('checkout', '-q', 'main')
       git('push', '-q', 'origin', 'main')
-      PUSHED_THEN_DELETED.each do |branch|
+      (PUSHED_THEN_DELETED + PUSHED_AND_KEPT).each do |branch|
         git('push', '-q', 'origin', "#{branch}:#{branch}")
         git('branch', '-q', "--set-upstream-to=origin/#{branch}", branch)
       end
