@@ -33,15 +33,32 @@
 #
 # proof-a:conflict and kept:not-landed both end in a keep, and the
 # difference between them is the point: the first is an unanswered
-# question, the second is a positive local fact. Only b-main-edited and
-# j-two-merged conflict, and they are exactly the two rows a MERGED pull
-# request would clear -- so they are the two whose verdict a merged pull
-# request changes, from KEEP here to DELETE in the full-forge table.
+# question, the second is a positive local fact. Only a conflicting row
+# ever reaches the forge, because proof (b) runs solely on branches
+# proof (a) could not clear -- so the conflicting rows are the entire
+# input to every pull-request rule the sweep has, and a rule with no
+# conflicting row behind it has nothing to decide and can be dropped
+# with nothing going red.
 #
-# Three rows change in all, not two: q-open-but-landed below moves the
-# other way, from DELETE to KEEP, on an OPEN pull request. Reading the
-# paragraph above as "the only two rows that ever change" is the mistake
-# to avoid when writing the full-forge table.
+# The eight conflicting rows are built to be exactly that input. Two are
+# cleared by the forge and flip to DELETE in the full-forge table:
+# b-main-edited on its merged pull request, j-two-merged on the older of
+# the two that share it. The other six each fail a different clause --
+# closed rather than merged (f-closed), no pull request at all
+# (h-no-pr), merged from a fork (i-cross-fork), merged but another is
+# open (k-merged-and-open), merged into a release branch rather than the
+# default one (t-merged-to-release), and a merged pull request whose head
+# SHA is not the local tip (d-unpushed) -- and stay KEEP in both tables,
+# for a forge reason online rather than an unanswered one.
+#
+# So when counting what the full-forge table changes, count reasons and
+# not just verdicts. Three verdicts move: b-main-edited and j-two-merged
+# to DELETE, and q-open-but-landed the other way, from DELETE to KEEP on
+# an OPEN pull request. Several more rows keep their verdict and change
+# their reason, because open-pull-request protection is specified to sit
+# in the protected set ahead of proof (a) -- g-open and k-merged-and-open
+# among them. A full-forge table written by counting verdict flips alone
+# will be red on those rows.
 #
 # No row's reason may read "no pull request". Nothing here consulted a
 # forge, and reporting an absence that was never checked is the specific
@@ -52,7 +69,7 @@
 # see the full-forge oracle.
 #
 # branch                 verdict  reason                  why
-main                     KEEP     protected:default       the default branch; HEAD stands elsewhere, so only this rule saves it
+main                     KEEP     protected:default       the default branch, and decided by that rule first; the long-lived list holds main too, so this row's VERDICT survives losing the default-branch rule and only its reason catches that
 o-current                KEEP     protected:current       an ancestor at the default branch's tip; only being checked out saves it
 develop                  KEEP     protected:long-lived    an ancestor; only the name saves it
 staging                  KEEP     protected:long-lived    an ancestor; only the name saves it
@@ -64,16 +81,17 @@ p1-ancestor              DELETE   pass1:ancestor          merged with a real mer
 a-squash-clean           DELETE   proof-a:content-landed  squash-merged; the default branch later moved on
 c-merged-main-back       DELETE   proof-a:content-landed  squash-merged, then the default branch merged back in
 q-open-but-landed        DELETE   proof-a:content-landed  landed by another pull request; its own is still open
-b-main-edited            KEEP     proof-a:conflict        squash-merged, then the same lines were edited
-j-two-merged             KEEP     proof-a:conflict        squash-merged, then the same lines were edited; two merged pull requests share it and the tip matches the older
-d-unpushed               KEEP     kept:not-landed         carries a commit no remote ever received, made after every push
+b-main-edited            KEEP     proof-a:conflict        squash-merged, then the same lines were edited; a merged pull request clears it online
+j-two-merged             KEEP     proof-a:conflict        two merged pull requests share it and the tip matches the older; clears online on that one
+d-unpushed               KEEP     proof-a:conflict        merged, but carries a commit no remote received, so the pull request's head SHA is not the tip
+f-closed                 KEEP     proof-a:conflict        its only pull request is closed, so nothing merged it
+h-no-pr                  KEEP     proof-a:conflict        no pull request at all ever named it
+i-cross-fork             KEEP     proof-a:conflict        the merged pull request came from a fork, so it is not evidence about this branch
+k-merged-and-open        KEEP     proof-a:conflict        merged once, but another pull request on it is still open
+t-merged-to-release      KEEP     proof-a:conflict        the merged pull request's base was a release branch, not the default one
 e-parent                 KEEP     kept:not-landed         never merged anywhere
 e-stacked-child          KEEP     kept:not-landed         merged into its parent, not the default branch
-f-closed                 KEEP     kept:not-landed         work never landed
-g-open                   KEEP     kept:not-landed         work never landed
-h-no-pr                  KEEP     kept:not-landed         work never landed
-i-cross-fork             KEEP     kept:not-landed         work never landed
-k-merged-and-open        KEEP     kept:not-landed         work never landed
+g-open                   KEEP     kept:not-landed         work never landed, and its pull request is open
 l-tracks-deleted-local   KEEP     kept:not-landed         never pushed; upstream was a deleted local branch
 m-gone-in-subject        KEEP     kept:not-landed         never pushed; the marker text is in its commit subject
 s-tag-shadow             KEEP     kept:not-landed         work never landed; a tag of the same name points at the default branch

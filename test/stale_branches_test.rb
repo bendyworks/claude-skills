@@ -53,14 +53,29 @@ class OracleTableTest < Minitest::Test
   # and stops, and a table with no keepers is satisfied by one that
   # deletes everything -- the same accidental-full-marks shape that made
   # the earlier oracle gradable by implementations nobody would ship.
-  DELETING_STAGES = %w[pass1 proof-a].freeze
+  # Derived from the vocabulary rather than listed, so a stage added to
+  # REASONS later cannot slip past this guarantee. A hardcoded list would
+  # keep passing when PR 3 adds proof-b, and the neighbouring test would
+  # not catch it either: that one only demands each reason be claimed by
+  # SOME row, and the row claiming a new stage may well be a KEEP.
+  #
+  # A stage counts as deleting when it can reach a deletion at all, which
+  # is a property of the rule rather than of a table. protected:* never
+  # deletes -- that is what protection means -- and kept:* is a keep by
+  # name, so what remains is the stages that weigh evidence.
+  NON_DELETING_STAGES = %w[protected kept].freeze
+
+  def self.deleting_stages
+    Fixtures::Oracle::REASONS.map { |reason| Fixtures::Oracle.stage(reason) }
+                             .uniq - NON_DELETING_STAGES
+  end
 
   def test_both_tables_demand_a_deletion_from_every_deciding_stage
     [FLAT, GITFLOW].each do |path|
       rows = Fixtures::Oracle.load(path)
       table = File.basename(path)
 
-      DELETING_STAGES.each do |stage|
+      self.class.deleting_stages.each do |stage|
         deletions = rows.count do |row|
           row.verdict == 'DELETE' && Fixtures::Oracle.stage(row.reason) == stage
         end
@@ -139,6 +154,31 @@ end
 # structure, never verdicts: what makes a row's reason reachable, not
 # what the reason is.
 class FixtureShapeTest < Minitest::Test
+  FLAT = File.expand_path('fixtures/expected-degraded.txt', __dir__)
+  GITFLOW = File.expand_path('fixtures/gitflow-expected-degraded.txt', __dir__)
+
+  # The reasons decided by looking at the repository rather than at a
+  # name. Each is a falsifiable claim about git's own answer, so each can
+  # be checked here without a sweep existing.
+  EVIDENCE_REASONS = %w[
+    pass1:ancestor proof-a:content-landed proof-a:conflict kept:not-landed
+  ].freeze
+
+  # The rows that say "protected" are graded elsewhere; these are the ones
+  # that say what git will report, and they are the rows a wrong fixture
+  # would silently invalidate. proof-a:conflict matters most: it is the
+  # only route to the forge, so a row claiming it that does not actually
+  # conflict removes a pull-request rule's only subject, and the rule
+  # could then be dropped from the sweep with nothing going red.
+  def test_the_flat_tables_evidence_reasons_are_what_git_reports
+    assert_evidence_matches(Fixtures::BranchRepo, FLAT, 'main', 'flat')
+  end
+
+  def test_the_gitflow_tables_evidence_reasons_are_what_git_reports
+    assert_evidence_matches(Fixtures::GitflowRepo, GITFLOW,
+                            Fixtures::GitflowRepo::DEFAULT_BRANCH, 'gitflow')
+  end
+
   def test_the_flat_fixture_stands_somewhere_the_evidence_would_clear
     with_flat do |repo|
       assert_equal Fixtures::BranchRepo::CURRENT, repo.git('branch', '--show-current').strip,
@@ -249,6 +289,42 @@ class FixtureShapeTest < Minitest::Test
 
     assert_equal tag, bare, "the bare name #{name} must resolve to the tag"
     refute_equal branch, bare, "the tag shadowing #{name} must point somewhere else"
+  end
+
+  def assert_evidence_matches(builder, table, default, label)
+    rows = Fixtures::Oracle.load(table).select { |row| EVIDENCE_REASONS.include?(row.reason) }
+    refute_empty rows, "#{label}: no row states evidence at all"
+
+    with_fixture(builder, label) do |repo|
+      default_tree = repo.git('rev-parse', "refs/heads/#{default}^{tree}").strip
+      rows.each do |row|
+        assert_equal row.reason, evidence_for(repo, row.branch, default, default_tree),
+                     "#{label}: the table says #{row.branch} is #{row.reason}, git disagrees"
+      end
+    end
+  end
+
+  # Reimplements the header's documented evidence procedure, in its
+  # documented order, against the built repository -- so the table is
+  # graded on what git actually reports rather than on what a row claims.
+  def evidence_for(repo, branch, default, default_tree)
+    ref = "refs/heads/#{branch}"
+    return 'pass1:ancestor' if ancestor?(repo, branch, default)
+
+    tree, merged = merge_tree(repo, default, ref)
+    return 'proof-a:conflict' unless merged
+
+    tree == default_tree ? 'proof-a:content-landed' : 'kept:not-landed'
+  end
+
+  # Returns the merged tree and whether the merge succeeded. A conflict is
+  # a non-zero exit, not a message, which is why the status is what the
+  # caller branches on.
+  def merge_tree(repo, default, ref)
+    stdout, _stderr, status = Open3.capture3(repo.env, 'git', '-C', repo.work,
+                                             'merge-tree', '--write-tree',
+                                             "refs/heads/#{default}", ref)
+    [stdout.lines.first.to_s.strip, status.success?]
   end
 
   def ancestor?(repo, branch, other)

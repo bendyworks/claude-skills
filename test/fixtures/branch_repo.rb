@@ -20,19 +20,55 @@ module Fixtures
     # deletes their head branches.
     PUSHED_THEN_DELETED = %w[
       a-squash-clean b-main-edited c-merged-main-back d-unpushed
-      e-stacked-child f-closed g-open i-cross-fork j-two-merged
-      k-merged-and-open
+      e-stacked-child f-closed i-cross-fork j-two-merged
+      t-merged-to-release
     ].freeze
 
     # Pushed to the throwaway repo's remote and left in place, matching the
-    # canned forge data that gives this branch a still-open pull request.
-    # There is no real pull request anywhere; the sweep's forge lookups are
-    # answered by a stub.
-    PUSHED_AND_KEPT = %w[q-open-but-landed].freeze
+    # canned forge data that gives each a still-open pull request. There is
+    # no real pull request anywhere; the sweep's forge lookups are answered
+    # by a stub -- but deleting a same-repo head branch on GitHub closes
+    # its open pull request, so a branch the stub calls open must keep its
+    # remote ref or the stub describes a repository the forge cannot
+    # produce. i-cross-fork is exempt and stays deleted above: a fork's
+    # head branch lives in the fork, not here.
+    PUSHED_AND_KEPT = %w[q-open-but-landed g-open k-merged-and-open].freeze
 
-    # Branches carrying content that never reached the default branch,
-    # distinguished from each other only by their pull-request history.
-    CONTENT_NEVER_LANDED = %w[f-closed g-open h-no-pr i-cross-fork k-merged-and-open].freeze
+    # Carries content that never reached the default branch, so proof (a)
+    # answers it alone: the merge runs cleanly and produces a different
+    # tree, a positive local fact no forge lookup can improve on. It has an
+    # open pull request in the stub data, and open-pull-request protection
+    # is specified to fire ahead of proof (a), so it never reaches the
+    # forge-deciding path below either. e-parent, e-stacked-child,
+    # l-tracks-deleted-local, m-gone-in-subject and s-tag-shadow are the
+    # rest of this family, each built by its own method for its own trap.
+    CONTENT_NEVER_LANDED = %w[g-open].freeze
+
+    # Branches squash-merged into the default branch, which then edited the
+    # same lines. proof (a) CONFLICTS on each, so it cannot answer either
+    # way and only the forge can decide -- which is the whole point: proof
+    # (b) runs solely on branches proof (a) could not clear, so a rejection
+    # clause with no conflicting branch behind it has no subject to reject
+    # and can be dropped from the sweep entirely with nothing going red.
+    #
+    # One branch per clause of proof (b), each rejected for a different
+    # reason once the stub answers for it:
+    #
+    #   f-closed            its only pull request is closed, not merged
+    #   h-no-pr             no pull request at all
+    #   i-cross-fork        the merged pull request came from a fork
+    #   k-merged-and-open   a merged pull request, but another is open
+    #   t-merged-to-release the merged pull request's base is not default
+    #   d-unpushed          the merged pull request's head SHA is not the
+    #                       local tip (see #commit_after_the_last_push)
+    #
+    # All six are KEEP in both tables. They differ from the branches above
+    # in what ANSWERS them, which is why the reason is asserted: here the
+    # keep is an unanswered question offline and a forge rejection online,
+    # never the positive fact that the work is unlanded.
+    FORCES_THE_FORGE = %w[
+      f-closed h-no-pr i-cross-fork k-merged-and-open t-merged-to-release
+    ].freeze
 
     # Stand-ins for the long-lived branches a team keeps regardless of what
     # any signal says. Each is built as a plain ancestor of the throwaway
@@ -63,6 +99,7 @@ module Fixtures
       build_squash_merged_branches
       build_stacked_pair
       build_unlanded_branches
+      build_forge_deciding_branches
       build_two_merged_branch
       build_open_but_landed
       build_protected_lookalikes
@@ -161,8 +198,12 @@ module Fixtures
     def squash_merged_branch_with_work_to_come
       git('checkout', '-q', 'main')
       git('checkout', '-qb', 'd-unpushed')
-      commit('d.txt', 'd', 'd work')
+      write_lines('d.txt', %w[l1 l2 l3])
+      git('add', 'd.txt')
+      git('commit', '-qm', 'd work')
       squash_into('main', 'd-unpushed', 'squash d')
+      write_lines('d.txt', ['l1', 'EDITED-LATER', 'l3'])
+      git('commit', '-qam', "main edits d's lines")
     end
 
     # A child branch merged into its PARENT, never into the default
@@ -181,6 +222,25 @@ module Fixtures
         git('checkout', '-q', 'main')
         git('checkout', '-qb', branch)
         commit("#{branch}.txt", branch, "#{branch} work")
+      end
+    end
+
+    # The conflicting shape, built once per branch that has to reach
+    # proof (b): squash-merge into the default branch, then edit the same
+    # lines there. The merge then conflicts, so the content check can say
+    # nothing either way and the pull-request record is the only evidence
+    # left. Multi-line files are what make this work -- a one-line file
+    # edited on both sides can merge cleanly.
+    def build_forge_deciding_branches
+      FORCES_THE_FORGE.each do |branch|
+        git('checkout', '-q', 'main')
+        git('checkout', '-qb', branch)
+        write_lines("#{branch}.txt", %w[l1 l2 l3])
+        git('add', "#{branch}.txt")
+        git('commit', '-qm', "#{branch} work")
+        squash_into('main', branch, "squash #{branch}")
+        write_lines("#{branch}.txt", ['l1', 'EDITED-LATER', 'l3'])
+        git('commit', '-qam', "main edits #{branch}'s lines")
       end
     end
 

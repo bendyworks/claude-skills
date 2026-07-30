@@ -22,12 +22,17 @@ module Fixtures
   # DELETE something the fixture can demand.
   #
   # The build ends with HEAD detached, where there is no current branch to
-  # protect at all. That is the state `git symbolic-ref -q --short HEAD`
-  # reports by failing, while `git rev-parse --abbrev-ref HEAD` cheerfully
-  # prints the string "HEAD" -- a difference a sweep can only get wrong
-  # once a fixture stands somewhere that tells the two apart. No row
-  # changes: the point is that every verdict here survives the default
-  # branch not being checked out.
+  # protect at all. No row changes, and that is the assertion: every
+  # verdict here survives the sweep running from a detached HEAD, and no
+  # branch is wrongly saved by a current-branch rule that found nothing to
+  # protect.
+  #
+  # This arm deliberately does NOT grade `symbolic-ref -q --short HEAD`
+  # against `rev-parse --abbrev-ref HEAD`, which differ here -- the first
+  # fails, the second prints the string "HEAD". No fixture can grade that
+  # difference, because a sweep taking "HEAD" for a branch name protects a
+  # branch that cannot exist: git refuses to create one ("fatal: 'HEAD' is
+  # not a valid branch name"), so no row's verdict can turn on it.
   class GitflowRepo < RepoBuilder
     DEFAULT_BRANCH = 'develop'
 
