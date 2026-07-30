@@ -21,7 +21,14 @@
 #    code under test ever saw it -- and so hid a default-branch bug
 #    through two rounds of review. A closing `fetch --prune` is fine and
 #    each fixture ends with one, because the sweep's own caller is
-#    specified to have fetched first.
+#    specified to have fetched first -- but that fetch is pinned with
+#    remote.origin.followRemoteHEAD=never. Left unpinned, git 2.48 and
+#    newer create refs/remotes/origin/HEAD during that fetch while older
+#    git does not, so the fixtures would build differently on the two
+#    gits CI might supply, and the newer one would be performing exactly
+#    the repair this property forbids. Absence is the deliberate state:
+#    the default branch is resolved from `ls-remote --symref`, which asks
+#    the remote rather than a local cache of it.
 #
 # 2. Ambient git configuration is neutralized, and so is ambient git
 #    ENVIRONMENT. Pointing GIT_CONFIG_GLOBAL/GIT_CONFIG_SYSTEM at an empty
@@ -150,6 +157,15 @@ module Fixtures
       stdout
     end
 
+    # Runs a git command for its exit status alone. Several of the facts
+    # a fixture is built to hold are ones git answers by succeeding or
+    # failing rather than by printing: whether a commit is an ancestor of
+    # another, whether HEAD is on a branch at all.
+    def git_succeeds?(*args, dir: work)
+      _stdout, _stderr, status = Open3.capture3(env, 'git', '-C', dir, *args)
+      status.success?
+    end
+
     # The environment every fixture git command runs under. Exposed so a
     # test driving the CLI against a fixture can run it under the same
     # neutralized configuration.
@@ -198,6 +214,7 @@ module Fixtures
       git('clone', '-q', 'origin.git', 'work', dir: root)
       git('symbolic-ref', 'HEAD', "refs/heads/#{default_branch}")
       git('config', 'advice.detachedHead', 'false')
+      git('config', 'remote.origin.followRemoteHEAD', 'never')
       verify_origin_url
     end
 

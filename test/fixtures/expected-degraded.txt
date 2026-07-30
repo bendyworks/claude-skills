@@ -41,7 +41,8 @@
 # see the full-forge oracle.
 #
 # branch                 verdict  reason                  why
-main                     KEEP     protected:default       the default branch, and where HEAD sits
+main                     KEEP     protected:default       the default branch; HEAD stands elsewhere, so only this rule saves it
+o-current                KEEP     protected:current       an ancestor at the default branch's tip; only being checked out saves it
 develop                  KEEP     protected:long-lived    an ancestor; only the name saves it
 staging                  KEEP     protected:long-lived    an ancestor; only the name saves it
 production               KEEP     protected:long-lived    an ancestor; only the name saves it

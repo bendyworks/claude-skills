@@ -1,48 +1,39 @@
 # frozen_string_literal: true
 
 # Checks the oracle tables under test/fixtures/ against the fixture
-# repositories they describe.
+# repositories they describe, and both against the vocabulary they share.
 #
 # The tables are the specification bin/stale-branches will be built
 # against: one row per branch, naming the verdict the sweep must reach and
 # the reason key its report must carry. The tests that drive the CLI
-# against them arrive with the CLI itself. What can be checked before then
-# is that the two halves agree about which branches exist -- a table that
-# forgets a branch silently asserts nothing about it, and one that invents
-# a branch would blame the sweep for the table's own mistake.
+# against them arrive with the CLI itself. Everything checkable before
+# then is checked here, and it is more than it first appears, because
+# each of these can go wrong while every other test stays green:
+#
+#   - the two halves must agree about which branches exist; a table that
+#     forgets a branch silently asserts nothing about it, and one that
+#     invents a branch would blame the sweep for the table's own mistake
+#   - every reason the vocabulary documents must be demanded by a row, or
+#     the rule behind it can be omitted from the sweep entirely with
+#     nothing going red
+#   - each table must demand a deletion from every stage that can reach
+#     one, or a sweep implementing one stage scores full marks
+#   - the loader's own guards must fire, since a guard that stops firing
+#     yields a table specifying less than it appears to
+#   - the fixtures must still build the structure the reasons rest on --
+#     the worktree, the shadowing tags, the deleted remote refs
+#
+# Together those are what stops the tables from being gradable by a sweep
+# nobody would ship, which is the failure the fixtures were rebuilt to
+# close.
 
 require_relative 'cli_test_case'
 require_relative 'fixtures/branch_repo'
 require_relative 'fixtures/gitflow_repo'
+require_relative 'fixtures/oracle'
 
 require 'open3'
 require 'tmpdir'
-
-# One expected row: the branch, the verdict the sweep must reach, the
-# reason key its report must carry, and prose saying why the row exists.
-module Oracle
-  Row = Struct.new(:branch, :verdict, :reason, :why)
-
-  # A missing or empty table is a hard error, never an empty pass. A
-  # grader that silently asserts nothing is indistinguishable from a
-  # passing suite, which is the failure these tables exist to prevent.
-  def self.load(path)
-    raise "oracle table not found: #{path}" unless File.exist?(path)
-
-    rows = File.readlines(path).filter_map do |line|
-      next if line.strip.empty? || line.lstrip.start_with?('#')
-
-      branch, verdict, reason, *why = line.split
-      raise "malformed oracle row in #{path}: #{line.inspect}" if reason.nil?
-      raise "unknown verdict #{verdict.inspect} in #{path}" unless %w[KEEP DELETE].include?(verdict)
-
-      Row.new(branch, verdict, reason, why.join(' '))
-    end
-    raise "oracle table has no rows: #{path}" if rows.empty?
-
-    rows
-  end
-end
 
 class OracleTableTest < Minitest::Test
   FLAT = File.expand_path('fixtures/expected-degraded.txt', __dir__)
@@ -56,15 +47,57 @@ class OracleTableTest < Minitest::Test
     assert_tables_agree(Fixtures::GitflowRepo, GITFLOW, 'gitflow')
   end
 
-  # Both tables must reach a verdict of DELETE somewhere. A table of
-  # nothing but keepers is satisfied by a sweep that never deletes
-  # anything, which is precisely the implementation these fixtures are
-  # meant to rule out.
-  def test_both_tables_demand_at_least_one_deletion
+  # Both tables must demand a deletion from EVERY stage that can reach
+  # one, not merely somewhere. A table whose only deletions come from the
+  # cheap ancestor pass is satisfied by a sweep that implements that pass
+  # and stops, and a table with no keepers is satisfied by one that
+  # deletes everything -- the same accidental-full-marks shape that made
+  # the earlier oracle gradable by implementations nobody would ship.
+  DELETING_STAGES = %w[pass1 proof-a].freeze
+
+  def test_both_tables_demand_a_deletion_from_every_deciding_stage
     [FLAT, GITFLOW].each do |path|
-      deletions = Oracle.load(path).count { |row| row.verdict == 'DELETE' }
-      assert_operator deletions, :>, 0, "#{File.basename(path)} asks for no deletions at all"
+      rows = Fixtures::Oracle.load(path)
+      table = File.basename(path)
+
+      DELETING_STAGES.each do |stage|
+        deletions = rows.count do |row|
+          row.verdict == 'DELETE' && Fixtures::Oracle.stage(row.reason) == stage
+        end
+        assert_operator deletions, :>, 0, "#{table} asks for no deletion decided by #{stage}"
+      end
+
+      assert_operator rows.count { |row| row.verdict == 'KEEP' }, :>, 0,
+                      "#{table} asks for no keeps at all"
     end
+  end
+
+  # Every reason the vocabulary documents must be demanded by some row in
+  # some table. A key nothing claims is a rule the sweep can omit
+  # entirely with nothing going red -- which is not a hypothetical: the
+  # current-branch protection was documented, implemented nowhere, and
+  # graded by nothing, and a classifier with that protection deleted
+  # outright scored full marks on both tables.
+  def test_every_documented_reason_is_demanded_by_some_row
+    claimed = [FLAT, GITFLOW].flat_map { |path| Fixtures::Oracle.load(path).map(&:reason) }.uniq
+    unclaimed = Fixtures::Oracle::REASONS - claimed
+
+    assert_empty unclaimed,
+                 'these reasons are documented but no row demands them, so nothing tests them'
+  end
+
+  # The flat table's header explains the vocabulary to a human reader
+  # while REASONS enforces it on a row, and a reader who trusts the wrong
+  # one of those writes a sweep that reports keys nothing accepts. Rows
+  # in the vocabulary block are indented three spaces, which is what
+  # separates them from the prose that discusses the same keys inline.
+  def test_the_table_header_documents_exactly_the_enforced_vocabulary
+    documented = File.readlines(FLAT).filter_map do |line|
+      line[/\A#   (\S+:\S+)\s/, 1]
+    end
+
+    assert_equal Fixtures::Oracle::REASONS.sort, documented.sort,
+                 'the vocabulary the table explains and the one the loader enforces have drifted'
   end
 
   private
@@ -73,10 +106,207 @@ class OracleTableTest < Minitest::Test
     Dir.mktmpdir("stale-branches-#{label}") do |dir|
       repo = builder.new(File.join(dir, label)).build
       built = repo.local_refs.map { |ref| ref.sub('refs/heads/', '') }.sort
-      listed = Oracle.load(table).map(&:branch).sort
+      listed = Fixtures::Oracle.load(table).map(&:branch).sort
       assert_equal built, listed,
                    "the #{label} oracle table and its fixture disagree about which branches exist"
     end
+  end
+end
+
+# Every reason in the tables is a claim about the shape of the fixture,
+# and the tables assert those reasons against a sweep rather than against
+# the repository. So if a fixture quietly stopped building the shape its
+# rows describe -- the worktree not registered, the shadowing tag absent,
+# a remote ref that was supposed to be deleted still present -- the sweep
+# would be graded against a specification nothing else holds it to, and
+# every test here would stay green while doing it.
+#
+# These tests hold the fixtures to their own descriptions. They assert
+# structure, never verdicts: what makes a row's reason reachable, not
+# what the reason is.
+class FixtureShapeTest < Minitest::Test
+  def test_the_flat_fixture_stands_somewhere_the_evidence_would_clear
+    with_flat do |repo|
+      assert_equal Fixtures::BranchRepo::CURRENT, repo.git('branch', '--show-current').strip,
+                   'HEAD must stand on a branch that only current-branch protection saves'
+      assert ancestor?(repo, Fixtures::BranchRepo::CURRENT, 'main'),
+             'the current branch must be one the evidence would otherwise clear'
+    end
+  end
+
+  def test_the_flat_fixture_builds_the_protections_its_table_calls_load_bearing
+    with_flat do |repo|
+      protected_by_name = Fixtures::BranchRepo::LONG_LIVED + [Fixtures::BranchRepo::BACKUP]
+      (protected_by_name + %w[n-worktree]).each do |branch|
+        assert ancestor?(repo, branch, 'main'),
+               "#{branch} is protected by name, but the evidence would not have cleared it anyway"
+      end
+
+      worktrees = repo.git('worktree', 'list', '--porcelain')
+      assert_includes worktrees, 'branch refs/heads/n-worktree',
+                      'n-worktree must be checked out in a second worktree'
+    end
+  end
+
+  def test_the_flat_fixture_builds_its_remote_ref_and_upstream_traps
+    with_flat do |repo|
+      Fixtures::BranchRepo::PUSHED_THEN_DELETED.each do |branch|
+        assert_empty repo.git('ls-remote', '--heads', 'origin', branch).strip,
+                     "#{branch} must have had its remote ref deleted"
+      end
+
+      Fixtures::BranchRepo::PUSHED_AND_KEPT.each do |branch|
+        refute_empty repo.git('ls-remote', '--heads', 'origin', branch).strip,
+                     "#{branch} must keep its remote ref, so a forge can answer for it"
+      end
+
+      upstream = repo.git('config', '--default', '', '--get',
+                          'branch.l-tracks-deleted-local.merge').strip
+      assert_equal 'refs/heads/throwaway', upstream,
+                   'l-tracks-deleted-local must track a LOCAL branch, not a remote one'
+      refute repo.git_succeeds?('rev-parse', '--verify', '-q', 'refs/heads/throwaway'),
+             'the branch l-tracks-deleted-local tracks must be gone'
+    end
+  end
+
+  def test_the_flat_fixture_builds_the_tag_that_shadows_a_branch
+    with_flat { |repo| assert_tag_shadows(repo, Fixtures::BranchRepo::TAG_SHADOWED) }
+  end
+
+  def test_the_gitflow_fixture_stands_on_no_branch_at_all
+    with_gitflow do |repo|
+      refute repo.git_succeeds?('symbolic-ref', '-q', '--short', 'HEAD'),
+             'the gitflow build must end with HEAD detached'
+      assert_empty repo.git('branch', '--show-current').strip
+    end
+  end
+
+  # The premise of the whole fixture: the default branch is develop, and
+  # it is discoverable without reading a local cache of the remote's HEAD.
+  def test_the_gitflow_fixture_names_its_default_branch_on_the_remote
+    with_gitflow do |repo|
+      symref = repo.git('ls-remote', '--symref', 'origin', 'HEAD')
+      assert_includes symref, "ref: refs/heads/#{Fixtures::GitflowRepo::DEFAULT_BRANCH}\tHEAD"
+
+      refute repo.git_succeeds?('rev-parse', '--verify', '-q', 'refs/remotes/origin/HEAD'),
+             'origin/HEAD must stay absent: the sweep asks the remote, not a local cache of it'
+    end
+  end
+
+  def test_the_gitflow_fixture_keeps_main_off_the_default_branch
+    with_gitflow do |repo|
+      default = Fixtures::GitflowRepo::DEFAULT_BRANCH
+      refute ancestor?(repo, 'main', default),
+             'main must hold work develop does not, or its keep is decided by the evidence'
+      [Fixtures::GitflowRepo::RELEASE, Fixtures::GitflowRepo::ANCESTOR].each do |branch|
+        assert ancestor?(repo, branch, default),
+               "#{branch} must be an ancestor of #{default}"
+      end
+      assert_tag_shadows(repo, Fixtures::GitflowRepo::TAG_SHADOWED)
+    end
+  end
+
+  private
+
+  # A bare name that resolves to something other than the branch of that
+  # name is the whole trap: a sweep asking git about `amb` is answered
+  # about the tag, which points at the default branch and so reports the
+  # branch as holding nothing.
+  def assert_tag_shadows(repo, name)
+    bare = repo.git('rev-parse', name).strip
+    branch = repo.git('rev-parse', "refs/heads/#{name}").strip
+    tag = repo.git('rev-parse', "refs/tags/#{name}").strip
+
+    assert_equal tag, bare, "the bare name #{name} must resolve to the tag"
+    refute_equal branch, bare, "the tag shadowing #{name} must point somewhere else"
+  end
+
+  def ancestor?(repo, branch, other)
+    repo.git_succeeds?('merge-base', '--is-ancestor', "refs/heads/#{branch}",
+                       "refs/heads/#{other}")
+  end
+
+  def with_flat(&block)
+    with_fixture(Fixtures::BranchRepo, 'flat', &block)
+  end
+
+  def with_gitflow(&block)
+    with_fixture(Fixtures::GitflowRepo, 'gitflow', &block)
+  end
+
+  def with_fixture(builder, label)
+    Dir.mktmpdir("stale-branches-#{label}") do |dir|
+      yield builder.new(File.join(dir, label)).build
+    end
+  end
+end
+
+# The loader is the grader. Every assertion the sweep is ever graded by
+# arrives through it, so a guard that stops firing does not produce a
+# wrong answer -- it produces a table that quietly specifies less than it
+# appears to, while every test that reads it stays green. Each guard gets
+# a test for that reason, and each test writes the smallest table that
+# should be refused.
+class OracleLoaderTest < Minitest::Test
+  def test_a_missing_table_is_an_error_rather_than_an_empty_pass
+    error = assert_raises(RuntimeError) { Fixtures::Oracle.load(table_path('absent.txt')) }
+    assert_match(/not found/, error.message)
+  end
+
+  def test_a_table_with_no_rows_is_an_error_rather_than_an_empty_pass
+    error = assert_raises(RuntimeError) { load_table("# nothing but a comment\n\n") }
+    assert_match(/no rows/, error.message)
+  end
+
+  def test_a_row_missing_its_reason_is_refused
+    error = assert_raises(RuntimeError) { load_table("main KEEP\n") }
+    assert_match(/malformed/, error.message)
+  end
+
+  def test_a_row_naming_an_unknown_verdict_is_refused
+    error = assert_raises(RuntimeError) { load_table("main PROBABLY protected:default why\n") }
+    assert_match(/unknown verdict/, error.message)
+  end
+
+  # The reason is the contract the sweep's report is matched against, so
+  # a typo in a key would otherwise ship as the specification and the
+  # implementation would be written to satisfy the typo.
+  def test_a_row_naming_an_unknown_reason_is_refused
+    error = assert_raises(RuntimeError) { load_table("main KEEP protected:defualt why\n") }
+    assert_match(/unknown reason/, error.message)
+  end
+
+  def test_a_well_formed_row_survives_every_guard
+    rows = load_table("main KEEP protected:default the default branch\n")
+
+    assert_equal 1, rows.length
+    assert_equal 'main', rows.first.branch
+    assert_equal 'KEEP', rows.first.verdict
+    assert_equal 'protected:default', rows.first.reason
+    assert_equal 'the default branch', rows.first.why
+  end
+
+  # git permits a branch name beginning with '#', so an indented row must
+  # not be mistaken for a comment: dropping it would remove that branch
+  # from the specification without a word.
+  def test_only_a_marker_in_the_first_column_starts_a_comment
+    rows = load_table("  #odd KEEP kept:not-landed a branch named oddly\n")
+
+    assert_equal ['#odd'], rows.map(&:branch)
+  end
+
+  private
+
+  def load_table(contents)
+    Dir.mktmpdir('stale-branches-oracle') do |dir|
+      path = File.join(dir, 'table.txt')
+      File.write(path, contents)
+      return Fixtures::Oracle.load(path)
+    end
+  end
+
+  def table_path(name)
+    File.join(Dir.tmpdir, "stale-branches-#{name}")
   end
 end
 

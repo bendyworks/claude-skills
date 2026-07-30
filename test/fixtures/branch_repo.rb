@@ -51,6 +51,9 @@ module Fixtures
     # wrongful keep.
     TAG_SHADOWED = 's-tag-shadow'
 
+    # Where HEAD is left standing, and deletable on the evidence alone.
+    CURRENT = 'o-current'
+
     # Returns self so a caller can build and use in one expression.
     def build
       prepare_root
@@ -69,10 +72,29 @@ module Fixtures
       build_worktree_branch
       git('checkout', '-q', 'main')
       git('fetch', '-q', '--prune', 'origin')
+      stand_on_a_non_default_branch
       self
     end
 
     private
+
+    # HEAD ends on a branch that is neither the default one nor otherwise
+    # protected. o-current sits at the default branch's tip, so the cheap
+    # first pass lists it and nothing but current-branch protection stands
+    # between it and deletion.
+    #
+    # Leaving HEAD on the default branch instead -- as this fixture once
+    # did -- makes the current-branch rule untestable, because the
+    # default-branch rule decides that row first. A sweep with no
+    # current-branch protection at all then scores full marks on every row
+    # of both tables. It also leaves the default-branch rule itself only
+    # half-graded, since the two rules were covering for each other.
+    #
+    # Created after the closing fetch so it has no upstream and was never
+    # pushed, which keeps it out of every remote-ref row above.
+    def stand_on_a_non_default_branch
+      git('checkout', '-qb', CURRENT)
+    end
 
     def worktree_path
       File.join(root, 'wt')
