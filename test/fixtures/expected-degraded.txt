@@ -15,6 +15,12 @@
 #   protected:worktree     checked out in another worktree
 #   protected:long-lived   a name teams keep: develop, staging,
 #                          production, gh-pages, main, master, release/*
+#                          -- the sweep's whole built-in list, not an
+#                          index of rows below. develop, staging,
+#                          production and gh-pages have arms here, main
+#                          and release/* have them in the gitflow table,
+#                          and master has none in either: it is the one
+#                          member of the list no fixture exercises.
 #   protected:backup       a name ending in -backup
 #   pass1:ancestor         already an ancestor of the default branch
 #   proof-a:content-landed merging it into the default branch would
@@ -28,9 +34,14 @@
 # proof-a:conflict and kept:not-landed both end in a keep, and the
 # difference between them is the point: the first is an unanswered
 # question, the second is a positive local fact. Only b-main-edited and
-# j-two-merged conflict, and they are exactly the two rows a merged pull
-# request would clear -- so they are the two that change verdict once the
-# forge can be reached.
+# j-two-merged conflict, and they are exactly the two rows a MERGED pull
+# request would clear -- so they are the two whose verdict a merged pull
+# request changes, from KEEP here to DELETE in the full-forge table.
+#
+# Three rows change in all, not two: q-open-but-landed below moves the
+# other way, from DELETE to KEEP, on an OPEN pull request. Reading the
+# paragraph above as "the only two rows that ever change" is the mistake
+# to avoid when writing the full-forge table.
 #
 # No row's reason may read "no pull request". Nothing here consulted a
 # forge, and reporting an absence that was never checked is the specific
@@ -54,8 +65,8 @@ a-squash-clean           DELETE   proof-a:content-landed  squash-merged; the def
 c-merged-main-back       DELETE   proof-a:content-landed  squash-merged, then the default branch merged back in
 q-open-but-landed        DELETE   proof-a:content-landed  landed by another pull request; its own is still open
 b-main-edited            KEEP     proof-a:conflict        squash-merged, then the same lines were edited
-j-two-merged             KEEP     proof-a:conflict        squash-merged, then the same lines were edited
-d-unpushed               KEEP     kept:not-landed         carries a commit made after the last push
+j-two-merged             KEEP     proof-a:conflict        squash-merged, then the same lines were edited; two merged pull requests share it and the tip matches the older
+d-unpushed               KEEP     kept:not-landed         carries a commit no remote ever received, made after every push
 e-parent                 KEEP     kept:not-landed         never merged anywhere
 e-stacked-child          KEEP     kept:not-landed         merged into its parent, not the default branch
 f-closed                 KEEP     kept:not-landed         work never landed

@@ -68,6 +68,7 @@ module Fixtures
       build_protected_lookalikes
       build_tag_shadowed_branch
       publish_and_delete_remote_branches
+      commit_after_the_last_push
       build_gone_lookalikes
       build_worktree_branch
       git('checkout', '-q', 'main')
@@ -118,7 +119,7 @@ module Fixtures
       squash_clean
       main_edited_after_squash
       main_merged_back_in
-      unpushed_commit_after_squash
+      squash_merged_branch_with_work_to_come
     end
 
     # Squash-merged, with main later advancing on an unrelated file: the
@@ -154,15 +155,14 @@ module Fixtures
       git('merge', '-q', 'main', '-m', 'merge main into c')
     end
 
-    # Squash-merged, then a real commit made after the last push. The
-    # content is at risk, so no signal may clear this branch.
-    def unpushed_commit_after_squash
+    # Squash-merged. The commit that puts its content at risk is made
+    # later, by #commit_after_the_last_push, once this branch has been
+    # pushed and its remote ref deleted.
+    def squash_merged_branch_with_work_to_come
       git('checkout', '-q', 'main')
       git('checkout', '-qb', 'd-unpushed')
       commit('d.txt', 'd', 'd work')
       squash_into('main', 'd-unpushed', 'squash d')
-      git('checkout', '-q', 'd-unpushed')
-      commit('d-danger.txt', 'REAL UNPUSHED WORK', 'after last push')
     end
 
     # A child branch merged into its PARENT, never into the default
@@ -227,7 +227,7 @@ module Fixtures
       git('checkout', '-qb', TAG_SHADOWED)
       commit('s.txt', 's', 's work that never landed')
       git('checkout', '-q', 'main')
-      git('tag', TAG_SHADOWED, git('rev-parse', 'main').strip)
+      git('tag', TAG_SHADOWED)
     end
 
     def publish_and_delete_remote_branches
@@ -238,6 +238,18 @@ module Fixtures
         git('branch', '-q', "--set-upstream-to=origin/#{branch}", branch)
       end
       PUSHED_THEN_DELETED.each { |branch| git('push', '-q', 'origin', '--delete', branch) }
+    end
+
+    # The commit that makes d-unpushed dangerous, made after every push
+    # has happened so no remote ever receives it. Ordering is the entire
+    # point: made any earlier, this commit rides along in the bulk push
+    # above and the branch's tip reaches origin's object store, leaving
+    # the fixture with no branch that carries work a remote has never
+    # seen -- while the branch name, this method, and the table's own
+    # prose all still promise one.
+    def commit_after_the_last_push
+      git('checkout', '-q', 'd-unpushed')
+      commit('d-danger.txt', 'REAL UNPUSHED WORK', 'after last push')
     end
 
     # Two branches that a naive "upstream is gone" enumeration would sweep
@@ -256,7 +268,7 @@ module Fixtures
       git('checkout', '-qb', 'throwaway')
       git('checkout', '-qb', 'l-tracks-deleted-local')
       commit('l.txt', 'l', 'l work never pushed')
-      git('branch', '--set-upstream-to=throwaway', 'l-tracks-deleted-local')
+      git('branch', '-q', '--set-upstream-to=throwaway', 'l-tracks-deleted-local')
       git('branch', '-q', '-D', 'throwaway')
     end
 

@@ -111,7 +111,7 @@ module Fixtures
       git('checkout', '-qb', TAG_SHADOWED, DEFAULT_BRANCH)
       commit('amb.txt', 'a', 'amb work that never landed')
       git('checkout', '-q', DEFAULT_BRANCH)
-      git('tag', TAG_SHADOWED, git('rev-parse', DEFAULT_BRANCH).strip)
+      git('tag', TAG_SHADOWED)
     end
   end
 end

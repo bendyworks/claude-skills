@@ -19,6 +19,8 @@
 
 module Fixtures
   module Oracle
+    Error = Class.new(StandardError)
+
     # One expected row: the branch, the verdict the sweep must reach, the
     # reason key its report must carry, and prose saying why the row
     # exists.
@@ -53,10 +55,10 @@ module Fixtures
     # grader that silently asserts nothing is indistinguishable from a
     # passing suite, which is the failure these tables exist to prevent.
     def self.load(path)
-      raise "oracle table not found: #{path}" unless File.exist?(path)
+      raise Error, "oracle table not found: #{path}" unless File.exist?(path)
 
       rows = File.readlines(path).filter_map { |line| parse(line, path) }
-      raise "oracle table has no rows: #{path}" if rows.empty?
+      raise Error, "oracle table has no rows: #{path}" if rows.empty?
 
       rows
     end
@@ -64,15 +66,25 @@ module Fixtures
     # The comment marker is anchored to column 0: git permits a branch
     # name beginning with '#', and treating an indented one as a comment
     # would drop that row from the table without a word.
+    #
+    # The split is capped at four fields so the trailing prose stays one
+    # column no matter how much whitespace it contains. A branch name
+    # cannot contain whitespace -- git refuses to create one -- so the
+    # first three fields are unambiguous. The line is stripped before
+    # splitting because a capped split preserves trailing whitespace as a
+    # final empty field, which would reach the reason guard as "" rather
+    # than nil and be reported as an unknown reason rather than a short
+    # row. The comment test above deliberately reads the UNstripped line,
+    # so that a marker only starts a comment in column 0.
     def self.parse(line, path)
       return if line.strip.empty? || line.start_with?('#')
 
-      branch, verdict, reason, *why = line.split
-      raise "malformed oracle row in #{path}: #{line.inspect}" if reason.nil?
-      raise "unknown verdict #{verdict.inspect} in #{path}" unless VERDICTS.include?(verdict)
-      raise "unknown reason #{reason.inspect} in #{path}" unless REASONS.include?(reason)
+      branch, verdict, reason, why = line.strip.split(' ', 4)
+      raise Error, "malformed oracle row in #{path}: #{line.inspect}" if reason.nil?
+      raise Error, "unknown verdict #{verdict.inspect} in #{path}" unless VERDICTS.include?(verdict)
+      raise Error, "unknown reason #{reason.inspect} in #{path}" unless REASONS.include?(reason)
 
-      Row.new(branch, verdict, reason, why.join(' '))
+      Row.new(branch, verdict, reason, why.to_s.strip)
     end
     private_class_method :parse
   end

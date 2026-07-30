@@ -61,9 +61,13 @@ module Fixtures
   class RepoBuilder
     Error = Class.new(StandardError)
 
-    # A reserved TLD, assembled rather than written literally so the
-    # address never appears in source as a contiguous token.
-    IDENTITY_HOST = 'example.test'
+    # Written out rather than assembled from parts. CONTRIBUTING
+    # prescribes example.com for addresses in this repo, and
+    # check-identifiers.sh matches a whole address rather than a domain:
+    # an address split across an interpolation is one the gate cannot
+    # see, so assembling it would buy nothing and would hide a real
+    # address if this constant were ever changed to one.
+    IDENTITY_EMAIL = 'fixture@example.com'
 
     # Git environment variables that must not survive into a build,
     # deleted rather than overridden (Open3 unsets a key whose value is
@@ -124,9 +128,17 @@ module Fixtures
     end
 
     # Full refnames, the form the sweep is specified to enumerate: a tag
-    # sharing a branch's name makes the short form ambiguous.
+    # sharing a branch's name makes the short form ambiguous, and both
+    # fixtures build that collision deliberately.
+    #
+    # This is the handoff between the two halves of that trap, so it is
+    # the place to say that neither form is safe everywhere. Enumeration
+    # and for-each-ref need the full refname. `git branch -d` refuses it
+    # outright ("error: branch 'refs/heads/amb' not found") and accepts
+    # only the short name -- which is the ambiguous one. A sweep has to
+    # convert between them knowingly rather than pick one and hope.
     def local_refs
-      git('for-each-ref', '--format=%(refname)', 'refs/heads/').lines.map(&:strip)
+      git('for-each-ref', '--format=%(refname)', 'refs/heads/').lines(chomp: true)
     end
 
     # Moves HEAD, for the arms that ask what the sweep does when the
@@ -173,12 +185,17 @@ module Fixtures
       @env ||= NEUTRALIZED_KEYS.to_h { |key| [key, nil] }.merge(
         'GIT_CONFIG_GLOBAL' => empty_config,
         'GIT_CONFIG_SYSTEM' => empty_config,
+        # Redundant with GIT_CONFIG_SYSTEM above, and kept: NOSYSTEM has
+        # been honored for far longer, while GIT_CONFIG_SYSTEM arrived in
+        # git 2.32. Either alone covers the supported versions; together
+        # they cover a machine below the floor before the version check
+        # gets a chance to say so.
         'GIT_CONFIG_NOSYSTEM' => '1',
         'GIT_TERMINAL_PROMPT' => '0',
         'GIT_AUTHOR_NAME' => 'Fixture',
         'GIT_COMMITTER_NAME' => 'Fixture',
-        'GIT_AUTHOR_EMAIL' => "fixture@#{IDENTITY_HOST}",
-        'GIT_COMMITTER_EMAIL' => "fixture@#{IDENTITY_HOST}"
+        'GIT_AUTHOR_EMAIL' => IDENTITY_EMAIL,
+        'GIT_COMMITTER_EMAIL' => IDENTITY_EMAIL
       ).freeze
     end
 

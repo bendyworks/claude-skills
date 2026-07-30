@@ -91,6 +91,18 @@ class OracleTableTest < Minitest::Test
   # one of those writes a sweep that reports keys nothing accepts. Rows
   # in the vocabulary block are indented three spaces, which is what
   # separates them from the prose that discusses the same keys inline.
+  # The prose column is the only place a row says why it exists, and a
+  # row that stops saying so is one a later reader deletes as redundant
+  # with its neighbour. Cheap to keep honest, and the two rows that were
+  # hardest to tell apart had drifted to identical prose.
+  def test_every_row_says_why_it_exists
+    [FLAT, GITFLOW].each do |path|
+      Fixtures::Oracle.load(path).each do |row|
+        refute_empty row.why, "#{File.basename(path)} row #{row.branch} says nothing about why"
+      end
+    end
+  end
+
   def test_the_table_header_documents_exactly_the_enforced_vocabulary
     documented = File.readlines(FLAT).filter_map do |line|
       line[/\A#   (\S+:\S+)\s/, 1]
@@ -105,9 +117,11 @@ class OracleTableTest < Minitest::Test
   def assert_tables_agree(builder, table, label)
     Dir.mktmpdir("stale-branches-#{label}") do |dir|
       repo = builder.new(File.join(dir, label)).build
-      built = repo.local_refs.map { |ref| ref.sub('refs/heads/', '') }.sort
+      built = repo.local_refs.map { |ref| ref.delete_prefix('refs/heads/') }.sort
       listed = Fixtures::Oracle.load(table).map(&:branch).sort
-      assert_equal built, listed,
+      # The table goes in the expected slot: it is the specification, so
+      # a diff should read as what the fixture did wrong against it.
+      assert_equal listed, built,
                    "the #{label} oracle table and its fixture disagree about which branches exist"
     end
   end
@@ -166,6 +180,22 @@ class FixtureShapeTest < Minitest::Test
                    'l-tracks-deleted-local must track a LOCAL branch, not a remote one'
       refute repo.git_succeeds?('rev-parse', '--verify', '-q', 'refs/heads/throwaway'),
              'the branch l-tracks-deleted-local tracks must be gone'
+    end
+  end
+
+  # A deleted remote ref is not the same as work no remote ever saw: the
+  # ref can be gone while the objects remain, which is the ordinary shape
+  # of a merged branch the forge tidied up. d-unpushed is the fixture's
+  # only branch carrying the stronger property, and it holds only because
+  # its last commit is made after every push. Asserting the branch tip is
+  # absent from origin's object store is the difference between building
+  # that property and merely naming it.
+  def test_the_flat_fixture_builds_a_branch_no_remote_ever_received
+    with_flat do |repo|
+      tip = repo.git('rev-parse', 'refs/heads/d-unpushed').strip
+
+      refute repo.git_succeeds?('cat-file', '-e', "#{tip}^{commit}", dir: repo.origin),
+             'd-unpushed carries work a remote already has, so no row tests unpushed work'
     end
   end
 
@@ -249,22 +279,22 @@ end
 # should be refused.
 class OracleLoaderTest < Minitest::Test
   def test_a_missing_table_is_an_error_rather_than_an_empty_pass
-    error = assert_raises(RuntimeError) { Fixtures::Oracle.load(table_path('absent.txt')) }
+    error = assert_raises(Fixtures::Oracle::Error) { Fixtures::Oracle.load(table_path('absent.txt')) }
     assert_match(/not found/, error.message)
   end
 
   def test_a_table_with_no_rows_is_an_error_rather_than_an_empty_pass
-    error = assert_raises(RuntimeError) { load_table("# nothing but a comment\n\n") }
+    error = assert_raises(Fixtures::Oracle::Error) { load_table("# nothing but a comment\n\n") }
     assert_match(/no rows/, error.message)
   end
 
   def test_a_row_missing_its_reason_is_refused
-    error = assert_raises(RuntimeError) { load_table("main KEEP\n") }
+    error = assert_raises(Fixtures::Oracle::Error) { load_table("main KEEP\n") }
     assert_match(/malformed/, error.message)
   end
 
   def test_a_row_naming_an_unknown_verdict_is_refused
-    error = assert_raises(RuntimeError) { load_table("main PROBABLY protected:default why\n") }
+    error = assert_raises(Fixtures::Oracle::Error) { load_table("main PROBABLY protected:default why\n") }
     assert_match(/unknown verdict/, error.message)
   end
 
@@ -272,7 +302,7 @@ class OracleLoaderTest < Minitest::Test
   # a typo in a key would otherwise ship as the specification and the
   # implementation would be written to satisfy the typo.
   def test_a_row_naming_an_unknown_reason_is_refused
-    error = assert_raises(RuntimeError) { load_table("main KEEP protected:defualt why\n") }
+    error = assert_raises(Fixtures::Oracle::Error) { load_table("main KEEP protected:defualt why\n") }
     assert_match(/unknown reason/, error.message)
   end
 
