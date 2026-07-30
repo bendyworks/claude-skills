@@ -23,12 +23,20 @@
 #    each fixture ends with one, because the sweep's own caller is
 #    specified to have fetched first.
 #
-# 2. Ambient git configuration is neutralized. The initial branch name is
-#    passed explicitly rather than inherited from init.defaultBranch, and
-#    GIT_CONFIG_GLOBAL/GIT_CONFIG_SYSTEM point at an empty file, so a
-#    developer's commit.gpgsign, core.hooksPath, merge.ff, or
-#    core.autocrlf cannot change a verdict. Without the explicit initial
-#    branch a fixture does not merely drift, it collapses: on a machine
+# 2. Ambient git configuration is neutralized, and so is ambient git
+#    ENVIRONMENT. Pointing GIT_CONFIG_GLOBAL/GIT_CONFIG_SYSTEM at an empty
+#    file covers only configuration that arrives through a file: the
+#    GIT_CONFIG_COUNT/GIT_CONFIG_KEY_n/GIT_CONFIG_VALUE_n form bypasses
+#    both, and core.hooksPath arriving that way is arbitrary script
+#    execution during a build. The variables naming a repository are worse
+#    still, because `git -C <dir>` does not override an inherited GIT_DIR
+#    and Open3.capture3 MERGES its env hash into the parent's rather than
+#    replacing it -- so a build inheriting one operates on whatever
+#    repository it names, reporting success the whole way. NEUTRALIZED_KEYS
+#    is therefore not a tidiness list; it is what keeps a build inside the
+#    directory it created. The initial branch name is likewise passed
+#    explicitly rather than inherited from init.defaultBranch: without it a
+#    fixture does not merely drift, it collapses, because on a machine
 #    defaulting to `master` the bare repo's HEAD names a branch that is
 #    never created and the first push fails outright.
 #
@@ -40,6 +48,7 @@
 
 require 'fileutils'
 require 'open3'
+require 'tmpdir'
 
 module Fixtures
   class RepoBuilder
@@ -49,12 +58,62 @@ module Fixtures
     # address never appears in source as a contiguous token.
     IDENTITY_HOST = 'example.test'
 
+    # Git environment variables that must not survive into a build,
+    # deleted rather than overridden (Open3 unsets a key whose value is
+    # nil). Three families, each able to defeat the containment this
+    # class promises:
+    #
+    #   Repository location -- redirects commands to another repository
+    #   entirely, `git -C` notwithstanding.
+    #   Configuration injection -- reaches git without touching either
+    #   config file, so the empty-file pointers below do not cover it.
+    #   Transport and credentials -- every remote here is a local path,
+    #   so nothing legitimate needs them and a build must never be able
+    #   to authenticate to a network host.
+    #
+    # GIT_EXEC_PATH is deliberately absent: git sets it for its own
+    # subprocesses and clearing it can break the invocation itself.
+    NEUTRALIZED_KEYS = %w[
+      GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_OBJECT_DIRECTORY
+      GIT_ALTERNATE_OBJECT_DIRECTORIES GIT_COMMON_DIR GIT_NAMESPACE
+      GIT_CEILING_DIRECTORIES GIT_TEMPLATE_DIR
+      GIT_CONFIG GIT_CONFIG_COUNT
+      GIT_SSH GIT_SSH_COMMAND GIT_ASKPASS GIT_PROXY_COMMAND
+      GIT_ALLOW_PROTOCOL
+    ].freeze
+
+    # The oldest git these fixtures are correct on. 2.32 is where
+    # GIT_CONFIG_GLOBAL and GIT_CONFIG_SYSTEM begin to be honored: below
+    # it they are ignored outright, the developer's own ~/.gitconfig
+    # applies to every fixture command, and nothing says so. Checked once
+    # per build so that failure is a sentence rather than a puzzle.
+    MINIMUM_GIT = [2, 32].freeze
+
     attr_reader :root, :work, :origin
 
+    # The root must be a path under the system temporary directory. A
+    # fixture builds a repository and then deletes branches in it, so
+    # pointing one at a working clone is not a mistake that degrades
+    # gracefully -- and the guard has to run before anything is created,
+    # which is why it lives here rather than in #build.
     def initialize(root)
-      @root = root
-      @origin = File.join(root, 'origin.git')
-      @work = File.join(root, 'work')
+      @root = File.expand_path(root)
+      unless self.class.under_tmpdir?(@root)
+        raise Error, "refusing to build a fixture outside #{Dir.tmpdir}: #{@root}"
+      end
+
+      @origin = File.join(@root, 'origin.git')
+      @work = File.join(@root, 'work')
+    end
+
+    # Both spellings of the temporary directory are accepted because
+    # macOS reports two: Dir.tmpdir and Dir.mktmpdir hand back /var/...
+    # while the same directory resolves to /private/var/..., and a check
+    # against either one alone rejects every real fixture or accepts a
+    # path that only looks like one.
+    def self.under_tmpdir?(path)
+      prefixes = [Dir.tmpdir, (File.realpath(Dir.tmpdir) if File.exist?(Dir.tmpdir))].compact
+      prefixes.uniq.any? { |prefix| path.start_with?(File.join(prefix, '')) }
     end
 
     # Full refnames, the form the sweep is specified to enumerate: a tag
@@ -76,9 +135,17 @@ module Fixtures
       git('checkout', '-q', '--detach')
     end
 
+    # Failures report stdout as well as stderr: `git merge` and
+    # `git commit` announce theirs on stdout, and those are the two
+    # commands a fixture is most likely to break as it grows, so a
+    # stderr-only message leaves the most common failure with nothing
+    # after the colon.
     def git(*args, dir: work)
       stdout, stderr, status = Open3.capture3(env, 'git', '-C', dir, *args)
-      raise Error, "git #{args.join(' ')} failed in #{dir}: #{stderr.strip}" unless status.success?
+      unless status.success?
+        raise Error, "git #{args.join(' ')} failed in #{dir} (exit #{status.exitstatus})\n" \
+                     "stdout: #{stdout.strip}\nstderr: #{stderr.strip}"
+      end
 
       stdout
     end
@@ -87,7 +154,7 @@ module Fixtures
     # test driving the CLI against a fixture can run it under the same
     # neutralized configuration.
     def env
-      @env ||= {
+      @env ||= NEUTRALIZED_KEYS.to_h { |key| [key, nil] }.merge(
         'GIT_CONFIG_GLOBAL' => empty_config,
         'GIT_CONFIG_SYSTEM' => empty_config,
         'GIT_CONFIG_NOSYSTEM' => '1',
@@ -96,7 +163,7 @@ module Fixtures
         'GIT_COMMITTER_NAME' => 'Fixture',
         'GIT_AUTHOR_EMAIL' => "fixture@#{IDENTITY_HOST}",
         'GIT_COMMITTER_EMAIL' => "fixture@#{IDENTITY_HOST}"
-      }
+      ).freeze
     end
 
     private
@@ -106,14 +173,44 @@ module Fixtures
     end
 
     def prepare_root
+      require_supported_git
       FileUtils.mkdir_p(root)
       File.write(empty_config, '')
     end
 
+    def require_supported_git
+      stdout, stderr, status = Open3.capture3('git', '--version')
+      raise Error, "git --version failed: #{stderr.strip}" unless status.success?
+
+      found = stdout[/\d+\.\d+/].to_s.split('.').map(&:to_i)
+      return if (found <=> MINIMUM_GIT) >= 0
+
+      raise Error, "these fixtures need git #{MINIMUM_GIT.join('.')} or newer, found #{stdout.strip}"
+    end
+
+    # The clone's initial branch is set explicitly rather than left to
+    # git. Adopting an empty remote's unborn HEAD name needs git 2.32;
+    # older git falls back to init.defaultBranch, which under the empty
+    # config above is `master`, and the first push then fails against a
+    # bare repo whose HEAD names a branch nothing creates.
     def init_remote_and_clone(default_branch)
       git('init', '-q', '-b', default_branch, '--bare', 'origin.git', dir: root)
       git('clone', '-q', 'origin.git', 'work', dir: root)
+      git('symbolic-ref', 'HEAD', "refs/heads/#{default_branch}")
       git('config', 'advice.detachedHead', 'false')
+      verify_origin_url
+    end
+
+    # Every later push names the remote `origin` rather than a path, so
+    # that remote-tracking refs update and the fixtures keep the shape
+    # the oracle tables describe. That makes the name's resolution
+    # load-bearing: this asserts once, before any push, that it still
+    # points at the throwaway bare repo beside it.
+    def verify_origin_url
+      url = git('remote', 'get-url', 'origin').strip
+      return if File.identical?(url, origin)
+
+      raise Error, "fixture origin resolves to #{url}, expected #{origin}"
     end
 
     # Writes a file and commits it, the one-liner most of every table needs.
