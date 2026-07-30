@@ -178,11 +178,19 @@ module Fixtures
       status.success?
     end
 
-    # The environment every fixture git command runs under. Exposed so a
-    # test driving the CLI against a fixture can run it under the same
-    # neutralized configuration.
-    def env
-      @env ||= NEUTRALIZED_KEYS.to_h { |key| [key, nil] }.merge(
+    # The neutralization as a bare hash, built without an instance.
+    #
+    # Anything that shells out to git while these tests run needs this,
+    # not just the fixtures -- including a test that builds a repository
+    # of its own to check the fixtures against. An unneutralized helper
+    # of that kind is worse than an unprotected fixture, because it
+    # writes into whatever an ambient GIT_DIR names AND reads that same
+    # redirected repository back for its comparison, so the check passes
+    # while the damage happens. `git -C <dir> init` under an ambient
+    # GIT_DIR re-initializes the named repository and warns rather than
+    # failing, and the commit that follows lands there.
+    def self.neutralized_env(empty_config)
+      NEUTRALIZED_KEYS.to_h { |key| [key, nil] }.merge(
         'GIT_CONFIG_GLOBAL' => empty_config,
         'GIT_CONFIG_SYSTEM' => empty_config,
         # Redundant with GIT_CONFIG_SYSTEM above, and kept: NOSYSTEM has
@@ -197,6 +205,13 @@ module Fixtures
         'GIT_AUTHOR_EMAIL' => IDENTITY_EMAIL,
         'GIT_COMMITTER_EMAIL' => IDENTITY_EMAIL
       ).freeze
+    end
+
+    # The environment every fixture git command runs under. Exposed so a
+    # test driving the CLI against a fixture can run it under the same
+    # neutralized configuration.
+    def env
+      @env ||= self.class.neutralized_env(empty_config)
     end
 
     private

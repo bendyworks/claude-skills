@@ -379,6 +379,36 @@ class RepoBuilderContainmentTest < Minitest::Test
     end
   end
 
+  # The harness that proves containment is itself a git caller, and the
+  # weakest link decides the answer: a redirected sentinel builder both
+  # writes into the repository an ambient GIT_DIR names and reads its
+  # comparison back from there, so the suite reports success while doing
+  # exactly the damage it is testing for. This test sets the ambient
+  # variable around the SENTINEL construction rather than around a
+  # fixture build, which is the case the other tests here cannot see.
+  def test_building_a_sentinel_cannot_be_redirected_either
+    Dir.mktmpdir('stale-branches-containment') do |dir|
+      victim = build_sentinel(File.join(dir, 'victim'))
+      before = sentinel_state(victim)
+
+      # GIT_DIR alone, with no GIT_WORK_TREE: git then takes the working
+      # tree from the directory it was pointed at, so commands read the
+      # files in front of them and write the result into the repository
+      # the variable names. That is the combination that actually
+      # escapes, and the one the real incident had; setting GIT_WORK_TREE
+      # too would send the reads back to the victim and mask it as an
+      # empty commit.
+      with_env('GIT_DIR' => File.join(victim, '.git')) do
+        build_sentinel(File.join(dir, 'other'))
+      end
+
+      assert_equal before, sentinel_state(victim),
+                   'the sentinel builder wrote into the repository an ambient GIT_DIR named'
+      assert_path_exists File.join(dir, 'other', '.git'),
+                         'the second sentinel must be a repository of its own'
+    end
+  end
+
   def test_ambient_git_config_pairs_cannot_reach_a_fixture_repo
     Dir.mktmpdir('stale-branches-containment') do |dir|
       hooks = File.join(dir, 'hooks')
@@ -418,8 +448,18 @@ class RepoBuilderContainmentTest < Minitest::Test
   def build_sentinel(dir)
     FileUtils.mkdir_p(dir)
     run_git(dir, 'init', '-q', '-b', 'sentinel-main')
-    File.write(File.join(dir, 'kept.txt'), "kept\n")
+    # Content differs per sentinel. Two sentinels holding identical bytes
+    # would let a redirected build stage nothing and fail on an empty
+    # commit, which reads as a broken test rather than as the escape it
+    # is -- the escape only becomes visible when the redirected commit
+    # can actually succeed.
+    File.write(File.join(dir, 'kept.txt'), "kept by #{File.basename(dir)}\n")
     run_git(dir, 'add', 'kept.txt')
+    # Identity is passed explicitly rather than left to the neutralized
+    # env. It is what the env would have supplied anyway, and carrying it
+    # here means a sentinel built WITHOUT that env still commits -- so a
+    # missing scrub shows up as the escape it is, rather than as a commit
+    # that failed for want of a name on a machine that has one.
     run_git(dir, '-c', 'user.name=Sentinel', '-c', 'user.email=sentinel@example.com',
             'commit', '-qm', 'sentinel')
     dir
@@ -429,11 +469,30 @@ class RepoBuilderContainmentTest < Minitest::Test
     run_git(dir, 'for-each-ref', '--format=%(refname) %(objectname)')
   end
 
+  # Runs under the same neutralization the fixtures use. The sentinel is
+  # the thing an escape is measured against, so a sentinel built through
+  # an ambient GIT_DIR would be built INSIDE the repository it is
+  # supposed to be protecting -- and read back from there too, leaving
+  # every assertion comparing that repository to itself.
   def run_git(dir, *args)
-    stdout, stderr, status = Open3.capture3('git', '-C', dir, *args)
-    raise "sentinel git #{args.join(' ')} failed: #{stderr.strip}" unless status.success?
+    env = Fixtures::RepoBuilder.neutralized_env(sentinel_config)
+    stdout, stderr, status = Open3.capture3(env, 'git', '-C', dir, *args)
+    unless status.success?
+      # stdout as well as stderr, for the same reason RepoBuilder#git
+      # reports both: git commit announces its failures on stdout, and
+      # "nothing to commit" is exactly the failure this helper hits.
+      raise "sentinel git #{args.join(' ')} failed\nstdout: #{stdout.strip}\nstderr: #{stderr.strip}"
+    end
 
     stdout
+  end
+
+  def sentinel_config
+    @sentinel_config ||= begin
+      path = File.join(Dir.mktmpdir('stale-branches-sentinel-config'), 'gitconfig-empty')
+      File.write(path, '')
+      path
+    end
   end
 
   def with_env(pairs)
