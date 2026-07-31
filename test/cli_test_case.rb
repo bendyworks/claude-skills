@@ -6,9 +6,11 @@
 # this file defines no tests. The scaffolding's own contract tests
 # live in test/cli_test_case_test.rb.
 #
-# Subclasses define run_cli(argv) to name their CLI entry point (and
-# any per-CLI safety guard), and may override extra_scrubbed_env_keys
-# to extend the env scrub. The scrub rides Minitest's
+# Subclasses define dispatch_cli(argv) to name their CLI entry point
+# and guard_cli_invocation(argv) for any per-CLI safety refusal, and
+# may override extra_scrubbed_env_keys to extend the env scrub. run_cli
+# itself is base-owned and refuses to be overridden, so that no suite
+# can dispatch around its own guard. The scrub rides Minitest's
 # before_setup/after_teardown lifecycle hooks, which run outside the
 # user-level setup/teardown chain -- so subclasses may override setup
 # or teardown freely, with or without super, without losing the scrub
@@ -67,8 +69,36 @@ class CliTestCase < Minitest::Test
     []
   end
 
+  # The invocation the tests drive, owned here rather than written per
+  # suite: a safety check hand-rolled inside a subclass's own run_cli is
+  # one the next suite copies by hand, and a copy that drifts or is
+  # forgotten leaves a suite that goes on passing with nothing checked.
+  # Subclasses name their entry point in dispatch_cli and their
+  # refusals in guard_cli_invocation.
+  def run_cli(argv)
+    guard_cli_invocation(argv)
+    dispatch_cli(argv)
+  end
+
+  # Subclasses override to refuse an invocation that must never reach
+  # the CLI at all -- a leaked API token, a target repository outside
+  # the throwaway directory -- by flunking. Runs before every dispatch.
+  def guard_cli_invocation(argv); end
+
+  # Subclasses override to name their CLI's entry point.
+  def dispatch_cli(_argv)
+    raise NotImplementedError, "#{self.class} must define dispatch_cli naming its CLI entry point"
+  end
+
   def before_setup
     super
+    # An overriding subclass looks exactly like a working one, and what
+    # it drops is the guard, so this is refused rather than discouraged.
+    if method(:run_cli).owner != CliTestCase
+      flunk "#{self.class} overrides run_cli; define dispatch_cli instead, so a " \
+            'per-CLI guard cannot be bypassed by overriding the runner that calls it'
+    end
+
     keys = (BASE_SCRUBBED_ENV_KEYS + extra_scrubbed_env_keys).uniq
     @saved_env = keys.to_h { |key| [key, ENV.delete(key)] }
     install_command_shims
@@ -88,15 +118,28 @@ class CliTestCase < Minitest::Test
     flunk "command intercepted by test shim (live call refused):\n#{@shim_hits}" if @shim_hits
   end
 
-  # Runs the CLI expecting an abort; returns the SystemExit message
-  # (Kernel#abort carries its message on the exception).
-  def abort_message(argv)
+  # Everything a refusing CLI did on its way out. Kernel#abort carries
+  # its message on the exception and exits 1; a CLI that prints its own
+  # complaint and calls exit instead carries no message worth reading,
+  # which is why the streams and the status are here beside it.
+  AbortResult = Struct.new(:status, :message, :stdout, :stderr)
+
+  # Runs the CLI expecting an abort; returns an AbortResult.
+  def abort_result(argv)
+    status = nil
     message = nil
-    capture_io do
+    out, err = capture_io do
       error = assert_raises(SystemExit) { run_cli(argv) }
+      status = error.status
       message = error.message
     end
-    message
+    AbortResult.new(status, message, out, err)
+  end
+
+  # Runs the CLI expecting an abort; returns the SystemExit message
+  # alone, which is all most rejection tests care about.
+  def abort_message(argv)
+    abort_result(argv).message
   end
 
   # Runs the CLI expecting a clean return; returns captured stdout.

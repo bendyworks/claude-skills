@@ -647,7 +647,22 @@ class OracleTestCase < CliTestCase
     ['gh']
   end
 
-  def run_cli(argv)
+  # This sweep deletes branches, so the directory it is aimed at is not
+  # a detail that degrades gracefully -- and the two targets that would
+  # do the damage are the ones nobody writes deliberately: this
+  # repository named outright, and the working directory a forgotten -C
+  # falls back to. During a test run both are the developer's own clone.
+  # The target is read from argv rather than from the fixture, so a test
+  # building its own argv is covered by the same refusal.
+  def guard_cli_invocation(argv)
+    index = argv.index('-C')
+    target = index ? argv[index + 1] : Dir.pwd
+    return if target && Fixtures::RepoBuilder.under_tmpdir?(File.expand_path(target))
+
+    flunk "refusing to sweep #{target.inspect}: outside #{Dir.tmpdir}"
+  end
+
+  def dispatch_cli(argv)
     raise "#{CLI_PATH} does not exist yet" unless File.exist?(CLI_PATH)
 
     StaleBranches::CLI.run(argv)
@@ -703,6 +718,67 @@ class OracleTestCase < CliTestCase
     Dir.mktmpdir("stale-branches-#{label}") do |dir|
       yield Fixtures::BranchRepo.new(File.join(dir, 'flat')).build
     end
+  end
+end
+
+# Drives the guard rather than a fixture: its target is whatever the
+# contract test sets, including the two a sweep must never be pointed
+# at. Unset means the body does nothing, so autorun's own pass over
+# this class stays green.
+class SweepTargetProbeCase < OracleTestCase
+  class << self
+    attr_accessor :target
+  end
+
+  def test_sweep_the_configured_target
+    return unless self.class.target
+
+    run_cli(self.class.target)
+  end
+end
+
+# The sweep deletes branches, so where it is aimed is not a detail that
+# degrades gracefully. Every other defense here is about what the sweep
+# READS -- an ambient GIT_DIR, a stale tracking ref -- while this one is
+# about what it is asked to write to, and the two most dangerous targets
+# are the ones no test would think to write: this very repository, named
+# outright, and the working directory a missing -C falls back to. Both
+# are the developer's clone during a test run.
+class SweepTargetTest < Minitest::Test
+  def test_a_target_outside_the_temp_directory_is_refused
+    assert_match(/outside/i, refusal(['-C', Dir.pwd]),
+                 'a sweep aimed at a working clone was allowed to run')
+  end
+
+  def test_no_target_at_all_is_refused_rather_than_falling_back_to_the_working_directory
+    assert_match(/outside/i, refusal([]),
+                 'a sweep with no -C ran against whatever directory the suite started in')
+  end
+
+  # The guard has to let a throwaway through, or it would refuse the
+  # whole suite and every oracle test would pass by never running.
+  # Asserted as "not refused" rather than as a clean run, so this keeps
+  # its meaning once the CLI exists and the probe reaches a real sweep.
+  def test_a_target_inside_the_temp_directory_is_allowed
+    Dir.mktmpdir('stale-branches-guard') do |dir|
+      refute_match(/outside/i, run_probe(['-C', dir]).failure&.message.to_s,
+                   'the guard refused a throwaway repository')
+    end
+  end
+
+  private
+
+  def refusal(target)
+    result = run_probe(target)
+    refute result.passed?, "the guard allowed #{target.inspect}"
+    result.failure.message
+  end
+
+  def run_probe(target)
+    SweepTargetProbeCase.target = target
+    SweepTargetProbeCase.new('test_sweep_the_configured_target').run
+  ensure
+    SweepTargetProbeCase.target = nil
   end
 end
 

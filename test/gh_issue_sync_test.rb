@@ -816,7 +816,7 @@ end
 # Tests that invoke CLI.run subclass CliTestCase for the abort capture
 # and env scrub; pure-helper tests stay on Minitest::Test.
 class CliArgumentRejectionTest < CliTestCase
-  def run_cli(argv)
+  def dispatch_cli(argv)
     GhIssueSync::CLI.run(argv)
   end
 

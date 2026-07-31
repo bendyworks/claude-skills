@@ -45,10 +45,11 @@ class LinearTestCase < CliTestCase
   # env scrub holds, and one of them reaches a live commentDelete
   # mutation if it does not. Refuse to run the CLI with a real token
   # present (e.g. a subclass overriding setup without super).
-  # The next env-token-authenticated CLI suite should not copy this
-  # wrapper by hand: hoist it into CliTestCase instead (issue #55).
-  def run_cli(argv)
+  def guard_cli_invocation(_argv)
     flunk 'LINEAR_API_TOKEN leaked into the test environment' if ENV.key?('LINEAR_API_TOKEN')
+  end
+
+  def dispatch_cli(argv)
     Linear::CLI.run(argv)
   end
 end
@@ -71,14 +72,11 @@ class DispatchTest < LinearTestCase
   end
 
   def test_unknown_subcommand_warns_prints_usage_and_exits_nonzero
-    status = nil
-    out, err = capture_io do
-      error = assert_raises(SystemExit) { run_cli(['bogus-subcommand']) }
-      status = error.status
-    end
-    assert_equal 1, status
-    assert_includes err, 'linear: unknown subcommand "bogus-subcommand"'
-    assert_includes out, 'semantic CLI for Linear'
+    result = abort_result(['bogus-subcommand'])
+
+    assert_equal 1, result.status
+    assert_includes result.stderr, 'linear: unknown subcommand "bogus-subcommand"'
+    assert_includes result.stdout, 'semantic CLI for Linear'
   end
 end
 

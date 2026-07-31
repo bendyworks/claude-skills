@@ -112,6 +112,84 @@ class BrokenShimProbeCase < CliTestCase
   def test_body_never_reached_when_install_raises; end
 end
 
+# The guard the base runs ahead of every dispatch. A per-CLI safety
+# check hand-rolled inside run_cli is one the next suite copies by hand
+# and drifts; declaring it as a hook keeps one runner responsible for
+# calling it. Armed by the outer contract test only.
+class GuardProbeCase < CliTestCase
+  class << self
+    attr_accessor :armed
+  end
+
+  attr_reader :dispatched
+
+  def guard_cli_invocation(argv)
+    flunk "guard refused #{argv.inspect}" if self.class.armed
+  end
+
+  def dispatch_cli(argv)
+    @dispatched = argv
+  end
+
+  def test_run_the_cli
+    run_cli(%w[some args])
+  end
+end
+
+# Overriding run_cli puts a subclass back outside the base's guard,
+# which is the bypass the two hooks exist to prevent -- and it is a
+# silent one, since the suite goes on passing with nothing checked.
+# The override itself is what the outer contract test arms, defined on
+# this class for the length of that test alone: a permanent one would
+# fail every autorun pass over this file, which is what a working
+# refusal looks like from the outside.
+class RunCliOverrideProbeCase < CliTestCase
+  def dispatch_cli(argv); end
+
+  def test_body_never_reached_when_the_override_is_refused; end
+end
+
+class MissingDispatchProbeCase < CliTestCase
+  class << self
+    attr_accessor :armed
+  end
+
+  def test_run_without_a_dispatch_hook
+    run_cli([]) if self.class.armed
+  end
+end
+
+# A CLI that refuses: something on each stream and a status that is not
+# 1, which is the shape abort_message alone cannot describe.
+class AbortProbeCase < CliTestCase
+  attr_reader :seen
+
+  def dispatch_cli(argv)
+    puts "usage: #{argv.first}"
+    warn "probe: refusing #{argv.first}"
+    exit 3
+  end
+
+  def test_record_abort_result
+    @seen = abort_result(%w[bogus])
+  end
+end
+
+# Kernel#abort carries its message on the exception and exits 1, which
+# is the case abort_message was written for and must keep answering
+# now that it is rebuilt on abort_result.
+class AbortMessageProbeCase < CliTestCase
+  attr_reader :seen
+
+  def dispatch_cli(argv)
+    abort "probe: cannot #{argv.first}"
+  end
+
+  def test_record_abort_message
+    @seen = { message: abort_message(%w[bogus]), status: abort_result(%w[bogus]).status }
+  end
+end
+
 class CliTestCaseTest < Minitest::Test
   SENTINEL_KEYS = (%w[POSIXLY_CORRECT CLI_TEST_CASE_SENTINEL] +
                    CliTestCase::GIT_LOCATION_ENV_KEYS).freeze
@@ -202,6 +280,66 @@ class CliTestCaseTest < Minitest::Test
                  'PATH must be restored to its exact pre-test value'
     assert_nil system('cli-test-case-fake-command', out: File::NULL, err: File::NULL),
                'shimmed command must not resolve once the test is over'
+  end
+
+  def test_the_guard_runs_before_the_dispatch_and_stops_it
+    GuardProbeCase.armed = true
+    probe = GuardProbeCase.new('test_run_the_cli')
+    result = probe.run
+
+    refute result.passed?, 'a refusing guard must fail the test'
+    assert_match(/guard refused/, result.failure.message)
+    assert_nil probe.dispatched, 'the CLI was dispatched after its guard refused'
+  ensure
+    GuardProbeCase.armed = false
+  end
+
+  def test_a_passing_guard_dispatches_the_argv_unchanged
+    GuardProbeCase.armed = false
+    probe = run_probe(GuardProbeCase, :test_run_the_cli)
+
+    assert_equal %w[some args], probe.dispatched
+  end
+
+  # Refused rather than merely discouraged: an overriding subclass looks
+  # exactly like a working one, and what it drops is the safety check.
+  def test_a_subclass_that_overrides_run_cli_is_refused
+    RunCliOverrideProbeCase.class_eval do
+      def run_cli(argv)
+        dispatch_cli(argv)
+      end
+    end
+    result = RunCliOverrideProbeCase.new('test_body_never_reached_when_the_override_is_refused').run
+
+    refute result.passed?, 'overriding run_cli must fail rather than bypass the guard'
+    assert_match(/dispatch_cli/, result.failure.message)
+  ensure
+    RunCliOverrideProbeCase.send(:remove_method, :run_cli)
+  end
+
+  def test_a_subclass_with_no_dispatch_hook_says_which_hook_is_missing
+    MissingDispatchProbeCase.armed = true
+    result = MissingDispatchProbeCase.new('test_run_without_a_dispatch_hook').run
+
+    refute result.passed?
+    assert_match(/dispatch_cli/, result.failure.message)
+  ensure
+    MissingDispatchProbeCase.armed = false
+  end
+
+  def test_abort_result_carries_the_status_and_both_streams
+    probe = run_probe(AbortProbeCase, :test_record_abort_result)
+
+    assert_equal 3, probe.seen.status
+    assert_includes probe.seen.stdout, 'usage: bogus'
+    assert_includes probe.seen.stderr, 'probe: refusing bogus'
+  end
+
+  def test_abort_message_still_answers_with_the_abort_message_alone
+    probe = run_probe(AbortMessageProbeCase, :test_record_abort_message)
+
+    assert_equal 'probe: cannot bogus', probe.seen[:message]
+    assert_equal 1, probe.seen[:status]
   end
 
   def test_shim_install_failure_leaves_path_intact
