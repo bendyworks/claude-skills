@@ -579,3 +579,194 @@ class RepoBuilderContainmentTest < Minitest::Test
     saved.each { |key, value| value.nil? ? ENV.delete(key) : ENV[key] = value }
   end
 end
+
+# The sweep itself, graded against the tables above. Everything from here
+# down needs bin/stale-branches; until it exists these tests are red, and
+# that is the point -- the specification lands before the code satisfying
+# it, and the CLI is written until these turn green.
+#
+# The CLI is driven IN-PROCESS rather than as a subprocess, for three
+# reasons that each bite differently. CI's coverage guard passes on a
+# merely-loaded file, so a subprocess sweep would report zero coverage
+# while CI stayed green. Minitest's capture_io redirects Ruby's $stdout
+# object rather than file descriptor 1, so a child's output escapes it
+# entirely. And `ruby` itself fails when invoked from inside a fixture
+# directory under a version manager.
+CLI_PATH = File.expand_path('../bin/stale-branches', __dir__)
+load CLI_PATH if File.exist?(CLI_PATH)
+
+# Turns the sweep's report back into rows the oracle can be compared with.
+module SweepRun
+  Result = Struct.new(:rows, :stdout, :stderr)
+
+  # The reason column carries a stable key, optionally followed by a
+  # parenthesized detail (a pull-request number, say). Only the key is
+  # matched, so the legend's wording stays free to change without
+  # breaking a test.
+  REPORT_LINE = /\A(?<branch>\S+)\s{2,}(?<outcome>DELETE|keep)\s{2,}(?<reason>[a-z0-9:-]+)/
+
+  # A sweep that hands a full refname to `git branch -d` deletes nothing
+  # while reporting success. The only evidence it went wrong is the noise
+  # git made on the way past, so every run asserts there was none.
+  GIT_COMPLAINT = /^(error|fatal):/
+
+  def self.parse(stdout)
+    stdout.lines.filter_map do |line|
+      match = REPORT_LINE.match(line)
+      next unless match
+
+      Fixtures::Oracle::Row.new(match[:branch],
+                                match[:outcome] == 'DELETE' ? 'DELETE' : 'KEEP',
+                                match[:reason], nil)
+    end
+  end
+end
+
+# Shared driving and assertions. Each fixture gets its own subclass so a
+# failure names the repository shape it came from.
+class OracleTestCase < CliTestCase
+  # PR 2's sweep is the offline half and must never reach a forge. Naming
+  # gh here shadows it with a PATH shim that records the attempt and
+  # fails, so any code path that calls it flunks the test rather than
+  # silently succeeding on a developer's authenticated machine.
+  def shimmed_commands
+    ['gh']
+  end
+
+  def run_cli(argv)
+    raise "#{CLI_PATH} does not exist yet" unless File.exist?(CLI_PATH)
+
+    StaleBranches::CLI.run(argv)
+  end
+
+  # The CLI shells out to git, so it runs under the same neutralized
+  # environment the fixture was built with: a developer's commit.gpgsign
+  # or merge.ff must not be able to change a verdict, and an ambient
+  # GIT_DIR must not be able to redirect the sweep at their own clone.
+  # A nil value means "unset", which is how RepoBuilder deletes the keys
+  # that would redirect git.
+  def sweep(repo, *extra)
+    saved = repo.env.keys.to_h { |key| [key, ENV[key]] }
+    repo.env.each { |key, value| value.nil? ? ENV.delete(key) : ENV[key] = value }
+    out, err = capture_io { run_cli(['-C', repo.work, *extra]) }
+    SweepRun::Result.new(SweepRun.parse(out), out, err)
+  ensure
+    saved&.each { |key, value| value.nil? ? ENV.delete(key) : ENV[key] = value }
+  end
+
+  # Collects every disagreement before failing rather than stopping at the
+  # first. A half-built sweep gets most of the table wrong at once, and a
+  # grader that names one row per run turns that into one round trip per
+  # row. `overrides` lets a test that moved HEAD say which rows it expects
+  # to differ from the table, so the rest still assert.
+  def assert_matches_oracle(expected, result, overrides = {})
+    actual = result.rows.to_h { |row| [row.branch, row] }
+
+    mismatches = expected.filter_map do |row|
+      want_verdict, want_reason = overrides.fetch(row.branch, [row.verdict, row.reason])
+      got = actual[row.branch]
+      if got.nil?
+        "#{row.branch}: missing from the report -- #{row.why}"
+      elsif got.verdict != want_verdict || got.reason != want_reason
+        "#{row.branch}: expected #{want_verdict}/#{want_reason}, " \
+          "got #{got.verdict}/#{got.reason} -- #{row.why}"
+      end
+    end
+
+    mismatches += (actual.keys - expected.map(&:branch))
+                  .map { |branch| "#{branch}: reported, but the oracle does not list it" }
+
+    assert_empty mismatches, "#{mismatches.length} row(s) disagree with the oracle:\n" \
+                             "#{mismatches.join("\n")}\n\nfull report:\n#{result.stdout}"
+  end
+
+  def refute_git_complaints(result)
+    complaints = (result.stdout.lines + result.stderr.lines).grep(SweepRun::GIT_COMPLAINT)
+    assert_empty complaints, "git reported errors during the sweep:\n#{complaints.join}"
+  end
+
+  def with_flat_fixture(label)
+    Dir.mktmpdir("stale-branches-#{label}") do |dir|
+      yield Fixtures::BranchRepo.new(File.join(dir, 'flat')).build
+    end
+  end
+end
+
+class FlatFixtureOracleTest < OracleTestCase
+  ORACLE = File.expand_path('fixtures/expected-degraded.txt', __dir__)
+
+  def test_report_matches_the_oracle_with_no_forge_available
+    with_flat_fixture('flat') do |repo|
+      result = sweep(repo)
+      assert_matches_oracle(Fixtures::Oracle.load(ORACLE), result)
+      refute_git_complaints(result)
+    end
+  end
+
+  # Standing on a branch protects it whatever the evidence says, and
+  # moving off one un-protects it. Asserting both halves is what tells
+  # current-branch protection from a rule that merely happens to keep the
+  # branch the fixture left HEAD on: a-squash-clean is DELETE in the table
+  # on its content alone, and o-current is KEEP only because HEAD is
+  # there, so checking out the first must flip both rows.
+  def test_the_checked_out_branch_is_protected_and_the_one_left_behind_is_not
+    with_flat_fixture('head') do |repo|
+      repo.checkout('a-squash-clean')
+      result = sweep(repo)
+
+      assert_matches_oracle(
+        Fixtures::Oracle.load(ORACLE), result,
+        'a-squash-clean' => %w[KEEP protected:current],
+        'o-current' => %w[DELETE pass1:ancestor]
+      )
+      refute_git_complaints(result)
+    end
+  end
+
+  # With HEAD detached there is no current branch to protect. The sweep
+  # must not mistake the empty answer for a branch named HEAD -- which is
+  # what `rev-parse --abbrev-ref HEAD` hands back where `symbolic-ref -q
+  # --short HEAD` fails -- and o-current, protected by nothing else, must
+  # lose its protection.
+  def test_a_detached_head_protects_no_branch_at_all
+    with_flat_fixture('detached') do |repo|
+      repo.detach_head
+      result = sweep(repo)
+
+      refute_includes result.rows.map(&:branch), 'HEAD',
+                      'a detached HEAD was reported as a branch'
+      assert_matches_oracle(Fixtures::Oracle.load(ORACLE), result,
+                            'o-current' => %w[DELETE pass1:ancestor])
+      refute_git_complaints(result)
+    end
+  end
+end
+
+class GitflowOracleTest < OracleTestCase
+  ORACLE = File.expand_path('fixtures/gitflow-expected-degraded.txt', __dir__)
+
+  # A repository whose default branch is develop, with a non-default main
+  # beside it. Every row here fails when the sweep assumes main. This
+  # fixture also ends with HEAD detached, so the whole table is graded
+  # from a detached HEAD as a matter of course.
+  def test_report_matches_the_oracle_with_no_forge_available
+    Dir.mktmpdir('stale-branches-gitflow') do |dir|
+      repo = Fixtures::GitflowRepo.new(File.join(dir, 'gf')).build
+      result = sweep(repo)
+      assert_matches_oracle(Fixtures::Oracle.load(ORACLE), result)
+      refute_git_complaints(result)
+    end
+  end
+
+  # The reason a forge was not consulted belongs in a warning, once, not
+  # in a per-branch reason. Reporting "no pull request" for a lookup that
+  # never happened states an absence nobody checked.
+  def test_no_row_claims_a_pull_request_was_absent
+    Dir.mktmpdir('stale-branches-gitflow-reasons') do |dir|
+      repo = Fixtures::GitflowRepo.new(File.join(dir, 'gf')).build
+      offenders = sweep(repo).rows.select { |row| row.reason.include?('no-pull-request') }
+      assert_empty offenders.map(&:branch),
+                   'a reason claimed a pull request was absent without checking'
+    end
+  end
+end
