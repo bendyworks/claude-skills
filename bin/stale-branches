@@ -243,6 +243,13 @@ module StaleBranches
       lines('rev-parse', ref).first
     end
 
+    # Answered by walking the commit graph rather than by comparing
+    # content, so a yes here is exact: the second ref contains the first
+    # commit for commit.
+    def ancestor?(ref, other)
+      succeeds?('merge-base', '--is-ancestor', ref, other)
+    end
+
     # nil rather than a failure where the ref is absent or is not
     # symbolic, both of which are ordinary states rather than problems.
     def symbolic_ref(name)
@@ -345,10 +352,36 @@ module StaleBranches
       note_stale_tracking_ref
       note_stale_head_ref
       partition_branches
+      clear_by_ancestry
       self
     end
 
     private
+
+    # The cheap pass, and the only one whose answer is beyond argument.
+    # Every branch is named by its full refname, because git resolves a
+    # bare name through refs/tags before refs/heads: a tag sharing a
+    # branch's name and pointing at the default branch would answer this
+    # question about itself, and the branch would be cleared for holding
+    # nothing while its own work has never landed.
+    def clear_by_ancestry
+      decide do |branch|
+        ['DELETE', 'pass1:ancestor'] if @git.ancestor?("refs/heads/#{branch}", @measured_ref)
+      end
+    end
+
+    # Runs a stage over the branches still undecided, moving the ones it
+    # answers for into the report and leaving the rest for the stage
+    # after it. Later stages are the expensive ones, so what an earlier
+    # stage settles is never paid for twice.
+    def decide
+      remaining = []
+      @candidates.each do |branch|
+        verdict, reason = yield(branch)
+        reason ? @rows << Row.new(branch, verdict, reason) : remaining << branch
+      end
+      @candidates = remaining
+    end
 
     # Every local branch is either protected -- decided by its name and
     # where HEAD is standing, at no cost -- or a candidate, which is

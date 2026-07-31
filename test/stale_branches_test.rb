@@ -1285,6 +1285,80 @@ class EnumerationTest < OracleTestCase
   end
 end
 
+# The cheap first pass: a branch whose tip the default branch already
+# contains adds nothing to it, and git answers that by walking commits
+# rather than comparing content. Everything it clears is clear beyond
+# argument, which is why it runs before the expensive checks.
+class Pass1Test < OracleTestCase
+  def test_the_flat_tables_ancestor_row_is_the_one_ancestry_clears
+    with_flat_fixture('pass1') do |repo|
+      assert_stage_matches(EnumerationTest::FLAT_ORACLE, repo, 'pass1:ancestor')
+    end
+  end
+
+  # Ancestry of DEVELOP. Every branch here is an ancestor of something,
+  # and measuring against main would clear the wrong ones.
+  def test_the_gitflow_tables_ancestor_row_is_measured_against_its_own_default
+    with_gitflow_fixture('pass1') do |repo|
+      assert_stage_matches(EnumerationTest::GITFLOW_ORACLE, repo, 'pass1:ancestor')
+    end
+  end
+
+  # The trap both fixtures build, and the reason enumeration keeps full
+  # refnames. Asked about a bare name, git resolves refs/tags before
+  # refs/heads -- so `merge-base --is-ancestor s-tag-shadow main` is
+  # answered about the tag, which points AT the default branch, and the
+  # branch is cleared for holding nothing while its own work has never
+  # landed. That is a wrongful deletion, not a wrongful keep.
+  def test_a_tag_at_the_default_branch_does_not_clear_the_branch_it_shadows
+    with_flat_fixture('tag-trap') do |repo|
+      sweep = measure(repo)
+
+      refute_includes stage_of(sweep, 'pass1:ancestor').keys, 's-tag-shadow'
+      assert_includes sweep.candidates, 's-tag-shadow',
+                      'the shadowed branch was decided by something, having no evidence yet'
+    end
+  end
+
+  def test_a_tag_at_the_default_branch_does_not_clear_it_in_the_gitflow_repository_either
+    with_gitflow_fixture('tag-trap') do |repo|
+      refute_includes stage_of(measure(repo), 'pass1:ancestor').keys, 'amb'
+    end
+  end
+
+  # Ancestry is asked of the remote-tracking ref, so a local default
+  # branch carrying commits nobody else has cannot clear anything: the
+  # branch below is an ancestor of the local main and of nothing the
+  # remote knows about.
+  def test_ancestry_of_an_unpushed_local_default_clears_nothing
+    with_flat_fixture('pass1-unpushed') do |repo|
+      repo.checkout('main')
+      repo.git('merge', '-q', '--no-ff', 'g-open', '-m', 'merge g-open locally only')
+
+      refute_includes stage_of(measure(repo), 'pass1:ancestor').keys, 'g-open'
+    end
+  end
+
+  private
+
+  def assert_stage_matches(oracle_path, repo, stage)
+    expected = Fixtures::Oracle.load(oracle_path)
+                               .select { |row| row.reason == stage }
+                               .to_h { |row| [row.branch, row.verdict] }
+    refute_empty expected, "the table demands nothing of #{stage}"
+
+    assert_equal expected, stage_of(measure(repo), stage)
+  end
+
+  def stage_of(sweep, stage)
+    sweep.rows.select { |row| row.reason == stage }.to_h { |row| [row.branch, row.verdict] }
+  end
+
+  def measure(repo)
+    with_repo_env(repo) { StaleBranches::Sweep.new(git_for(repo)).run }
+  end
+end
+
 # The wiring between the pure parser and the process. A refusal has to
 # reach stderr under the tool's own name and exit non-zero, or a
 # scripted caller reads a sweep that never ran as one that found
