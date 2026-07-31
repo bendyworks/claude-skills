@@ -6,9 +6,11 @@
 # this file defines no tests. The scaffolding's own contract tests
 # live in test/cli_test_case_test.rb.
 #
-# Subclasses define run_cli(argv) to name their CLI entry point (and
-# any per-CLI safety guard), and may override extra_scrubbed_env_keys
-# to extend the env scrub. The scrub rides Minitest's
+# Subclasses define dispatch_cli(argv) to name their CLI entry point
+# and guard_cli_invocation(argv) for any per-CLI safety refusal, and
+# may override extra_scrubbed_env_keys to extend the env scrub. run_cli
+# itself is base-owned and refuses to be overridden, so that no suite
+# can dispatch around its own guard. The scrub rides Minitest's
 # before_setup/after_teardown lifecycle hooks, which run outside the
 # user-level setup/teardown chain -- so subclasses may override setup
 # or teardown freely, with or without super, without losing the scrub
@@ -29,11 +31,39 @@ require 'minitest/autorun'
 require 'tmpdir'
 
 class CliTestCase < Minitest::Test
+  # The variables that aim git at a repository other than the one named
+  # on the command line. `git -C <dir>` does not override an inherited
+  # GIT_DIR, so a CLI that passes no environment of its own inherits
+  # whatever the shell names. In a test that is the developer's own
+  # clone, reached by a CLI that believes it is working on a
+  # throwaway. (bin/stale-branches unsets these for its own children
+  # too, because it deletes; this scrub covers every CLI, including the
+  # ones that do not.) Scrubbed for every CLI suite rather than
+  # only where a fixture builds one, because a test that drives a CLI
+  # without building anything -- argument handling, a usage error --
+  # still reaches far enough in for it to run git.
+  GIT_LOCATION_ENV_KEYS = %w[
+    GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_OBJECT_DIRECTORY
+    GIT_ALTERNATE_OBJECT_DIRECTORIES GIT_COMMON_DIR GIT_NAMESPACE
+    GIT_CEILING_DIRECTORIES
+  ].freeze
+
+  # Git variables that reach git's configuration without going through
+  # any config file, so pointing GIT_CONFIG_GLOBAL and GIT_CONFIG_SYSTEM
+  # at an empty one does not neutralize them. core.hooksPath arriving
+  # this way is arbitrary script execution during a test, and
+  # `git branch -d` does fire the reference-transaction hook.
+  GIT_CONFIG_ENV_KEYS = %w[
+    GIT_CONFIG GIT_CONFIG_COUNT GIT_CONFIG_GLOBAL GIT_CONFIG_SYSTEM
+    GIT_TEMPLATE_DIR
+  ].freeze
+
   # Env vars whose machine values must not leak into any CLI test run,
   # deleted before each test and restored to their original values
   # afterward. POSIXLY_CORRECT is scrubbed for every CLI because
   # OptionParser's parsing mode depends on it.
-  BASE_SCRUBBED_ENV_KEYS = %w[POSIXLY_CORRECT].freeze
+  BASE_SCRUBBED_ENV_KEYS = (%w[POSIXLY_CORRECT] + GIT_LOCATION_ENV_KEYS +
+                            GIT_CONFIG_ENV_KEYS).freeze
 
   # Subclasses override to extend the scrub with their CLI's own env
   # keys (tokens, default-team settings, and kin).
@@ -51,8 +81,36 @@ class CliTestCase < Minitest::Test
     []
   end
 
+  # The invocation the tests drive, owned here rather than written per
+  # suite: a safety check hand-rolled inside a subclass's own run_cli is
+  # one the next suite copies by hand, and a copy that drifts or is
+  # forgotten leaves a suite that goes on passing with nothing checked.
+  # Subclasses name their entry point in dispatch_cli and their
+  # refusals in guard_cli_invocation.
+  def run_cli(argv)
+    guard_cli_invocation(argv)
+    dispatch_cli(argv)
+  end
+
+  # Subclasses override to refuse an invocation that must never reach
+  # the CLI at all -- a leaked API token, a target repository outside
+  # the throwaway directory -- by flunking. Runs before every dispatch.
+  def guard_cli_invocation(argv); end
+
+  # Subclasses override to name their CLI's entry point.
+  def dispatch_cli(_argv)
+    raise NotImplementedError, "#{self.class} must define dispatch_cli naming its CLI entry point"
+  end
+
   def before_setup
     super
+    # An overriding subclass looks exactly like a working one, and what
+    # it drops is the guard, so this is refused rather than discouraged.
+    if method(:run_cli).owner != CliTestCase
+      flunk "#{self.class} overrides run_cli; define dispatch_cli instead, so a " \
+            'per-CLI guard cannot be bypassed by overriding the runner that calls it'
+    end
+
     keys = (BASE_SCRUBBED_ENV_KEYS + extra_scrubbed_env_keys).uniq
     @saved_env = keys.to_h { |key| [key, ENV.delete(key)] }
     install_command_shims
@@ -72,15 +130,28 @@ class CliTestCase < Minitest::Test
     flunk "command intercepted by test shim (live call refused):\n#{@shim_hits}" if @shim_hits
   end
 
-  # Runs the CLI expecting an abort; returns the SystemExit message
-  # (Kernel#abort carries its message on the exception).
-  def abort_message(argv)
+  # Everything a refusing CLI did on its way out. Kernel#abort carries
+  # its message on the exception and exits 1; a CLI that prints its own
+  # complaint and calls exit instead carries no message worth reading,
+  # which is why the streams and the status are here beside it.
+  AbortResult = Struct.new(:status, :message, :stdout, :stderr)
+
+  # Runs the CLI expecting an abort; returns an AbortResult.
+  def abort_result(argv)
+    status = nil
     message = nil
-    capture_io do
+    out, err = capture_io do
       error = assert_raises(SystemExit) { run_cli(argv) }
+      status = error.status
       message = error.message
     end
-    message
+    AbortResult.new(status, message, out, err)
+  end
+
+  # Runs the CLI expecting an abort; returns the SystemExit message
+  # alone, which is all most rejection tests care about.
+  def abort_message(argv)
+    abort_result(argv).message
   end
 
   # Runs the CLI expecting a clean return; returns captured stdout.
