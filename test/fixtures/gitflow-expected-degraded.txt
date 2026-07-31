@@ -1,0 +1,25 @@
+# Expected verdicts for the gitflow fixture, as the sweep should report
+# them when pull-request lookups are unavailable -- no GitHub CLI, not
+# authenticated, offline, or a remote that is not GitHub at all.
+#
+# One row per local branch. Columns are whitespace-separated: the branch
+# name, the verdict, the reason key the report must carry, and free prose
+# saying why the row exists. The reason is asserted, not just the verdict,
+# because several branches here survive for more than one reason and only
+# the reason says which rule actually fired. main is the clearest case: it
+# is protected by name, and it also holds work develop does not have, so a
+# sweep with no protected set at all still keeps it -- and would still be
+# wrong.
+#
+# No row's reason may read "no pull request". Nothing here consulted a
+# forge, and reporting an absence that was never checked is the specific
+# mistake this fixture exists to catch.
+#
+# branch              verdict  reason                   why
+develop               KEEP     protected:default        the repository's default branch
+main                  KEEP     protected:long-lived     present but not the default; protected by name, not by evidence
+release/1.x           KEEP     protected:long-lived     merged into develop and otherwise deletable; only the name saves it
+gf-ancestor           DELETE   pass1:ancestor           already an ancestor of the default branch
+gf-squashed           DELETE   proof-a:content-landed   squash-merged into develop, so merging it back adds nothing
+merged-to-main-only   KEEP     kept:not-landed          merged into main only; measuring against main would clear it
+amb                   KEEP     kept:not-landed          work never landed; a tag of the same name points at develop
