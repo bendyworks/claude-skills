@@ -949,6 +949,28 @@ class OracleTestCase < CliTestCase
       yield Fixtures::GitflowRepo.new(File.join(dir, 'gf')).build
     end
   end
+
+  # Drives a sweep for its verdicts rather than its report, which is
+  # what lets a stage be graded before there is anything to print.
+  def measure(repo, remote: 'origin')
+    with_repo_env(repo) { StaleBranches::Sweep.new(git_for(repo, remote: remote)).run }
+  end
+
+  # Every row a table demands of one stage, against every row the sweep
+  # reached by it. Compared as whole sets in both directions, so a stage
+  # that reaches the right verdict for an extra branch is a failure too.
+  def assert_stage_matches(oracle_path, sweep, stage)
+    expected = Fixtures::Oracle.load(oracle_path)
+                               .select { |row| row.reason == stage }
+                               .to_h { |row| [row.branch, row.verdict] }
+    refute_empty expected, "the table demands nothing of #{stage}"
+
+    assert_equal expected, stage_of(sweep, stage), "#{stage} disagrees with the table"
+  end
+
+  def stage_of(sweep, stage)
+    sweep.rows.select { |row| row.reason == stage }.to_h { |row| [row.branch, row.verdict] }
+  end
 end
 
 # Which branch the verdicts are measured against, asked of a real
@@ -1153,10 +1175,6 @@ class MeasuredRefTest < OracleTestCase
 
   private
 
-  def measure(repo, remote: 'origin')
-    with_repo_env(repo) { StaleBranches::Sweep.new(git_for(repo, remote: remote)).run }
-  end
-
   def warnings(repo)
     measure(repo).warnings.join("\n")
   end
@@ -1272,10 +1290,6 @@ class EnumerationTest < OracleTestCase
     rows.to_h { |row| [row.branch, row.reason] }
   end
 
-  def measure(repo)
-    with_repo_env(repo) { StaleBranches::Sweep.new(git_for(repo)).run }
-  end
-
   # `git branch` will not make one of these, so the ref is written
   # directly. The sweep has to survive one existing, because the way it
   # goes wrong is silent: `git branch -d -D` exits saying a branch name
@@ -1292,7 +1306,7 @@ end
 class Pass1Test < OracleTestCase
   def test_the_flat_tables_ancestor_row_is_the_one_ancestry_clears
     with_flat_fixture('pass1') do |repo|
-      assert_stage_matches(EnumerationTest::FLAT_ORACLE, repo, 'pass1:ancestor')
+      assert_stage_matches(EnumerationTest::FLAT_ORACLE, measure(repo), 'pass1:ancestor')
     end
   end
 
@@ -1300,7 +1314,7 @@ class Pass1Test < OracleTestCase
   # and measuring against main would clear the wrong ones.
   def test_the_gitflow_tables_ancestor_row_is_measured_against_its_own_default
     with_gitflow_fixture('pass1') do |repo|
-      assert_stage_matches(EnumerationTest::GITFLOW_ORACLE, repo, 'pass1:ancestor')
+      assert_stage_matches(EnumerationTest::GITFLOW_ORACLE, measure(repo), 'pass1:ancestor')
     end
   end
 
@@ -1315,8 +1329,8 @@ class Pass1Test < OracleTestCase
       sweep = measure(repo)
 
       refute_includes stage_of(sweep, 'pass1:ancestor').keys, 's-tag-shadow'
-      assert_includes sweep.candidates, 's-tag-shadow',
-                      'the shadowed branch was decided by something, having no evidence yet'
+      assert_equal 'KEEP', sweep.rows.find { |row| row.branch == 's-tag-shadow' }&.verdict,
+                   'the branch a tag shadows was swept up by the tag'
     end
   end
 
@@ -1339,23 +1353,97 @@ class Pass1Test < OracleTestCase
     end
   end
 
-  private
+end
 
-  def assert_stage_matches(oracle_path, repo, stage)
-    expected = Fixtures::Oracle.load(oracle_path)
-                               .select { |row| row.reason == stage }
-                               .to_h { |row| [row.branch, row.verdict] }
-    refute_empty expected, "the table demands nothing of #{stage}"
+# The content check, which answers the question ancestry cannot: a
+# branch squash-merged into the default branch is not an ancestor of
+# anything, yet merging it back adds nothing. git answers by merging
+# into a tree it writes and never checks out, so the working tree is
+# untouched and the comparison is of trees rather than of diffs.
+#
+# Its three outcomes are three different states of knowledge, and the
+# report says which. A merged tree equal to the default branch's own
+# means the content is already there. A different tree is a positive
+# local fact: this branch definitely adds something. A conflict is
+# neither -- the check could not run, so nothing offline can clear the
+# branch, and it is the only outcome a pull-request lookup could
+# improve on.
+class ProofATest < OracleTestCase
+  def test_the_flat_table_agrees_about_what_the_content_check_finds
+    with_flat_fixture('proof-a') do |repo|
+      sweep = measure(repo)
 
-    assert_equal expected, stage_of(measure(repo), stage)
+      %w[proof-a:content-landed proof-a:conflict kept:not-landed].each do |stage|
+        assert_stage_matches(EnumerationTest::FLAT_ORACLE, sweep, stage)
+      end
+    end
   end
 
-  def stage_of(sweep, stage)
-    sweep.rows.select { |row| row.reason == stage }.to_h { |row| [row.branch, row.verdict] }
+  def test_the_gitflow_table_agrees_about_what_the_content_check_finds
+    with_gitflow_fixture('proof-a') do |repo|
+      sweep = measure(repo)
+
+      %w[proof-a:content-landed kept:not-landed].each do |stage|
+        assert_stage_matches(EnumerationTest::GITFLOW_ORACLE, sweep, stage)
+      end
+    end
   end
 
-  def measure(repo)
-    with_repo_env(repo) { StaleBranches::Sweep.new(git_for(repo)).run }
+  # A conflict is the one outcome that must never clear a branch, and it
+  # is reported as its own reason rather than folded into an ordinary
+  # keep: those branches are the entire input to every pull-request rule
+  # the finished sweep will have, so a stage that loses track of them
+  # leaves those rules nothing to decide.
+  def test_a_conflicting_branch_is_kept_and_says_the_check_could_not_answer
+    with_flat_fixture('conflict') do |repo|
+      conflicted = stage_of(measure(repo), 'proof-a:conflict')
+
+      refute_empty conflicted, 'no branch reached the check that only a forge can settle'
+      assert_equal %w[KEEP], conflicted.values.uniq
+    end
+  end
+
+  # Once every stage has run, nothing is left undecided: a branch the
+  # report omits is one nobody looked at, which reads as a keep and is
+  # not one.
+  def test_every_branch_leaves_with_a_verdict
+    with_flat_fixture('decided') do |repo|
+      sweep = measure(repo)
+
+      assert_empty sweep.candidates
+      assert_equal sweep.branches.sort, sweep.rows.map(&:branch).sort
+    end
+  end
+end
+
+# The content check needs git 2.38, where `merge-tree --write-tree`
+# arrived. On older git the same command is a different tool with a
+# different signature, so it fails -- and a sweep reading that failure
+# as it reads any other non-zero exit would call every branch in the
+# repository conflicted and report a table of unanswered questions.
+class GitVersionTest < Minitest::Test
+  def test_the_version_is_read_from_what_git_prints
+    assert_equal [2, 50], StaleBranches.parse_git_version('git version 2.50.1 (Apple Git-155)')
+    assert_equal [2, 38], StaleBranches.parse_git_version("git version 2.38.0\n")
+  end
+
+  def test_output_that_names_no_version_answers_nothing
+    assert_nil StaleBranches.parse_git_version('git version unknown')
+    assert_nil StaleBranches.parse_git_version('')
+  end
+
+  def test_the_content_check_needs_the_version_that_introduced_it
+    refute StaleBranches.content_check_available?([2, 37])
+    assert StaleBranches.content_check_available?([2, 38])
+    assert StaleBranches.content_check_available?([2, 50])
+    assert StaleBranches.content_check_available?([3, 0])
+  end
+
+  # An unreadable version is not treated as new enough. The check the
+  # sweep would then run silently produces the wrong answer for every
+  # branch, which is worse than refusing.
+  def test_an_unreadable_version_is_not_assumed_to_be_new_enough
+    refute StaleBranches.content_check_available?(nil)
   end
 end
 

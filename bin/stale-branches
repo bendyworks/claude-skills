@@ -76,6 +76,13 @@ module StaleBranches
   # something; the sweep is not the tool that second-guesses that.
   BACKUP_SUFFIX = '-backup'
 
+  # Where `merge-tree --write-tree` arrived. Before it, merge-tree was
+  # a different tool taking three arguments, so the command below does
+  # not fail in some recognizable way -- it fails the way a conflict
+  # does, and a sweep that did not check the version would report a
+  # repository in which every branch conflicts.
+  MINIMUM_GIT = [2, 38].freeze
+
   # One branch's verdict and the rule that reached it.
   Row = Struct.new(:branch, :verdict, :reason)
 
@@ -195,6 +202,20 @@ module StaleBranches
       LONG_LIVED_PREFIXES.any? { |prefix| branch.start_with?(prefix) }
   end
 
+  # The major and minor of what `git --version` prints, or nil where
+  # that is not a version at all.
+  def parse_git_version(output)
+    found = output[/(\d+)\.(\d+)/]
+    found&.split('.')&.map(&:to_i)
+  end
+
+  # An unreadable version is not new enough. The check would otherwise
+  # run and quietly answer wrongly for every branch, which is worse
+  # than saying so.
+  def content_check_available?(version)
+    !version.nil? && (version <=> MINIMUM_GIT) >= 0
+  end
+
   # The only code here that shells out, and the only code that knows
   # the repository is somewhere other than where this process is
   # standing.
@@ -248,6 +269,28 @@ module StaleBranches
     # commit for commit.
     def ancestor?(ref, other)
       succeeds?('merge-base', '--is-ancestor', ref, other)
+    end
+
+    def version
+      @version ||= StaleBranches.parse_git_version(capture('--version').first.to_s)
+    end
+
+    # Merges into a tree git writes and never checks out, so the
+    # caller's working tree and index are untouched and there is no
+    # merge to abort afterwards. Returns the merged tree's object name
+    # and whether the merge ran at all: a conflict is a non-zero exit
+    # rather than a message, so the status is what a caller branches on.
+    def merge_tree(base, ref)
+      stdout, _stderr, status = capture('merge-tree', '--write-tree', base, ref)
+      [stdout.lines.first.to_s.strip, status.success?]
+    end
+
+    # `<ref>^{tree}` is one argument to git and never touches a shell,
+    # so the braces reach git as typed. Written as a shell word instead,
+    # it is a glob that some shells expand to nothing and the whole
+    # comparison then silently changes meaning.
+    def tree_of(ref)
+      sha("#{ref}^{tree}")
     end
 
     # nil rather than a failure where the ref is absent or is not
@@ -353,10 +396,47 @@ module StaleBranches
       note_stale_head_ref
       partition_branches
       clear_by_ancestry
+      assert_content_check_available!
+      decide_by_content
       self
     end
 
     private
+
+    # Refused rather than degraded, because the vocabulary this report
+    # speaks has no honest word for it. Every remaining reason states
+    # something that was observed -- a conflict seen, content compared
+    # -- and reporting one of those for a check that never ran is the
+    # same mistake as claiming a pull request was absent without
+    # looking. So an old git ends the run, naming what it needs.
+    def assert_content_check_available!
+      return if StaleBranches.content_check_available?(@git.version)
+
+      raise Error, "this needs git #{MINIMUM_GIT.join('.')} or newer for its content " \
+                   "check, found #{@git.version&.join('.') || 'no readable version'}"
+    end
+
+    # What ancestry cannot answer. A branch squash-merged into the
+    # default branch is an ancestor of nothing, yet merging it back
+    # produces the default branch's own tree -- so the comparison is of
+    # trees, and equality means the content is already there.
+    #
+    # The three outcomes are three states of knowledge, and the report
+    # keeps them apart. A different tree is a positive local fact: this
+    # branch definitely adds something. A conflict is neither fact --
+    # the check could not run, so nothing available offline can clear
+    # the branch, and it is the only outcome a pull-request record
+    # could improve on.
+    def decide_by_content
+      landed = @git.tree_of(@measured_ref)
+
+      decide do |branch|
+        tree, merged = @git.merge_tree(@measured_ref, "refs/heads/#{branch}")
+        next ['KEEP', 'proof-a:conflict'] unless merged
+
+        tree == landed ? ['DELETE', 'proof-a:content-landed'] : ['KEEP', 'kept:not-landed']
+      end
+    end
 
     # The cheap pass, and the only one whose answer is beyond argument.
     # Every branch is named by its full refname, because git resolves a
