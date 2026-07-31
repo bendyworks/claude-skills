@@ -1047,8 +1047,11 @@ class OracleTestCase < CliTestCase
   # The command layer, driven directly for the questions a report cannot
   # be asked yet. It goes through the same refusal run_cli gets, so a
   # test reaching past the argv cannot reach past the guard with it.
+  # The guard is given the directory the Git will actually use, not the
+  # fixture's -- otherwise a test passing dir: outside the temporary
+  # directory reaches past exactly the refusal this exists to apply.
   def git_for(repo, remote: 'origin', dir: repo.work)
-    guard_cli_invocation(['-C', repo.work])
+    guard_cli_invocation(['-C', dir])
     StaleBranches::Git.new(dir: dir, remote: remote)
   end
 
@@ -1404,14 +1407,21 @@ class MeasuredRefTest < OracleTestCase
   # Neither contains the other, and this clone does not even have the
   # commit the remote is on -- which is the ordinary shape of a
   # force-push nobody has fetched since.
-  def test_a_tracking_ref_the_remote_has_left_behind_entirely_is_reported_as_diverged
-    with_flat_fixture('diverged-tracking') do |repo|
+  # Somebody pushed and this clone has not fetched since, which is the
+  # ordinary state and the mild one. The object is not here to compare
+  # against, so a check that asks about ancestry first calls every such
+  # repository diverged -- the most common state getting the most
+  # alarming message, and the fetch advice it needs never printed.
+  def test_a_tracking_ref_missing_what_the_remote_is_on_is_told_to_fetch
+    with_flat_fixture('behind-tracking') do |repo|
       elsewhere = repo.git('commit-tree', "#{sha(repo, 'refs/heads/main')}^{tree}",
-                           '-p', sha(repo, 'refs/heads/main~1'), '-m', 'somebody else',
+                           '-p', sha(repo, 'refs/heads/main'), '-m', 'somebody else pushed',
                            dir: repo.origin).strip
       repo.git('update-ref', 'refs/heads/main', elsewhere, dir: repo.origin)
+      warning = warnings(repo)
 
-      assert_match(/diverged/, warnings(repo))
+      assert_match(/git fetch origin/, warning, 'the advice this state needs was not given')
+      refute_match(/diverged/, warning, 'an unfetched clone was reported as diverged')
     end
   end
 
@@ -1454,6 +1464,43 @@ class MeasuredRefTest < OracleTestCase
   # keeps quiet about it can be deleted outright and every properly
   # set-up repository is told its origin/HEAD names the wrong branch,
   # with nothing going red.
+  # Offline, refs/remotes/<remote>/HEAD is the remote's own answer --
+  # older, but an answer. A hardcoded guess at main is not one, and on
+  # a repository shipping from develop it measures every verdict
+  # against the wrong branch.
+  def test_an_unreachable_remote_falls_back_to_what_the_remote_last_said
+    with_gitflow_fixture('offline-remembered') do |repo|
+      repo.git('symbolic-ref', 'refs/remotes/origin/HEAD', 'refs/remotes/origin/develop')
+      repo.git('remote', 'set-url', 'origin', File.join(repo.root, 'no-such-repo.git'))
+
+      assert_equal 'develop', measure(repo).default.name
+    end
+  end
+
+  # Every clause of the stale-HEAD warning is false when the remote was
+  # never asked: the name it compares against is the sweep's own guess,
+  # so it would claim the remote said something, and advise a repair
+  # that needs the same unreachable remote and would overwrite a
+  # correct ref with the guess.
+  # The remembered answer names a ref this clone no longer has, so the
+  # fallback drops through to `main` -- and the two now disagree, which
+  # is the state that made the warning fire while the remote had said
+  # nothing at all. Every clause of it would be false: the name it
+  # quotes is the sweep's own guess, and `set-head --auto` needs the
+  # same unreachable remote and would overwrite a correct ref with it.
+  def test_a_remote_that_was_never_asked_is_not_quoted_as_disagreeing
+    with_gitflow_fixture('offline-no-quote') do |repo|
+      repo.git('symbolic-ref', 'refs/remotes/origin/HEAD', 'refs/remotes/origin/develop')
+      repo.git('update-ref', '-d', 'refs/remotes/origin/develop')
+      repo.git('remote', 'set-url', 'origin', File.join(repo.root, 'no-such-repo.git'))
+      warning = warnings(repo)
+
+      assert_equal 'main', measure(repo).default.name, 'the arm did not reach the disagreeing state'
+      refute_match(/set-head|origin says/, warning,
+                   'a remote that was never reached was quoted as having answered')
+    end
+  end
+
   def test_a_head_ref_that_already_agrees_is_reported_as_nothing
     with_gitflow_fixture('agreeing-head-ref') do |repo|
       repo.git('symbolic-ref', 'refs/remotes/origin/HEAD', 'refs/remotes/origin/develop')
@@ -1838,6 +1885,23 @@ class GitFailureTest < OracleTestCase
       git = git_for(repo)
       with_repo_env(repo) { assert_equal git.version, git.version }
     end
+  end
+end
+
+# The version gate runs before anything else, so whatever it reports is
+# the first thing a caller sees -- and it must not answer a question
+# nobody asked. `git -C <nonexistent> --version` exits 128 with empty
+# stdout, which read as a git too old for the content check and sent a
+# caller who mistyped -C away to upgrade git.
+class MistypedTargetTest < CliTestCase
+  def dispatch_cli(argv)
+    StaleBranches::CLI.run(argv)
+  end
+
+  def test_a_directory_that_does_not_exist_is_reported_as_such
+    message = abort_result(['-C', File.join(Dir.tmpdir, 'stale-branches-no-such-dir')]).message
+
+    refute_match(/2\.38|version/, message, 'a bad directory was reported as an out-of-date git')
   end
 end
 
