@@ -609,6 +609,101 @@ end
 CLI_PATH = File.expand_path('../bin/stale-branches', __dir__)
 load CLI_PATH if File.exist?(CLI_PATH)
 
+# The flags, parsed as a pure function. Nothing here touches a
+# repository, so nothing here needs one -- and the traps below are
+# OptionParser's rather than git's, each having cost this repo a defect
+# in some CLI already.
+class ArgumentParsingTest < CliTestCase
+  def test_the_defaults_name_the_working_directory_and_origin
+    options = parse
+
+    assert_equal '.', options.dir
+    assert_equal 'origin', options.remote
+    refute options.delete?
+  end
+
+  def test_dash_c_names_the_repository_to_sweep
+    assert_equal '/tmp/elsewhere', parse('-C', '/tmp/elsewhere').dir
+  end
+
+  def test_remote_names_the_ancestry_to_measure_against
+    assert_equal 'upstream', parse('--remote', 'upstream').remote
+  end
+
+  def test_delete_is_off_until_it_is_asked_for
+    assert parse('--delete').delete?
+  end
+
+  def test_help_asks_for_usage_rather_than_a_sweep
+    assert parse('--help').help?
+    assert parse('-h').help?
+  end
+
+  def test_an_unknown_option_is_refused_by_name
+    assert_equal 'invalid option: --bogus', refusal('--bogus')
+  end
+
+  def test_a_value_option_with_no_value_says_which_one
+    assert_equal 'missing argument: --remote', refusal('--remote')
+  end
+
+  # This CLI takes no positionals at all, so one is not a stray detail
+  # but a misreading of what the command does: `stale-branches
+  # some-branch --delete`, typed by someone who believes it names the
+  # branch to remove, would act on every branch in the repository.
+  def test_a_positional_is_refused_rather_than_ignored
+    assert_equal 'unexpected extra arguments: "some-branch"', refusal('some-branch', '--delete')
+  end
+
+  # A mandatory-argument option swallows a following flag as its value.
+  # Unguarded, `-C --delete` parses as a directory named --delete with
+  # no delete flag set, and the sweep acts on the command it misread.
+  def test_a_value_option_will_not_swallow_a_following_flag
+    assert_match(/--delete/, refusal('-C', '--delete'))
+    assert_match(/--delete/, refusal('--remote', '--delete'))
+  end
+
+  # Last-wins would silently discard the first value, which for -C means
+  # sweeping a repository the caller also named and did not get.
+  def test_a_repeated_value_option_is_refused_rather_than_last_winning
+    assert_equal 'duplicate -C', refusal('-C', '/tmp/a', '-C', '/tmp/b')
+    assert_equal 'duplicate --remote', refusal('--remote', 'a', '--remote', 'b')
+  end
+
+  # Accepted where a repeated value option is refused, and the
+  # difference is not inconsistency: a repeated boolean discards no
+  # input and leaves the sweep acting on exactly what was typed.
+  def test_a_repeated_delete_flag_is_accepted
+    assert parse('--delete', '--delete').delete?
+  end
+
+  # OptionParser#parse permutes positionals past flags only while
+  # POSIXLY_CORRECT is unset; with it set, parsing stops at the first
+  # positional and every flag after it leaks into the leftovers. So the
+  # same argv means two things on two machines, and the machine that
+  # differs is the one whose sweep silently loses --delete or gains a
+  # complaint about a flag the caller spelled correctly.
+  def test_the_environment_cannot_change_what_an_argv_means
+    argv = ['oops', '--delete']
+    scrubbed = refusal(*argv)
+    ENV['POSIXLY_CORRECT'] = '1'
+
+    assert_equal scrubbed, refusal(*argv)
+    assert_equal 'unexpected extra arguments: "oops"', scrubbed
+  end
+
+  private
+
+  def parse(*argv)
+    StaleBranches.parse_options(argv)
+  end
+
+  def refusal(*argv)
+    assert_raises(StaleBranches::Error) { parse(*argv) }.message
+  end
+end
+
+
 # Turns the sweep's report back into rows the oracle can be compared with.
 module SweepRun
   Result = Struct.new(:rows, :stdout, :stderr)
@@ -718,6 +813,34 @@ class OracleTestCase < CliTestCase
     Dir.mktmpdir("stale-branches-#{label}") do |dir|
       yield Fixtures::BranchRepo.new(File.join(dir, 'flat')).build
     end
+  end
+end
+
+# The wiring between the pure parser and the process. A refusal has to
+# reach stderr under the tool's own name and exit non-zero, or a
+# scripted caller reads a sweep that never ran as one that found
+# nothing.
+class CliRefusalTest < OracleTestCase
+  def setup
+    @dir = Dir.mktmpdir('stale-branches-argv')
+  end
+
+  def teardown
+    FileUtils.remove_entry(@dir)
+  end
+
+  def test_a_refused_argv_exits_non_zero_naming_the_tool
+    result = abort_result(['-C', @dir, '--bogus'])
+
+    assert_equal 1, result.status
+    assert_equal 'stale-branches: invalid option: --bogus', result.message
+  end
+
+  # The target is an empty directory rather than a repository, so a
+  # usage request that fell through to the sweep would fail loudly here
+  # rather than printing and returning.
+  def test_help_prints_usage_and_sweeps_nothing
+    assert_includes cli_stdout(['-C', @dir, '--help']), 'Usage: stale-branches'
   end
 end
 
@@ -854,7 +977,13 @@ class GitflowOracleTest < OracleTestCase
   def test_no_row_claims_a_pull_request_was_absent
     Dir.mktmpdir('stale-branches-gitflow-reasons') do |dir|
       repo = Fixtures::GitflowRepo.new(File.join(dir, 'gf')).build
-      offenders = sweep(repo).rows.select { |row| row.reason.include?('no-pull-request') }
+      rows = sweep(repo).rows
+      # A report with no rows satisfies every claim about what its rows
+      # may not say, which is the empty pass the oracle loader refuses
+      # for the same reason.
+      refute_empty rows, 'the sweep reported nothing, so this test asserted nothing'
+
+      offenders = rows.select { |row| row.reason.include?('no-pull-request') }
       assert_empty offenders.map(&:branch),
                    'a reason claimed a pull request was absent without checking'
     end

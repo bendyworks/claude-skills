@@ -1,0 +1,129 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+# stale-branches -- report, and optionally delete, local branches whose
+# work has already reached the default branch.
+#
+# By default it prints one row per local branch with a DELETE or keep
+# verdict and the evidence behind it, and touches nothing. With
+# --delete it removes exactly the branches that same report marks
+# DELETE. The judgment of whether a keeper deserves a closer look is
+# the caller's; this tool's job is to make the evidence explicit and to
+# refuse to guess.
+#
+# Stdlib-only (no gems). Run with --help for usage.
+#
+# The logic here is mostly the shelling-out, so the traps are mostly
+# shell-level, and each one below has already shipped as a defect in
+# the prose procedure this tool replaces:
+#
+#   -C is passed through to git as `git -C DIR`, never applied with
+#   Dir.chdir. A chdir survives past the failure that interrupted it,
+#   and what it aims subsequent commands at is the caller's own clone.
+
+require 'optparse'
+
+module StaleBranches
+  Error = Class.new(StandardError)
+
+  DEFAULT_REMOTE = 'origin'
+
+  USAGE = <<~TXT
+    Usage: stale-branches [-C DIR] [--remote NAME] [--delete]
+
+    Reports every local branch with a verdict and the evidence behind
+    it. Nothing is deleted unless --delete is given, and then only the
+    branches the same report marks DELETE.
+
+      -C DIR          the repository to sweep (default: the working directory)
+      --remote NAME   the remote whose default branch verdicts are measured
+                      against (default: #{DEFAULT_REMOTE})
+      --delete        delete the branches marked DELETE
+      -h, --help      print this message
+
+    A branch is kept unless the evidence positively says its work has
+    landed. Unpushed work, an unanswerable question, and a missing
+    remote all end in a keep.
+  TXT
+
+  # The parsed command line. Held as a value rather than a hash so a
+  # stage reaching for a flag that does not exist fails where it is
+  # written rather than reading as nil.
+  Options = Struct.new(:dir, :remote, :delete, :help) do
+    def delete?
+      delete
+    end
+
+    def help?
+      help
+    end
+  end
+
+  # An option value must not begin with a dash: a mandatory-argument
+  # option otherwise swallows a following flag as its value, so
+  # `-C --delete` parses as a directory named --delete with no delete
+  # flag set, and the sweep acts on the command it misread. Anchored
+  # end to end to state explicitly the whole-argument match optparse
+  # requires of an acceptance pattern.
+  VALUE_NOT_FLAG = /\A[^-].*\z/m
+
+  module_function
+
+  # Parsed here rather than in the CLI class below because nothing about
+  # it reaches outside the process: this is the last point at which what
+  # the caller typed can still be refused for free.
+  def parse_options(argv)
+    values = {}
+    flags = { delete: false, help: false }
+    rest = permute(argv, values, flags)
+    raise Error, "unexpected extra arguments: #{rest.map(&:inspect).join(', ')}" unless rest.empty?
+
+    Options.new(values.fetch(:dir, '.'), values.fetch(:remote, DEFAULT_REMOTE),
+                flags[:delete], flags[:help])
+  end
+
+  def permute(argv, values, flags)
+    parser = OptionParser.new do |o|
+      o.banner = USAGE
+      o.on('-C DIR', VALUE_NOT_FLAG) { |v| set_once(values, :dir, '-C', v) }
+      o.on('--remote NAME', VALUE_NOT_FLAG) { |v| set_once(values, :remote, '--remote', v) }
+      # Repeated booleans are accepted where a repeated value option is
+      # refused: repeating one discards no input and leaves the sweep
+      # acting on exactly what was typed.
+      o.on('--delete') { flags[:delete] = true }
+      o.on('-h', '--help') { flags[:help] = true }
+    end
+    # permute, not parse: #parse permutes positionals past flags only
+    # while POSIXLY_CORRECT is unset, so the same argv would mean two
+    # things on two machines.
+    parser.permute(argv)
+  rescue OptionParser::ParseError => e
+    raise Error, e.message
+  end
+
+  # Last-wins on a repeated option silently discards the first value,
+  # which for -C means sweeping a repository the caller also named and
+  # did not get.
+  def set_once(values, key, flag, value)
+    raise Error, "duplicate #{flag}" if values.key?(key)
+
+    values[key] = value
+  end
+
+  # The half that talks to the outside world: everything above is a pure
+  # function of what it was handed.
+  class CLI
+    def self.run(argv)
+      new.run(argv)
+    end
+
+    def run(argv)
+      options = StaleBranches.parse_options(argv)
+      return puts(StaleBranches::USAGE) if options.help?
+    rescue Error => e
+      abort "stale-branches: #{e.message}"
+    end
+  end
+end
+
+StaleBranches::CLI.run(ARGV) if $PROGRAM_NAME == __FILE__
