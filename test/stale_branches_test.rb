@@ -167,7 +167,8 @@ class FixtureShapeTest < Minitest::Test
   # name. Each is a falsifiable claim about git's own answer, so each can
   # be checked here without a sweep existing.
   EVIDENCE_REASONS = %w[
-    pass1:ancestor proof-a:content-landed proof-a:conflict kept:not-landed
+    pass1:ancestor proof-a:content-landed proof-a:tip-only proof-a:conflict
+    kept:not-landed
   ].freeze
 
   # The rows that say "protected" are graded elsewhere; these are the ones
@@ -348,8 +349,20 @@ class FixtureShapeTest < Minitest::Test
 
     tree, merged = merge_tree(repo, default, ref)
     return 'proof-a:conflict' unless merged
+    return 'kept:not-landed' unless tree == default_tree
 
-    tree == default_tree ? 'proof-a:content-landed' : 'kept:not-landed'
+    history_landed?(repo, default, ref, default_tree) ? 'proof-a:content-landed' : 'proof-a:tip-only'
+  end
+
+  # Every commit the branch does not share with the default branch,
+  # asked the question its tip was asked. A tip that adds nothing says
+  # nothing about what the history discarded on the way there.
+  def history_landed?(repo, default, ref, default_tree)
+    commits = repo.git('rev-list', "refs/heads/#{default}..#{ref}").lines(chomp: true)
+    commits.all? do |commit|
+      tree, merged = merge_tree(repo, default, commit)
+      merged && tree == default_tree
+    end
   end
 
   # Returns the merged tree and whether the merge succeeded. A conflict is
@@ -2006,6 +2019,27 @@ class DeletionTest < OracleTestCase
         assert_match(/p1-ancestor/, result.stderr)
         assert_match(/denied|cannot lock/i, result.stderr, "git's own reason was dropped")
       end
+    end
+  end
+
+  # The harm the tip-only rule exists to prevent, asserted as harm
+  # rather than as a verdict: the branch survives --delete, and so does
+  # the only copy of what it added. Before the rule, this branch was
+  # deleted with its reflog and the blob was left reachable from
+  # nothing -- recoverable by `git fsck` until the next gc, and by
+  # nobody who did not know to look.
+  def test_a_branch_holding_the_only_copy_of_its_own_work_survives_delete
+    with_flat_fixture('tip-only-delete') do |repo|
+      branch = Fixtures::BranchRepo::ADDED_THEN_REMOVED
+      blob = repo.git('rev-parse', "#{branch}~1:u-research.txt").strip
+      sweep(repo, '--delete')
+
+      assert_includes repo.local_refs, "refs/heads/#{branch}",
+                      'a branch holding content nothing else has was deleted'
+      assert_equal 'THE ONLY COPY OF THIS RESEARCH',
+                   repo.git('cat-file', '-p', blob).strip
+      refute_includes repo.git('fsck', '--no-reflogs', '--unreachable'), blob,
+                      'the only copy of the research is reachable from nothing'
     end
   end
 
