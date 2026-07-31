@@ -62,6 +62,23 @@ module StaleBranches
   # why taking one is always announced.
   FALLBACK_BRANCHES = %w[main master].freeze
 
+  # Names a team keeps regardless of what any evidence says. Most are
+  # ancestors of the default branch most of the time, so without this
+  # list the cheap first pass alone would clear them.
+  LONG_LIVED_NAMES = %w[main master develop staging production gh-pages].freeze
+
+  # A prefix rather than a name: a team cuts release/1.x, release/2.0
+  # and so on, and each is long-lived for as long as it is supported.
+  # The trailing slash is what keeps `releases-ui` out.
+  LONG_LIVED_PREFIXES = ['release/'].freeze
+
+  # The suffix a hand-made safety net carries. Someone typed it to keep
+  # something; the sweep is not the tool that second-guesses that.
+  BACKUP_SUFFIX = '-backup'
+
+  # One branch's verdict and the rule that reached it.
+  Row = Struct.new(:branch, :verdict, :reason)
+
   # The branch every verdict is measured against, and where the answer
   # came from -- which the report has to say, because a guess that
   # announces itself can be re-run against the real answer and a silent
@@ -152,6 +169,32 @@ module StaleBranches
     DefaultBranch.new(name, output[/^([0-9a-f]{4,64})\tHEAD$/, 1], :remote)
   end
 
+  # Why this branch is not a candidate, or nil if it is one. The order
+  # is the specification and not an implementation detail: a branch can
+  # satisfy several of these at once -- the default branch is usually on
+  # the long-lived list, and the branch HEAD is on is listed as a
+  # worktree of its own -- so the first rule that fires is what the
+  # report has to say, or a sweep that never learned which branch is the
+  # default reports "long-lived" and looks right.
+  #
+  # `current` is nil where HEAD is detached, and it must stay nil rather
+  # than becoming a string: `rev-parse --abbrev-ref HEAD` answers "HEAD"
+  # there, where `symbolic-ref --quiet HEAD` reports nothing at all.
+  def protection_for(branch, default:, current:, worktrees:)
+    return 'protected:default' if branch == default
+    return 'protected:current' if current && branch == current
+    return 'protected:worktree' if worktrees.include?(branch)
+    return 'protected:long-lived' if long_lived?(branch)
+    return 'protected:backup' if branch.end_with?(BACKUP_SUFFIX)
+
+    nil
+  end
+
+  def long_lived?(branch)
+    LONG_LIVED_NAMES.include?(branch) ||
+      LONG_LIVED_PREFIXES.any? { |prefix| branch.start_with?(prefix) }
+  end
+
   # The only code here that shells out, and the only code that knows
   # the repository is somewhere other than where this process is
   # standing.
@@ -205,6 +248,31 @@ module StaleBranches
     def symbolic_ref(name)
       stdout, _stderr, status = capture('symbolic-ref', '--quiet', name)
       status.success? ? stdout.strip : nil
+    end
+
+    # Full refnames, which is the form that is unambiguous: a tag
+    # sharing a branch's name makes every bare-name lookup answer about
+    # the tag, and both fixtures build that collision because a real
+    # repository does. Callers convert to short names knowingly --
+    # `git branch -d` refuses a full refname and takes only the
+    # ambiguous short one.
+    def local_branches
+      lines('for-each-ref', '--format=%(refname)', 'refs/heads/')
+        .map { |ref| ref.delete_prefix('refs/heads/') }
+    end
+
+    # nil on a detached HEAD, where there is no branch to name.
+    def current_branch
+      stdout, _stderr, status = capture('symbolic-ref', '--quiet', '--short', 'HEAD')
+      status.success? ? stdout.strip : nil
+    end
+
+    # Every branch checked out anywhere, this worktree included. git
+    # refuses to delete any of them, so a sweep that lists one as a
+    # candidate produces a mid-run error instead of a verdict.
+    def worktree_branches
+      lines('worktree', 'list', '--porcelain')
+        .filter_map { |line| line[%r{\Abranch refs/heads/(.+)\z}, 1] }
     end
 
     # What the verdicts are measured against, once the default branch
@@ -261,11 +329,13 @@ module StaleBranches
   # to talk to git; it hands back rows to print and warnings to say
   # first.
   class Sweep
-    attr_reader :default, :measured_ref, :warnings
+    attr_reader :default, :measured_ref, :warnings, :branches, :rows, :candidates
 
     def initialize(git)
       @git = git
       @warnings = []
+      @rows = []
+      @candidates = []
     end
 
     def run
@@ -274,10 +344,26 @@ module StaleBranches
       @measured_ref = @git.default_ref(@default.name)
       note_stale_tracking_ref
       note_stale_head_ref
+      partition_branches
       self
     end
 
     private
+
+    # Every local branch is either protected -- decided by its name and
+    # where HEAD is standing, at no cost -- or a candidate, which is
+    # what the evidence-gathering below is spent on.
+    def partition_branches
+      @branches = @git.local_branches
+      current = @git.current_branch
+      worktrees = @git.worktree_branches
+
+      @branches.each do |branch|
+        reason = StaleBranches.protection_for(branch, default: @default.name,
+                                                      current: current, worktrees: worktrees)
+        reason ? @rows << Row.new(branch, 'KEEP', reason) : @candidates << branch
+      end
+    end
 
     def fallback_warning
       "could not ask #{@git.remote} for its default branch; " \

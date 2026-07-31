@@ -744,6 +744,80 @@ class RemoteHeadParsingTest < Minitest::Test
   end
 end
 
+# Which branches the sweep refuses to consider at all, decided from the
+# name and three facts about the repository. Pure, so the whole decision
+# table is exercised here without a repository; the fixtures then check
+# that the facts fed in are the ones git reports.
+class ProtectionTest < Minitest::Test
+  FACTS = { default: 'main', current: 'feature', worktrees: %w[parked] }.freeze
+
+  def test_the_default_branch_is_protected_as_the_default
+    assert_equal 'protected:default', protection('main')
+  end
+
+  # Order is the assertion, not the verdict. main is on the long-lived
+  # list too, so both rules keep it and only the reason says which one
+  # ran -- and the same is true of develop in a repository that ships
+  # from it, where a sweep answering "long-lived" has not proved it
+  # knows which branch is the default at all.
+  def test_a_default_branch_that_is_also_long_lived_is_decided_as_the_default
+    assert_equal 'protected:default', protection('develop', default: 'develop')
+  end
+
+  def test_the_checked_out_branch_is_protected_as_the_current_one
+    assert_equal 'protected:current', protection('feature')
+  end
+
+  def test_a_branch_checked_out_in_another_worktree_is_protected_as_such
+    assert_equal 'protected:worktree', protection('parked')
+  end
+
+  # Nothing is standing anywhere, so nothing is protected for standing
+  # there. A sweep taking the empty answer for a branch name would
+  # protect a branch called "" or "HEAD", and `rev-parse --abbrev-ref
+  # HEAD` hands back exactly "HEAD" where `symbolic-ref` reports
+  # nothing.
+  def test_a_detached_head_protects_no_branch
+    assert_nil protection('feature', current: nil)
+    assert_nil protection('HEAD', current: nil)
+  end
+
+  def test_every_long_lived_name_is_protected_by_its_name
+    %w[master develop staging production gh-pages].each do |name|
+      assert_equal 'protected:long-lived', protection(name), "#{name} was not protected"
+    end
+  end
+
+  # A prefix rather than a name: teams cut release/1.x, release/2026-07
+  # and so on, and each is long-lived for as long as it is supported.
+  def test_a_release_branch_is_protected_by_its_prefix
+    assert_equal 'protected:long-lived', protection('release/1.x')
+    assert_equal 'protected:long-lived', protection('release/2026-07')
+  end
+
+  # A near-miss must not inherit the protection: releases-ui is somebody
+  # feature branch, and a rule matching it would keep it forever.
+  def test_a_name_merely_starting_with_release_is_not_protected
+    assert_nil protection('releases-ui')
+    assert_nil protection('release-notes')
+  end
+
+  def test_a_backup_suffix_is_protected_as_a_backup
+    assert_equal 'protected:backup', protection('r-spike-backup')
+  end
+
+  def test_an_ordinary_branch_is_protected_by_nothing
+    assert_nil protection('some-work')
+    assert_nil protection('backup-of-something')
+  end
+
+  private
+
+  def protection(branch, **overrides)
+    StaleBranches.protection_for(branch, **FACTS.merge(overrides))
+  end
+end
+
 
 # Turns the sweep's report back into rows the oracle can be compared with.
 module SweepRun
@@ -814,9 +888,9 @@ class OracleTestCase < CliTestCase
   # The command layer, driven directly for the questions a report cannot
   # be asked yet. It goes through the same refusal run_cli gets, so a
   # test reaching past the argv cannot reach past the guard with it.
-  def git_for(repo, remote: 'origin')
+  def git_for(repo, remote: 'origin', dir: repo.work)
     guard_cli_invocation(['-C', repo.work])
-    StaleBranches::Git.new(dir: repo.work, remote: remote)
+    StaleBranches::Git.new(dir: dir, remote: remote)
   end
 
   # The CLI shells out to git, so it runs under the same neutralized
@@ -1100,6 +1174,114 @@ class MeasuredRefTest < OracleTestCase
     repo.git('commit', '-q', '--allow-empty', '-m', 'work someone else pushed')
     repo.git('push', '-q', 'origin', 'main')
     repo.git('update-ref', 'refs/remotes/origin/main', behind)
+  end
+end
+
+# What the sweep considers, and what it refuses to consider, against
+# real repositories. The decision table itself is graded above; these
+# arms check that the facts fed into it are the ones git reports.
+class EnumerationTest < OracleTestCase
+  FLAT_ORACLE = File.expand_path('fixtures/expected-degraded.txt', __dir__)
+  GITFLOW_ORACLE = File.expand_path('fixtures/gitflow-expected-degraded.txt', __dir__)
+
+  def test_every_local_branch_is_accounted_for
+    with_flat_fixture('enumeration') do |repo|
+      expected = repo.local_refs.map { |ref| ref.delete_prefix('refs/heads/') }
+
+      assert_equal expected.sort, measure(repo).branches.sort
+    end
+  end
+
+  # Enumeration reads full refnames because the short form is the
+  # ambiguous one: `amb` and `s-tag-shadow` are each both a branch and a
+  # tag in these fixtures, and a lookup by bare name is answered about
+  # the tag.
+  def test_a_branch_shadowed_by_a_tag_is_still_enumerated
+    with_flat_fixture('shadowed') do |repo|
+      assert_includes measure(repo).branches, 's-tag-shadow'
+    end
+  end
+
+  # git refuses to CREATE a branch whose name looks like a flag --
+  # `git branch -- -D` and `git checkout -b -D` both decline -- but that
+  # is porcelain's own guard, not a rule about refs:
+  # `check-ref-format refs/heads/-D` calls it valid and `update-ref`
+  # makes one without complaint. So a repository can hold one, and
+  # for-each-ref lists it, which is what puts it in front of this sweep.
+  def test_a_branch_named_like_a_flag_is_enumerated_rather_than_skipped
+    with_flat_fixture('flag-shaped') do |repo|
+      plant_flag_shaped_branch(repo)
+
+      assert_includes measure(repo).branches, '-D'
+    end
+  end
+
+  def test_the_flat_fixtures_protections_are_the_ones_its_table_demands
+    with_flat_fixture('protections') do |repo|
+      assert_protections_match(FLAT_ORACLE, repo)
+    end
+  end
+
+  # Graded from a detached HEAD, where the current-branch rule has
+  # nothing to protect and every other protection must still fire.
+  def test_the_gitflow_fixtures_protections_are_the_ones_its_table_demands
+    with_gitflow_fixture('protections') do |repo|
+      assert_protections_match(GITFLOW_ORACLE, repo)
+    end
+  end
+
+  # Standing on a branch protects it, and the protection is released
+  # when HEAD moves away. Asserting only the first half passes a sweep
+  # that protects the branch it started on forever.
+  def test_moving_head_moves_the_protection
+    with_flat_fixture('head-moves') do |repo|
+      repo.checkout('a-squash-clean')
+      protections = protections_of(repo)
+
+      assert_equal 'protected:current', protections['a-squash-clean']
+      refute_includes protections.keys, 'o-current'
+    end
+  end
+
+  # The invocation with no -C at all, which resolves the repository from
+  # the working directory. Every other arm here names one explicitly, so
+  # without this the ordinary way a person runs the tool goes untested.
+  def test_a_relative_target_resolves_from_the_working_directory
+    with_flat_fixture('relative') do |repo|
+      Dir.chdir(repo.work) do
+        sweep = with_repo_env(repo) { StaleBranches::Sweep.new(git_for(repo, dir: '.')).run }
+
+        assert_includes sweep.branches, 'main'
+      end
+    end
+  end
+
+  private
+
+  def assert_protections_match(oracle, repo)
+    expected = Fixtures::Oracle.load(oracle)
+                              .select { |row| row.reason.start_with?('protected:') }
+                              .to_h { |row| [row.branch, row.reason] }
+
+    assert_equal expected, protections_of(repo)
+  end
+
+  def protections_of(repo)
+    rows = measure(repo).rows.select { |row| row.reason.start_with?('protected:') }
+    assert_equal %w[KEEP], rows.map(&:verdict).uniq, 'a protected branch was not kept'
+    rows.to_h { |row| [row.branch, row.reason] }
+  end
+
+  def measure(repo)
+    with_repo_env(repo) { StaleBranches::Sweep.new(git_for(repo)).run }
+  end
+
+  # `git branch` will not make one of these, so the ref is written
+  # directly. The sweep has to survive one existing, because the way it
+  # goes wrong is silent: `git branch -d -D` exits saying a branch name
+  # is required, having deleted nothing, while the caller reads success.
+  def plant_flag_shaped_branch(repo)
+    repo.git('update-ref', 'refs/heads/-D', repo.git('rev-parse', 'main').strip)
   end
 end
 
