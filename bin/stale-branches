@@ -188,8 +188,40 @@ module StaleBranches
 
     # --verify with a full refname, so a tag of the same name cannot
     # answer for a branch that does not exist.
+    def ref?(name)
+      succeeds?('show-ref', '--verify', '--quiet', name)
+    end
+
     def local_branch?(name)
-      succeeds?('show-ref', '--verify', '--quiet', "refs/heads/#{name}")
+      ref?("refs/heads/#{name}")
+    end
+
+    def sha(ref)
+      lines('rev-parse', ref).first
+    end
+
+    # nil rather than a failure where the ref is absent or is not
+    # symbolic, both of which are ordinary states rather than problems.
+    def symbolic_ref(name)
+      stdout, _stderr, status = capture('symbolic-ref', '--quiet', name)
+      status.success? ? stdout.strip : nil
+    end
+
+    # What the verdicts are measured against, once the default branch
+    # has a name. The remote-tracking ref is the remote's own state as
+    # of the last fetch; the local branch of the same name is whatever
+    # this developer happens to have advanced, and measuring against
+    # unpushed commits on it would clear branches whose work reached
+    # nobody. Where nothing tracks the remote -- a single-branch clone,
+    # pruned refs -- the local branch is all there is.
+    def default_ref(name)
+      tracking = "refs/remotes/#{remote}/#{name}"
+      return tracking if ref?(tracking)
+
+      local = "refs/heads/#{name}"
+      return local if ref?(local)
+
+      raise Error, "nothing to measure against: neither #{tracking} nor #{local} exists"
     end
 
     def default_branch
@@ -225,6 +257,66 @@ module StaleBranches
     end
   end
 
+  # Gathers the facts and reaches the verdicts. The CLI hands it a way
+  # to talk to git; it hands back rows to print and warnings to say
+  # first.
+  class Sweep
+    attr_reader :default, :measured_ref, :warnings
+
+    def initialize(git)
+      @git = git
+      @warnings = []
+    end
+
+    def run
+      @default = @git.default_branch
+      @warnings << fallback_warning unless @default.from_remote?
+      @measured_ref = @git.default_ref(@default.name)
+      note_stale_tracking_ref
+      note_stale_head_ref
+      self
+    end
+
+    private
+
+    def fallback_warning
+      "could not ask #{@git.remote} for its default branch; " \
+        "measuring against #{@default.name} instead"
+    end
+
+    # Behind the remote because nobody has fetched. This does not make
+    # the verdicts wrong so much as older: an earlier tip clears fewer
+    # branches, so the sweep keeps more than it needs to. What the
+    # caller cannot tell without being told is that a keep reading
+    # "this work never landed" may only mean "this work landed after
+    # your last fetch".
+    def note_stale_tracking_ref
+      return unless @default.sha
+      return if @git.sha(@measured_ref) == @default.sha
+
+      @warnings << "#{@measured_ref} is behind #{@git.remote}; run " \
+                   "`git fetch #{@git.remote}` -- until then a keep may mean nothing more " \
+                   'than that the work landed after your last fetch'
+    end
+
+    # This sweep never reads refs/remotes/<remote>/HEAD, which is what
+    # makes a stale one harmless here and nowhere else: every
+    # `origin/HEAD` shorthand the caller types resolves through it.
+    # Having asked the remote already, saying so costs one comparison.
+    def note_stale_head_ref
+      target = @git.symbolic_ref("refs/remotes/#{@git.remote}/HEAD")
+      return unless target
+
+      named = target.sub(%r{\Arefs/remotes/#{Regexp.escape(@git.remote)}/}, '')
+      return if named == @default.name
+
+      @warnings << "refs/remotes/#{@git.remote}/HEAD still names #{named}, but " \
+                   "#{@git.remote} says #{@default.name}; run " \
+                   "`git remote set-head #{@git.remote} --auto`. This sweep asked the " \
+                   'remote, so its own verdicts are unaffected'
+    end
+  end
+
   # The half that talks to the outside world: everything above is a pure
   # function of what it was handed.
   class CLI
@@ -236,20 +328,13 @@ module StaleBranches
       options = StaleBranches.parse_options(argv)
       return puts(StaleBranches::USAGE) if options.help?
 
-      git = Git.new(dir: options.dir, remote: options.remote)
-      default = git.default_branch
-      warn_about_guess(git.remote, default) unless default.from_remote?
+      sweep = Sweep.new(Git.new(dir: options.dir, remote: options.remote)).run
+      # Warnings come before the report rather than after it: a caller
+      # reading a piped report from the top must meet the caveats
+      # before the rows they apply to.
+      sweep.warnings.each { |warning| warn "stale-branches: #{warning}" }
     rescue Error => e
       abort "stale-branches: #{e.message}"
-    end
-
-    private
-
-    # Named on both sides: which remote went unanswered, and which
-    # branch the verdicts below were measured against instead.
-    def warn_about_guess(remote, default)
-      warn "stale-branches: could not ask #{remote} for its default branch; " \
-           "measuring against #{default.name} instead"
     end
   end
 end

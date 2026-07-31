@@ -998,6 +998,111 @@ class DefaultBranchTest < OracleTestCase
   end
 end
 
+# Which ref the verdicts are actually measured against, once the branch
+# NAME is known. The two candidates carry the same name and answer
+# differently, and neither fixture can tell them apart -- both build a
+# local default branch and its remote-tracking ref at the same commit --
+# so these arms make them disagree on purpose.
+class MeasuredRefTest < OracleTestCase
+  def test_the_remote_tracking_ref_is_what_verdicts_are_measured_against
+    with_flat_fixture('measured') do |repo|
+      assert_equal 'refs/remotes/origin/main', measure(repo).measured_ref
+    end
+  end
+
+  # The remote-tracking ref is the remote's own state as of the last
+  # fetch, while the local branch is whatever this developer happens to
+  # have checked out and advanced. Measuring against a local branch
+  # carrying unpushed commits would clear branches whose work reached
+  # nobody, which is the one mistake this sweep must never make.
+  def test_an_unpushed_commit_on_the_local_default_does_not_move_the_measurement
+    with_flat_fixture('unpushed-default') do |repo|
+      repo.checkout('main')
+      tracking = sha(repo, 'refs/remotes/origin/main')
+      repo.git('commit', '-q', '--allow-empty', '-m', 'local-only work on main')
+
+      refute_equal tracking, sha(repo, 'refs/heads/main'), 'the arm did not move the local branch'
+      assert_equal tracking, sha(repo, measure(repo).measured_ref)
+    end
+  end
+
+  # Nothing local mirrors the remote's default branch -- a repository
+  # cloned with a single-branch fetch, or one whose refs were pruned.
+  # The local branch is the only thing left to measure against.
+  def test_with_no_remote_tracking_ref_the_local_branch_is_measured_against
+    with_flat_fixture('no-tracking') do |repo|
+      repo.git('update-ref', '-d', 'refs/remotes/origin/main')
+
+      assert_equal 'refs/heads/main', measure(repo).measured_ref
+    end
+  end
+
+  # Behind the remote because nobody fetched. The verdicts stay
+  # trustworthy in the direction that matters -- an older tip clears
+  # fewer branches, so the sweep keeps more than it needs to -- but a
+  # keep the caller reads as "this work never landed" may only mean
+  # "this work landed after your last fetch".
+  def test_a_tracking_ref_the_remote_has_moved_past_is_reported
+    with_flat_fixture('stale-tracking') do |repo|
+      rewind_tracking_ref(repo)
+
+      assert_match(/fetch/, warnings(repo), 'the warning did not name the repair')
+      assert_match(%r{origin/main}, warnings(repo), 'the warning did not name the stale ref')
+    end
+  end
+
+  def test_a_current_tracking_ref_is_reported_as_nothing_at_all
+    with_flat_fixture('current-tracking') do |repo|
+      assert_empty measure(repo).warnings
+    end
+  end
+
+  # The sweep is immune to this ref by construction, and the caller's
+  # other tools are not: every `git branch -vv`, every `origin/HEAD`
+  # shorthand, reads the branch it names. Knowing the truth is a
+  # by-product of having asked the remote, so it costs nothing to say.
+  def test_a_stale_head_ref_is_reported_with_the_command_that_repairs_it
+    with_gitflow_fixture('stale-head-warning') do |repo|
+      repo.git('symbolic-ref', 'refs/remotes/origin/HEAD', 'refs/remotes/origin/main')
+      warning = warnings(repo)
+
+      assert_match(/set-head/, warning, 'the warning did not name the repair')
+      assert_match(/develop/, warning, 'the warning did not name the real default branch')
+    end
+  end
+
+  def test_no_head_ref_at_all_is_reported_as_nothing
+    with_gitflow_fixture('no-head-ref') do |repo|
+      refute_match(/set-head/, warnings(repo))
+    end
+  end
+
+  private
+
+  def measure(repo, remote: 'origin')
+    with_repo_env(repo) { StaleBranches::Sweep.new(git_for(repo, remote: remote)).run }
+  end
+
+  def warnings(repo)
+    measure(repo).warnings.join("\n")
+  end
+
+  def sha(repo, ref)
+    repo.git('rev-parse', ref).strip
+  end
+
+  # Pushes a commit and then rewinds the local record of it, which is
+  # the state a repository is in whenever someone else pushed and this
+  # clone has not fetched since.
+  def rewind_tracking_ref(repo)
+    behind = sha(repo, 'refs/remotes/origin/main')
+    repo.checkout('main')
+    repo.git('commit', '-q', '--allow-empty', '-m', 'work someone else pushed')
+    repo.git('push', '-q', 'origin', 'main')
+    repo.git('update-ref', 'refs/remotes/origin/main', behind)
+  end
+end
+
 # The wiring between the pure parser and the process. A refusal has to
 # reach stderr under the tool's own name and exit non-zero, or a
 # scripted caller reads a sweep that never ran as one that found
