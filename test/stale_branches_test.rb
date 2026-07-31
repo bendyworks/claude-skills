@@ -1520,6 +1520,143 @@ class GitVersionTest < Minitest::Test
   end
 end
 
+# Deleting, which is the half that cannot be taken back. Every arm here
+# checks the repository afterwards rather than the exit status, because
+# the failure this whole tool was extracted to prevent is a deletion
+# that reports success and does not happen.
+class DeletionTest < OracleTestCase
+  # A git that accepts every branch deletion and deletes nothing.
+  # Standing in for the real shape of that defect: handed a full
+  # refname, `git branch -d refs/heads/x` exits complaining and the
+  # sweep carried on; handed a flag-shaped name without a separator, it
+  # exits saying a branch name is required. Either way the caller who
+  # trusts the command rather than the repository reports a clean
+  # sweep of branches that are all still there.
+  class PretendingGit < StaleBranches::Git
+    def capture(*args)
+      args.first == 'branch' ? super('rev-parse', 'HEAD') : super
+    end
+  end
+
+  # `git branch -d -D` and `git branch -D -D` both exit saying a branch
+  # name is required, having deleted nothing -- so the separator is not
+  # a nicety here, it is the difference between the deletion happening
+  # and the sweep lying about it.
+  def test_a_branch_named_like_a_flag_is_deleted_rather_than_refused
+    with_flat_fixture('delete-flag') do |repo|
+      repo.git('update-ref', 'refs/heads/-D', repo.git('rev-parse', 'main').strip)
+      result = delete_branch(repo, '-D')
+
+      assert_predicate result, :deleted, "git said: #{result.detail}"
+      refute_includes repo.local_refs, 'refs/heads/-D'
+    end
+  end
+
+  # git's own definition of merged is reachability, and a squash-merged
+  # branch never satisfies it however plainly its content has landed.
+  # -d is asked first anyway, so git gets to refuse on its own terms,
+  # and -D then forces what the evidence already settled.
+  def test_a_squash_merged_branch_git_will_not_delete_gently_is_forced
+    with_flat_fixture('delete-squashed') do |repo|
+      assert_predicate delete_branch(repo, 'a-squash-clean'), :deleted
+      refute_includes repo.local_refs, 'refs/heads/a-squash-clean'
+    end
+  end
+
+  def test_a_branch_the_default_branch_contains_is_deleted
+    with_flat_fixture('delete-ancestor') do |repo|
+      assert_predicate delete_branch(repo, 'p1-ancestor'), :deleted
+      refute_includes repo.local_refs, 'refs/heads/p1-ancestor'
+    end
+  end
+
+  def test_a_deletion_that_did_not_happen_is_not_reported_as_one
+    with_flat_fixture('pretending') do |repo|
+      git = with_repo_env(repo) { PretendingGit.new(dir: repo.work, remote: 'origin') }
+      result = with_repo_env(repo) { git.delete_branch('p1-ancestor') }
+
+      refute_predicate result, :deleted, 'a branch still in the repository was called deleted'
+      assert_includes repo.local_refs, 'refs/heads/p1-ancestor'
+    end
+  end
+
+  # A sweep that cannot do what it was told exits non-zero, or the
+  # script that called it carries on as though the branches were gone.
+  # git's own explanation is passed along, since "permission denied" is
+  # the actionable half and the sweep has no better wording for it.
+  def test_a_deletion_that_fails_exits_non_zero_and_says_why
+    with_flat_fixture('delete-refused') do |repo|
+      with_unwritable_refs(repo) do
+        result = with_repo_env(repo) { abort_result(['-C', repo.work, '--delete']) }
+
+        refute_equal 0, result.status, 'a sweep that deleted nothing it was told to exited clean'
+        assert_match(/p1-ancestor/, result.stderr)
+        assert_match(/denied|cannot lock/i, result.stderr, "git's own reason was dropped")
+      end
+    end
+  end
+
+  # The promise the default mode makes: it shows what it would destroy
+  # and destroys nothing. A tool that quietly acted would be discovered
+  # by its damage rather than by a test.
+  def test_the_default_mode_shows_its_deletions_and_performs_none
+    with_flat_fixture('preview') do |repo|
+      before = repo.local_refs
+      result = sweep(repo)
+
+      assert_includes result.rows.map(&:verdict), 'DELETE', 'nothing was marked, so nothing was risked'
+      assert_equal before, repo.local_refs, 'a report-only run changed the repository'
+      assert_match(/--delete/, result.stdout, 'the report never says how to act on it')
+    end
+  end
+
+  # The other half of that promise, and the reason the expected state is
+  # derived from the report rather than written out: a hardcoded list
+  # would agree with a sweep that deleted the right branches for the
+  # wrong reasons, or that reported one set and acted on another. What
+  # is asserted is that the two are the same set.
+  def test_delete_removes_exactly_the_branches_its_own_report_marked
+    with_flat_fixture('delete-mode') do |repo|
+      before = repo.local_refs
+      result = sweep(repo, '--delete')
+      marked = result.rows.select { |row| row.verdict == 'DELETE' }.map(&:branch)
+
+      refute_empty marked, 'the run marked nothing, so it proved nothing'
+      assert_equal (before - marked.map { |branch| "refs/heads/#{branch}" }).sort,
+                   repo.local_refs.sort
+      marked.each { |branch| assert_match(/^deleted #{Regexp.escape(branch)}$/, result.stdout) }
+    end
+  end
+
+  # `git branch -d` refuses a squash-merged branch with an "error:" line
+  # of its own, and this mode runs into that deliberately on the way to
+  # -D. None of it belongs on the sweep's stderr, where it would read as
+  # something having gone wrong.
+  def test_deleting_leaks_none_of_gits_complaints
+    with_flat_fixture('delete-quiet') do |repo|
+      refute_git_complaints(sweep(repo, '--delete'))
+    end
+  end
+
+  private
+
+  def delete_branch(repo, name)
+    with_repo_env(repo) { git_for(repo).delete_branch(name) }
+  end
+
+  # Loose refs live as files, so a directory git cannot write to is a
+  # deletion it cannot perform -- a real refusal from git rather than a
+  # simulated one. Restored before the block returns, or the temporary
+  # directory cannot be cleaned up either.
+  def with_unwritable_refs(repo)
+    heads = File.join(repo.work, '.git', 'refs', 'heads')
+    File.chmod(0o500, heads)
+    yield
+  ensure
+    File.chmod(0o700, heads)
+  end
+end
+
 # The wiring between the pure parser and the process. A refusal has to
 # reach stderr under the tool's own name and exit non-zero, or a
 # scripted caller reads a sweep that never ran as one that found

@@ -86,6 +86,16 @@ module StaleBranches
   # One branch's verdict and the rule that reached it.
   Row = Struct.new(:branch, :verdict, :reason)
 
+  # What became of one branch the report marked. `deleted` is decided
+  # by looking at the repository afterwards rather than at what git
+  # said, and `detail` carries git's own explanation of a refusal,
+  # which is the actionable half of one.
+  Deletion = Struct.new(:branch, :deleted, :detail) do
+    def deleted?
+      deleted
+    end
+  end
+
   # The branch every verdict is measured against, and where the answer
   # came from -- which the report has to say, because a guess that
   # announces itself can be re-run against the real answer and a silent
@@ -319,6 +329,28 @@ module StaleBranches
       [stdout.lines.first.to_s.strip, status.success?]
     end
 
+    # Deletes one branch, and then looks to see whether it is gone.
+    #
+    # Two things make that last part necessary rather than pedantic.
+    # `git branch -d` takes only the short, ambiguous name and rejects
+    # the full refname enumeration hands out; and a name shaped like a
+    # flag needs the `--` below, without which `git branch -d -D` exits
+    # saying a branch name is required. Both of those are failures a
+    # caller reading the exit status alone reports as a clean sweep.
+    #
+    # -d is asked first so git can refuse on its own terms: it declines
+    # any branch whose commits are not reachable from HEAD or its
+    # upstream, which is a second signature on the sweep's conclusion.
+    # A squash-merged branch never satisfies that however plainly its
+    # content has landed, so -D then forces what the evidence settled.
+    def delete_branch(name)
+      ref = "refs/heads/#{name}"
+      _stdout, stderr, = capture('branch', '-d', '--', name)
+      _stdout, stderr, = capture('branch', '-D', '--', name) if ref?(ref)
+
+      Deletion.new(name, !ref?(ref), stderr.strip)
+    end
+
     # `<ref>^{tree}` is one argument to git and never touches a shell,
     # so the braces reach git as typed. Written as a shell word instead,
     # it is a glob that some shells expand to nothing and the whole
@@ -433,6 +465,13 @@ module StaleBranches
       assert_content_check_available!
       decide_by_content
       self
+    end
+
+    # Acts on exactly what the report marked, which is what makes the
+    # default run a preview of this one rather than a separate opinion.
+    def delete_marked
+      @rows.select { |row| row.verdict == 'DELETE' }
+           .map { |row| @git.delete_branch(row.branch) }
     end
 
     private
@@ -567,8 +606,33 @@ module StaleBranches
       # before the rows they apply to.
       sweep.warnings.each { |warning| warn "stale-branches: #{warning}" }
       print StaleBranches.render_report(sweep.rows)
+      options.delete? ? delete_marked(sweep) : offer_deletion(sweep)
     rescue Error => e
       abort "stale-branches: #{e.message}"
+    end
+
+    private
+
+    def delete_marked(sweep)
+      results = sweep.delete_marked
+      results.select(&:deleted?).each { |result| puts "deleted #{result.branch}" }
+      failed = results.reject(&:deleted?)
+      return if failed.empty?
+
+      failed.each do |result|
+        warn "stale-branches: could not delete #{result.branch}: " \
+             "#{result.detail.empty? ? 'it is still there' : result.detail}"
+      end
+      # A caller that scripted this has to be able to tell a sweep that
+      # did what it was told from one that did not.
+      exit 1
+    end
+
+    def offer_deletion(sweep)
+      marked = sweep.rows.count { |row| row.verdict == 'DELETE' }
+      return if marked.zero?
+
+      puts "Nothing was deleted. Re-run with --delete to remove the #{marked} marked DELETE."
     end
   end
 end
