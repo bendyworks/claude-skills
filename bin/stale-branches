@@ -202,6 +202,40 @@ module StaleBranches
       LONG_LIVED_PREFIXES.any? { |prefix| branch.start_with?(prefix) }
   end
 
+  # The report, rendered from rows rather than printed as each is
+  # decided, so its order is the reader's rather than the sweep's.
+  # Sorted by name because a report is read twice: once now, and once
+  # against the last run, where a stable order is what makes the
+  # difference between them legible.
+  #
+  # DELETE is the only verdict in capitals, and a reader skimming a
+  # long report is looking for exactly what this tool proposes to
+  # destroy. Columns are padded to the widest value rather than to a
+  # fixed width, which keeps a long branch name from pushing the
+  # verdict out of alignment for every other row.
+  def render_report(rows)
+    ordered = rows.sort_by(&:branch)
+    branch_width = [*ordered.map { |row| row.branch.length }, 'branch'.length].max
+    verdict_width = 'verdict'.length
+
+    lines = [format_row('branch', 'verdict', 'reason', branch_width, verdict_width)]
+    ordered.each do |row|
+      verdict = row.verdict == 'DELETE' ? 'DELETE' : 'keep'
+      lines << format_row(row.branch, verdict, row.reason, branch_width, verdict_width)
+    end
+    deletions = ordered.count { |row| row.verdict == 'DELETE' }
+    lines << ''
+    lines << "#{ordered.length} branches, #{deletions} marked DELETE"
+    "#{lines.join("\n")}\n"
+  end
+
+  # Two spaces between columns at their widest, which is what the
+  # report's own grader keys on: one space would let a padded column
+  # run into the next.
+  def format_row(branch, verdict, reason, branch_width, verdict_width)
+    "#{branch.ljust(branch_width)}  #{verdict.ljust(verdict_width)}  #{reason}".rstrip
+  end
+
   # The major and minor of what `git --version` prints, or nil where
   # that is not a version at all.
   def parse_git_version(output)
@@ -532,6 +566,7 @@ module StaleBranches
       # reading a piped report from the top must meet the caveats
       # before the rows they apply to.
       sweep.warnings.each { |warning| warn "stale-branches: #{warning}" }
+      print StaleBranches.render_report(sweep.rows)
     rescue Error => e
       abort "stale-branches: #{e.message}"
     end

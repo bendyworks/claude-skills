@@ -846,6 +846,79 @@ module SweepRun
   end
 end
 
+# The report, which is the whole product in the default mode and the
+# only thing anyone reads. It is rendered from rows rather than printed
+# as they are decided, so the ordering is the reader's rather than the
+# sweep's, and it is graded by feeding it back through the same parser
+# the oracle uses -- a renderer whose output that parser cannot read
+# would leave every table passing against a report no one can check.
+class ReportTest < Minitest::Test
+  ROWS = [
+    StaleBranches::Row.new('main', 'KEEP', 'protected:default'),
+    StaleBranches::Row.new('a-squash-clean', 'DELETE', 'proof-a:content-landed'),
+    StaleBranches::Row.new('l-tracks-deleted-local', 'KEEP', 'kept:not-landed')
+  ].freeze
+
+  def test_every_row_survives_the_round_trip_through_the_oracles_parser
+    parsed = SweepRun.parse(StaleBranches.render_report(ROWS))
+
+    assert_equal ROWS.map { |row| [row.branch, row.verdict, row.reason] },
+                 parsed.map { |row| [row.branch, row.verdict, row.reason] }.sort_by { |b, _| order(b) }
+  end
+
+  # Only the rows are rows. A header and a summary make the report
+  # readable and must not read back as branches, which the parser
+  # decides for itself -- so what is asserted here is the count.
+  def test_nothing_but_the_rows_reads_back_as_a_row
+    assert_equal ROWS.length, SweepRun.parse(StaleBranches.render_report(ROWS)).length
+  end
+
+  # DELETE shouts and keep does not. The asymmetry is the point: a
+  # reader skimming a long report is looking for what the sweep proposes
+  # to destroy.
+  def test_a_deletion_is_the_only_verdict_in_capitals
+    report = StaleBranches.render_report(ROWS)
+
+    assert_match(/^a-squash-clean\s+DELETE\s+proof-a:content-landed$/, report)
+    assert_match(/^main\s+keep\s+protected:default$/, report)
+  end
+
+  def test_the_columns_line_up_whatever_the_names_are_wide
+    lines = StaleBranches.render_report(ROWS).lines.grep(SweepRun::REPORT_LINE)
+    columns = lines.map { |line| line.index(/DELETE|keep/) }
+
+    assert_equal 1, columns.uniq.length, "the verdict column moved: #{columns.inspect}"
+  end
+
+  # A branch named like a flag has to survive being printed as well as
+  # being enumerated, and a report is where a name that starts with a
+  # dash would be least expected.
+  def test_a_branch_named_like_a_flag_renders_and_reads_back
+    rows = [StaleBranches::Row.new('-D', 'DELETE', 'pass1:ancestor')]
+
+    assert_equal ['-D'], SweepRun.parse(StaleBranches.render_report(rows)).map(&:branch)
+  end
+
+  def test_the_summary_counts_the_branches_and_the_deletions
+    summary = StaleBranches.render_report(ROWS).lines.last
+
+    assert_match(/3 branches/, summary)
+    assert_match(/1 marked DELETE/, summary)
+  end
+
+  # An empty repository is not an error, and a report with no rows must
+  # not claim otherwise.
+  def test_a_repository_with_no_branches_reports_none_rather_than_failing
+    assert_match(/0 branches/, StaleBranches.render_report([]))
+  end
+
+  private
+
+  def order(branch)
+    ROWS.map(&:branch).index(branch)
+  end
+end
+
 # Shared driving and assertions. Each fixture gets its own subclass so a
 # failure names the repository shape it came from.
 class OracleTestCase < CliTestCase
