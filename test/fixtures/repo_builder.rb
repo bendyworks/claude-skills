@@ -136,7 +136,28 @@ module Fixtures
     # path that only looks like one.
     def self.under_tmpdir?(path)
       prefixes = [Dir.tmpdir, (File.realpath(Dir.tmpdir) if File.exist?(Dir.tmpdir))].compact
-      prefixes.uniq.any? { |prefix| path.start_with?(File.join(prefix, '')) }
+      resolved = resolve_existing(path)
+      prefixes.uniq.any? { |prefix| resolved.start_with?(File.join(prefix, '')) }
+    end
+
+    # expand_path resolves `..` and `~` and stops there, so a symlink
+    # under the temporary directory pointing at a working clone passes a
+    # check made against the unresolved path -- and the fixture then
+    # builds, and deletes, inside the clone. The root itself does not
+    # exist yet, so the deepest ancestor that does is what can be
+    # resolved, with the rest appended.
+    def self.resolve_existing(path)
+      existing = path
+      tail = []
+      until File.exist?(existing)
+        parent = File.dirname(existing)
+        break if parent == existing
+
+        tail.unshift(File.basename(existing))
+        existing = parent
+      end
+
+      File.join(File.realpath(existing), *tail)
     end
 
     # Full refnames, the form the sweep is specified to enumerate: a tag

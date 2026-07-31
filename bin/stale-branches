@@ -5,11 +5,14 @@
 # work has already reached the default branch.
 #
 # By default it prints one row per local branch with a DELETE or keep
-# verdict and the evidence behind it, and touches nothing. With
-# --delete it removes exactly the branches that same report marks
-# DELETE. The judgment of whether a keeper deserves a closer look is
-# the caller's; this tool's job is to make the evidence explicit and to
-# refuse to guess.
+# verdict and the evidence behind it, and changes nothing: no branch,
+# ref, working tree, or index is touched. (The content check does write
+# a tree object into the repository's object store, which is
+# unreferenced and reclaimed by the next gc -- "touches nothing" would
+# be a nice claim and is not a true one.) With --delete it removes
+# exactly the branches that same report marks DELETE. The judgment of
+# whether a keeper deserves a closer look is the caller's; this tool's
+# job is to make the evidence explicit and to refuse to guess.
 #
 # Stdlib-only (no gems). Run with --help for usage.
 #
@@ -53,13 +56,17 @@ module StaleBranches
       -h, --help      print this message
 
     A branch is kept unless the evidence positively says its work has
-    landed. Unpushed work, an unanswerable question, and a missing
-    remote all end in a keep.
+    landed. Unpushed work and an unanswerable question both end in a
+    keep, and verdicts are always measured against what the remote had
+    as of your last fetch -- never against a local branch, which may
+    carry commits no remote has seen.
   TXT
 
-  # Where the sweep falls back when the remote cannot be reached, in
-  # order. A local branch by one of these names is a guess, which is
-  # why taking one is always announced.
+  # Which remote-tracking ref the sweep falls back to when the remote
+  # cannot be reached, in order. Picking one is a guess about which
+  # branch is the default, which is why taking one is always
+  # announced -- but it is still a record of what the remote had,
+  # never a local branch.
   FALLBACK_BRANCHES = %w[main master].freeze
 
   # Names a team keeps regardless of what any evidence says. Most are
@@ -83,14 +90,58 @@ module StaleBranches
   # repository in which every branch conflicts.
   MINIMUM_GIT = [2, 38].freeze
 
-  # One branch's verdict and the rule that reached it.
-  Row = Struct.new(:branch, :verdict, :reason)
+  # Git environment variables that name a repository, unset for every
+  # child. `git -C DIR` does NOT override an inherited GIT_DIR, so
+  # without this a sweep run with one set reports on, and with --delete
+  # destroys branches in, a repository the caller never named -- the
+  # exact failure -C was chosen to prevent, arriving through the
+  # environment rather than through Dir.chdir. This is not exotic:
+  # git hooks, `git rebase --exec`, `git bisect run`, and filter-branch
+  # all set GIT_DIR for what they run.
+  #
+  # GIT_CEILING_DIRECTORIES is deliberately left alone. It only stops
+  # repository discovery early, so honoring it can lead this tool to
+  # refuse a directory and never to act on an unintended one, which is
+  # the safe direction for something that deletes.
+  REDIRECTING_ENV_KEYS = %w[
+    GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_OBJECT_DIRECTORY
+    GIT_ALTERNATE_OBJECT_DIRECTORIES GIT_COMMON_DIR GIT_NAMESPACE
+  ].freeze
+
+  # A nil value unsets the variable for the child. The prompt settings
+  # are here because git asks for credentials on /dev/tty rather than
+  # on stdin, so capturing the child's pipes does not stop `ls-remote`
+  # from blocking a report that was supposed to be unattended.
+  CHILD_ENV = REDIRECTING_ENV_KEYS.to_h { |key| [key, nil] }
+                                  .merge('GIT_TERMINAL_PROMPT' => '0',
+                                         'GIT_ASKPASS' => nil,
+                                         'SSH_ASKPASS' => nil)
+                                  .freeze
+
+  # One branch's verdict and the rule that reached it. The verdict is
+  # asked through the predicate rather than compared as a string, so
+  # the spelling lives in one place -- and the report's own shouted
+  # DELETE against a quiet keep is a rendering choice made there.
+  Row = Struct.new(:branch, :verdict, :reason) do
+    def delete?
+      verdict == 'DELETE'
+    end
+  end
+
+  # A bare object name, and the message git uses for two histories with
+  # no commit in common. Both are how merge-tree distinguishes a
+  # question it answered from one it could not attempt.
+  OBJECT_NAME = /\A[0-9a-f]{40,64}\z/
+  UNMERGEABLE = /unrelated histories/
 
   # What became of one branch the report marked. `deleted` is decided
   # by looking at the repository afterwards rather than at what git
   # said, and `detail` carries git's own explanation of a refusal,
-  # which is the actionable half of one.
-  Deletion = Struct.new(:branch, :deleted, :detail) do
+  # which is the actionable half of one. `sha` is read before the
+  # deletion, because `git branch -D` removes the branch's reflog along
+  # with the branch and that object name is then the only breadcrumb
+  # back to the work.
+  Deletion = Struct.new(:branch, :sha, :deleted, :detail) do
     def deleted?
       deleted
     end
@@ -101,7 +152,7 @@ module StaleBranches
   # announces itself can be re-run against the real answer and a silent
   # one cannot. The tip is carried alongside because the remote hands
   # it over in the same breath.
-  DefaultBranch = Struct.new(:name, :sha, :source) do
+  DefaultBranch = Struct.new(:name, :sha, :source, :detail) do
     def from_remote?
       source == :remote
     end
@@ -137,22 +188,45 @@ module StaleBranches
     values = {}
     flags = { delete: false, help: false }
     rest = permute(argv, values, flags)
+    options = Options.new(values.fetch(:dir, '.'), values.fetch(:remote, DEFAULT_REMOTE),
+                          flags[:delete], flags[:help])
+    # A request for usage is answered rather than corrected. Someone
+    # typing `stale-branches --help main` is asking what the command
+    # takes, and telling them their argument is unexpected is a worse
+    # answer than the one they asked for.
+    return options if options.help?
+
     raise Error, "unexpected extra arguments: #{rest.map(&:inspect).join(', ')}" unless rest.empty?
 
-    Options.new(values.fetch(:dir, '.'), values.fetch(:remote, DEFAULT_REMOTE),
-                flags[:delete], flags[:help])
+    options
   end
 
   def permute(argv, values, flags)
     parser = OptionParser.new do |o|
       o.banner = USAGE
-      o.on('-C DIR', VALUE_NOT_FLAG) { |v| set_once(values, :dir, '-C', v) }
-      o.on('--remote NAME', VALUE_NOT_FLAG) { |v| set_once(values, :remote, '--remote', v) }
+      # Abbreviation is off. OptionParser accepts any unambiguous
+      # prefix by default, which makes `--del` -- and `--d` -- mean
+      # --delete, so a typo one character into a flag deletes branches.
+      # Every other guard here exists to refuse a misread command line;
+      # this is the hole they were all standing around.
+      o.require_exact = true
+      o.on('-C DIR', VALUE_NOT_FLAG, 'the repository to sweep') do |v|
+        set_once(values, :dir, '-C', v)
+      end
+      o.on('--remote NAME', VALUE_NOT_FLAG,
+           'the remote whose default branch is measured against') do |v|
+        set_once(values, :remote, '--remote', v)
+      end
       # Repeated booleans are accepted where a repeated value option is
       # refused: repeating one discards no input and leaves the sweep
       # acting on exactly what was typed.
-      o.on('--delete') { flags[:delete] = true }
-      o.on('-h', '--help') { flags[:help] = true }
+      o.on('--delete', 'delete the branches marked DELETE') { flags[:delete] = true }
+      o.on('-h', '--help', 'print usage') { flags[:help] = true }
+      # OptionParser answers --version itself unless told otherwise,
+      # and there is no version to give: the plugin this ships in is
+      # deliberately versionless. Refusing it as the unknown flag it is
+      # beats answering "version unknown".
+      o.on('--version') { raise Error, 'invalid option: --version' }
     end
     # permute, not parse: #parse permutes positionals past flags only
     # while POSIXLY_CORRECT is unset, so the same argv would mean two
@@ -177,8 +251,11 @@ module StaleBranches
   #   ref: refs/heads/develop<TAB>HEAD
   #   55a8fc0a4f21946df49bb9900352cd09e2ef2fc2<TAB>HEAD
   #
-  # An empty remote prints the first line and not the second, so the
-  # name is the answer and the tip is what may be missing.
+  # A remote with no commits yet prints neither and exits 0, so an
+  # empty answer is a real answer and not a failure -- the caller tells
+  # the two apart by the exit status, not by this returning nil. The
+  # tip is optional on its own account: only the name is needed to say
+  # which branch is the default.
   def parse_remote_head(output)
     name = output[%r{^ref: refs/heads/(\S+)\tHEAD$}, 1]
     return nil unless name
@@ -226,14 +303,14 @@ module StaleBranches
   def render_report(rows)
     ordered = rows.sort_by(&:branch)
     branch_width = [*ordered.map { |row| row.branch.length }, 'branch'.length].max
-    verdict_width = 'verdict'.length
+    verdict_width = ['verdict', 'DELETE', 'keep'].map(&:length).max
 
     lines = [format_row('branch', 'verdict', 'reason', branch_width, verdict_width)]
     ordered.each do |row|
-      verdict = row.verdict == 'DELETE' ? 'DELETE' : 'keep'
+      verdict = row.delete? ? 'DELETE' : 'keep'
       lines << format_row(row.branch, verdict, row.reason, branch_width, verdict_width)
     end
-    deletions = ordered.count { |row| row.verdict == 'DELETE' }
+    deletions = ordered.count(&:delete?)
     lines << ''
     lines << "#{ordered.length} branches, #{deletions} marked DELETE"
     "#{lines.join("\n")}\n"
@@ -243,13 +320,13 @@ module StaleBranches
   # report's own grader keys on: one space would let a padded column
   # run into the next.
   def format_row(branch, verdict, reason, branch_width, verdict_width)
-    "#{branch.ljust(branch_width)}  #{verdict.ljust(verdict_width)}  #{reason}".rstrip
+    "#{branch.ljust(branch_width)}  #{verdict.ljust(verdict_width)}  #{reason}"
   end
 
   # The major and minor of what `git --version` prints, or nil where
   # that is not a version at all.
   def parse_git_version(output)
-    found = output[/(\d+)\.(\d+)/]
+    found = output[/\d+\.\d+/]
     found&.split('.')&.map(&:to_i)
   end
 
@@ -272,7 +349,7 @@ module StaleBranches
     end
 
     def capture(*args)
-      Open3.capture3('git', '-C', @dir, *args)
+      Open3.capture3(CHILD_ENV, 'git', '-C', @dir, *args)
     rescue Errno::ENOENT
       raise Error, 'git not found on PATH'
     end
@@ -300,10 +377,6 @@ module StaleBranches
       succeeds?('show-ref', '--verify', '--quiet', name)
     end
 
-    def local_branch?(name)
-      ref?("refs/heads/#{name}")
-    end
-
     def sha(ref)
       lines('rev-parse', ref).first
     end
@@ -311,22 +384,50 @@ module StaleBranches
     # Answered by walking the commit graph rather than by comparing
     # content, so a yes here is exact: the second ref contains the first
     # commit for commit.
+    #
+    # Exit 1 is the documented "no"; anything else is git failing to
+    # answer, and reading that as a no is how a broken run turns into a
+    # confident verdict.
     def ancestor?(ref, other)
-      succeeds?('merge-base', '--is-ancestor', ref, other)
+      _stdout, stderr, status = capture('merge-base', '--is-ancestor', ref, other)
+      return true if status.exitstatus.zero?
+      return false if status.exitstatus == 1
+
+      raise Error, "git merge-base --is-ancestor failed: #{stderr.strip}"
     end
 
+    def object?(name)
+      succeeds?('cat-file', '-e', "#{name}^{commit}")
+    end
+
+    # defined? rather than ||=, so an unreadable version is remembered
+    # as unreadable instead of re-shelling git on the one path where
+    # asking it has already failed.
     def version
-      @version ||= StaleBranches.parse_git_version(capture('--version').first.to_s)
+      return @version if defined?(@version)
+
+      @version = StaleBranches.parse_git_version(capture('--version').first.to_s)
     end
 
     # Merges into a tree git writes and never checks out, so the
-    # caller's working tree and index are untouched and there is no
-    # merge to abort afterwards. Returns the merged tree's object name
-    # and whether the merge ran at all: a conflict is a non-zero exit
-    # rather than a message, so the status is what a caller branches on.
+    # caller's working tree, index, and refs are untouched and there is
+    # no merge to abort afterwards. Returns the merged tree's object
+    # name, and whether a merged tree was produced at all.
+    #
+    # Not every non-zero exit is an answer. A content conflict exits 1
+    # with the merged tree still on stdout; histories with nothing in
+    # common exit 128 saying so; a ref git cannot resolve exits with
+    # nothing on stdout and a message on stderr. The first two are the
+    # question coming back unanswerable, which is a verdict. The third
+    # is this tool being broken, and reporting it as a conflict would
+    # put a reason in the report that names something nobody observed.
     def merge_tree(base, ref)
-      stdout, _stderr, status = capture('merge-tree', '--write-tree', base, ref)
-      [stdout.lines.first.to_s.strip, status.success?]
+      stdout, stderr, status = capture('merge-tree', '--write-tree', base, ref)
+      tree = stdout.lines.first.to_s.strip
+      return [tree, true] if status.success?
+      return [nil, false] if tree.match?(OBJECT_NAME) || stderr.match?(UNMERGEABLE)
+
+      raise Error, "git merge-tree failed on #{ref}: #{stderr.lines.first.to_s.strip}"
     end
 
     # Deletes one branch, and then looks to see whether it is gone.
@@ -345,10 +446,15 @@ module StaleBranches
     # content has landed, so -D then forces what the evidence settled.
     def delete_branch(name)
       ref = "refs/heads/#{name}"
-      _stdout, stderr, = capture('branch', '-d', '--', name)
-      _stdout, stderr, = capture('branch', '-D', '--', name) if ref?(ref)
+      was = sha(ref)
+      _stdout, stderr, _status = capture('branch', '-d', '--', name)
+      remaining = ref?(ref)
+      if remaining
+        _stdout, stderr, _status = capture('branch', '-D', '--', name)
+        remaining = ref?(ref)
+      end
 
-      Deletion.new(name, !ref?(ref), stderr.strip)
+      Deletion.new(name, was, !remaining, stderr.strip)
     end
 
     # `<ref>^{tree}` is one argument to git and never touches a shell,
@@ -392,28 +498,39 @@ module StaleBranches
     end
 
     # What the verdicts are measured against, once the default branch
-    # has a name. The remote-tracking ref is the remote's own state as
-    # of the last fetch; the local branch of the same name is whatever
-    # this developer happens to have advanced, and measuring against
-    # unpushed commits on it would clear branches whose work reached
-    # nobody. Where nothing tracks the remote -- a single-branch clone,
-    # pruned refs -- the local branch is all there is.
+    # has a name: the remote-tracking ref, and nothing else.
+    #
+    # The local branch of the same name is not a fallback. It is
+    # whatever this developer has advanced, and measuring against
+    # unpushed commits on it clears branches whose work reached nobody
+    # -- a branch merged into a local-only main is then deleted, and
+    # `git branch -D` takes its reflog with it. That is the one mistake
+    # this tool must never make, so a repository with no remote-tracking
+    # ref for its default branch gets a refusal instead of a guess.
+    # `git clone --single-branch` produces exactly that repository, so
+    # the refusal has to say what would fix it.
     def default_ref(name)
       tracking = "refs/remotes/#{remote}/#{name}"
       return tracking if ref?(tracking)
 
-      local = "refs/heads/#{name}"
-      return local if ref?(local)
-
-      raise Error, "nothing to measure against: neither #{tracking} nor #{local} exists"
+      raise Error, "#{tracking} does not exist, so there is nothing here recording what " \
+                   "#{remote} has. Run `git fetch #{remote} #{name}` and try again -- the " \
+                   'local branch of that name is not a substitute, since it may carry ' \
+                   'commits no remote has ever seen'
     end
 
+    # git's own first line of complaint is carried into the fallback,
+    # because an auth failure, a DNS error and a genuinely offline
+    # laptop are three different situations that otherwise arrive as
+    # one sentence -- and this is the branch that routes the run onto a
+    # guess, so it is the last place to be vague about why.
     def default_branch
       assert_remote_configured!
-      stdout, _stderr, status = capture('ls-remote', '--symref', remote, 'HEAD')
+      stdout, stderr, status = capture('ls-remote', '--symref', remote, 'HEAD')
       head = status.success? ? StaleBranches.parse_remote_head(stdout) : nil
+      return head if head
 
-      head || fallback_default_branch
+      fallback_default_branch(fallback_detail(stderr, status))
     end
 
     private
@@ -430,14 +547,32 @@ module StaleBranches
       raise Error, "no such remote: #{remote} (#{known})"
     end
 
-    def fallback_default_branch
-      name = FALLBACK_BRANCHES.find { |candidate| local_branch?(candidate) }
+    # Only one line of git's complaint, and only its first: the rest is
+    # boilerplate, and a multi-line warning carrying git's own "fatal:"
+    # prefixes at the start of a line reads as though this tool broke.
+    #
+    # A remote that answered and advertised nothing is not a remote
+    # that could not be reached, and saying so saves the reader from
+    # checking a network that is fine.
+    def fallback_detail(stderr, status)
+      return 'it advertises no refs' if status.success?
+
+      stderr.lines.first.to_s.strip
+    end
+
+    # The candidates are remote-tracking refs rather than local
+    # branches, for the reason default_ref refuses to measure against a
+    # local branch at all: what matters is having a record of what the
+    # remote had, not having a branch by a familiar name.
+    def fallback_default_branch(detail)
+      name = FALLBACK_BRANCHES.find { |candidate| ref?("refs/remotes/#{remote}/#{candidate}") }
       unless name
-        raise Error, "could not ask #{remote} for its default branch, and no local " \
-                     "#{FALLBACK_BRANCHES.join(' or ')} to fall back to"
+        raise Error, "could not ask #{remote} for its default branch (#{detail}), and no " \
+                     "#{FALLBACK_BRANCHES.map { |b| "#{remote}/#{b}" }.join(' or ')} " \
+                     'to fall back to'
       end
 
-      DefaultBranch.new(name, nil, :fallback)
+      DefaultBranch.new(name, nil, :fallback, detail)
     end
   end
 
@@ -455,6 +590,11 @@ module StaleBranches
     end
 
     def run
+      # Asked before anything else, including before the network call.
+      # The answer does not depend on the repository, so a sweep that
+      # cannot finish should say so immediately rather than after the
+      # slowest thing it does.
+      assert_content_check_available!
       @default = @git.default_branch
       @warnings << fallback_warning unless @default.from_remote?
       @measured_ref = @git.default_ref(@default.name)
@@ -462,16 +602,25 @@ module StaleBranches
       note_stale_head_ref
       partition_branches
       clear_by_ancestry
-      assert_content_check_available!
       decide_by_content
       self
     end
 
     # Acts on exactly what the report marked, which is what makes the
-    # default run a preview of this one rather than a separate opinion.
+    # default run a preview of this one rather than a separate opinion,
+    # and in the report's own order so the two read together.
+    #
+    # Each result is yielded as it happens rather than collected and
+    # returned in one go. An interrupt partway through would otherwise
+    # leave no record of what had already been destroyed, and since
+    # `git branch -D` removes the branch's reflog there is little else
+    # to reconstruct it from.
     def delete_marked
-      @rows.select { |row| row.verdict == 'DELETE' }
-           .map { |row| @git.delete_branch(row.branch) }
+      @rows.select(&:delete?).sort_by(&:branch).map do |row|
+        result = @git.delete_branch(row.branch)
+        yield result if block_given?
+        result
+      end
     end
 
     private
@@ -552,8 +701,8 @@ module StaleBranches
     end
 
     def fallback_warning
-      "could not ask #{@git.remote} for its default branch; " \
-        "measuring against #{@default.name} instead"
+      "could not ask #{@git.remote} for its default branch (#{@default.detail}); " \
+        "measuring against #{@git.remote}/#{@default.name} as of your last fetch instead"
     end
 
     # Behind the remote because nobody has fetched. This does not make
@@ -562,13 +711,49 @@ module StaleBranches
     # caller cannot tell without being told is that a keep reading
     # "this work never landed" may only mean "this work landed after
     # your last fetch".
+    # Which way the two disagree is the whole message, and an equality
+    # test cannot tell. Behind is the ordinary state and the mild one:
+    # an earlier tip clears fewer branches, so the sweep keeps more than
+    # it needs to, and the caller only needs to know that a keep may
+    # mean the work landed after their last fetch. Ahead is the
+    # hazardous one -- the tracking ref holds commits the remote no
+    # longer advertises, so a DELETE can clear work that is on no
+    # remote -- and reporting THAT as "behind, run git fetch" reassures
+    # the reader in exactly the state that deserves alarm.
     def note_stale_tracking_ref
       return unless @default.sha
-      return if @git.sha(@measured_ref) == @default.sha
 
-      @warnings << "#{@measured_ref} is behind #{@git.remote}; run " \
-                   "`git fetch #{@git.remote}` -- until then a keep may mean nothing more " \
-                   'than that the work landed after your last fetch'
+      local = @git.sha(@measured_ref)
+      return if local == @default.sha
+
+      @warnings << stale_tracking_warning(local)
+    end
+
+    def stale_tracking_warning(local)
+      case tracking_relation(local)
+      when :behind
+        "#{@measured_ref} is behind #{@git.remote}; run `git fetch #{@git.remote}` -- " \
+          'until then a keep may mean nothing more than that the work landed after ' \
+          'your last fetch'
+      when :ahead
+        "#{@measured_ref} holds commits #{@git.remote} does not, so a DELETE below may " \
+          'clear work that is on no remote. Check what was force-pushed before acting ' \
+          'on this report'
+      else
+        "#{@measured_ref} and #{@git.remote}'s #{@default.name} have diverged; neither " \
+          'contains the other, so treat every verdict below as provisional'
+      end
+    end
+
+    # The remote's tip is only comparable when this repository actually
+    # has the object; without a fetch since it moved, it does not, and
+    # the honest answer is that they differ.
+    def tracking_relation(local)
+      return :diverged unless @git.object?(@default.sha)
+      return :behind if @git.ancestor?(local, @default.sha)
+      return :ahead if @git.ancestor?(@default.sha, local)
+
+      :diverged
     end
 
     # This sweep never reads refs/remotes/<remote>/HEAD, which is what
@@ -598,7 +783,7 @@ module StaleBranches
 
     def run(argv)
       options = StaleBranches.parse_options(argv)
-      return puts(StaleBranches::USAGE) if options.help?
+      return puts(USAGE) if options.help?
 
       sweep = Sweep.new(Git.new(dir: options.dir, remote: options.remote)).run
       # Warnings come before the report rather than after it: a caller
@@ -613,9 +798,12 @@ module StaleBranches
 
     private
 
+    # The object name goes out with each line because it is the only
+    # way back to a branch this just removed the reflog of.
     def delete_marked(sweep)
-      results = sweep.delete_marked
-      results.select(&:deleted?).each { |result| puts "deleted #{result.branch}" }
+      results = sweep.delete_marked do |result|
+        puts "deleted #{result.branch} (was #{result.sha})" if result.deleted?
+      end
       failed = results.reject(&:deleted?)
       return if failed.empty?
 
@@ -629,7 +817,7 @@ module StaleBranches
     end
 
     def offer_deletion(sweep)
-      marked = sweep.rows.count { |row| row.verdict == 'DELETE' }
+      marked = sweep.rows.count(&:delete?)
       return if marked.zero?
 
       puts "Nothing was deleted. Re-run with --delete to remove the #{marked} marked DELETE."

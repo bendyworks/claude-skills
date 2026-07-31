@@ -47,11 +47,22 @@ class CliTestCase < Minitest::Test
     GIT_CEILING_DIRECTORIES
   ].freeze
 
+  # Git variables that reach git's configuration without going through
+  # any config file, so pointing GIT_CONFIG_GLOBAL and GIT_CONFIG_SYSTEM
+  # at an empty one does not neutralize them. core.hooksPath arriving
+  # this way is arbitrary script execution during a test, and
+  # `git branch -d` does fire the reference-transaction hook.
+  GIT_CONFIG_ENV_KEYS = %w[
+    GIT_CONFIG GIT_CONFIG_COUNT GIT_CONFIG_GLOBAL GIT_CONFIG_SYSTEM
+    GIT_TEMPLATE_DIR
+  ].freeze
+
   # Env vars whose machine values must not leak into any CLI test run,
   # deleted before each test and restored to their original values
   # afterward. POSIXLY_CORRECT is scrubbed for every CLI because
   # OptionParser's parsing mode depends on it.
-  BASE_SCRUBBED_ENV_KEYS = (%w[POSIXLY_CORRECT] + GIT_LOCATION_ENV_KEYS).freeze
+  BASE_SCRUBBED_ENV_KEYS = (%w[POSIXLY_CORRECT] + GIT_LOCATION_ENV_KEYS +
+                            GIT_CONFIG_ENV_KEYS).freeze
 
   # Subclasses override to extend the scrub with their CLI's own env
   # keys (tokens, default-team settings, and kin).
