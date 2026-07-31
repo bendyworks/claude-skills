@@ -87,6 +87,13 @@ module Fixtures
     # wrongful keep.
     TAG_SHADOWED = 's-tag-shadow'
 
+    # Adds a file and then removes it, so its net diff against the
+    # default branch is empty while its history holds content no other
+    # branch ever received. The tip check clears it and the branch is
+    # not deletable: deleting it takes the reflog too, and that content
+    # is then reachable from nothing.
+    ADDED_THEN_REMOVED = 'u-added-then-removed'
+
     # Where HEAD is left standing, and deletable on the evidence alone.
     CURRENT = 'o-current'
 
@@ -104,6 +111,7 @@ module Fixtures
       build_open_but_landed
       build_protected_lookalikes
       build_tag_shadowed_branch
+      build_added_then_removed
       publish_and_delete_remote_branches
       commit_after_the_last_push
       build_gone_lookalikes
@@ -288,6 +296,14 @@ module Fixtures
       commit('s.txt', 's', 's work that never landed')
       git('checkout', '-q', 'main')
       git('tag', TAG_SHADOWED)
+    end
+
+    def build_added_then_removed
+      git('checkout', '-q', 'main')
+      git('checkout', '-qb', ADDED_THEN_REMOVED)
+      commit('u-research.txt', 'THE ONLY COPY OF THIS RESEARCH', 'research worth keeping')
+      git('rm', '-q', 'u-research.txt')
+      git('commit', '-qm', 'drop the research file')
     end
 
     def publish_and_delete_remote_branches

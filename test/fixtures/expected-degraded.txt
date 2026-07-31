@@ -24,7 +24,13 @@
 #   protected:backup       a name ending in -backup
 #   pass1:ancestor         already an ancestor of the default branch
 #   proof-a:content-landed merging it into the default branch would
-#                          produce the default branch's own tree
+#                          produce the default branch's own tree, and so
+#                          would merging each commit it does not share
+#                          with that branch
+#   proof-a:tip-only       merging the branch adds nothing, but a commit
+#                          on it would -- content that reached no other
+#                          branch, and that deleting this one would leave
+#                          reachable from nothing
 #   proof-a:conflict       that merge conflicts, so the check cannot say
 #                          either way, and nothing offline can clear it
 #   kept:not-landed        the merge runs cleanly and produces a
@@ -95,3 +101,4 @@ g-open                   KEEP     kept:not-landed         work never landed, and
 l-tracks-deleted-local   KEEP     kept:not-landed         never pushed; upstream was a deleted local branch
 m-gone-in-subject        KEEP     kept:not-landed         never pushed; the marker text is in its commit subject
 s-tag-shadow             KEEP     kept:not-landed         work never landed; a tag of the same name points at the default branch
+u-added-then-removed     KEEP     proof-a:tip-only        added a file and removed it, so it adds nothing while holding the only copy of what it added
