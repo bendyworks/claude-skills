@@ -517,6 +517,20 @@ class RepoBuilderContainmentTest < Minitest::Test
     refute File.exist?(outside), 'a refused build still created its root directory'
   end
 
+  # Two defenses against the same variable, and each covers what the
+  # other cannot. RepoBuilder unsets these per git invocation, which
+  # reaches only the commands it makes itself; CliTestCase deletes them
+  # for the whole test body, which reaches the CLI's own git calls -- and
+  # those carry no env hash, because in real use an ambient GIT_DIR is
+  # the developer saying where their repository is. So the two lists must
+  # not drift: a location variable learned about here and not there is
+  # one a sweep would still inherit.
+  def test_every_location_key_the_fixtures_unset_is_also_scrubbed_suite_wide
+    missing = Fixtures::RepoBuilder::LOCATION_KEYS - CliTestCase::BASE_SCRUBBED_ENV_KEYS
+    assert_empty missing,
+                 'RepoBuilder unsets these per command, but no CLI test body is free of them'
+  end
+
   private
 
   # A repository no fixture names, standing in for the developer's own

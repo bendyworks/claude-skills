@@ -84,14 +84,26 @@ module Fixtures
     #
     # GIT_EXEC_PATH is deliberately absent: git sets it for its own
     # subprocesses and clearing it can break the invocation itself.
-    NEUTRALIZED_KEYS = %w[
+    #
+    # The location family is named on its own because a second defense
+    # is built against it: unsetting these per git invocation covers the
+    # commands this class makes, and nothing else, so CliTestCase deletes
+    # the same names for the whole of every CLI test body. A test asserts
+    # the two have not drifted.
+    LOCATION_KEYS = %w[
       GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_OBJECT_DIRECTORY
       GIT_ALTERNATE_OBJECT_DIRECTORIES GIT_COMMON_DIR GIT_NAMESPACE
-      GIT_CEILING_DIRECTORIES GIT_TEMPLATE_DIR
-      GIT_CONFIG GIT_CONFIG_COUNT
+      GIT_CEILING_DIRECTORIES
+    ].freeze
+
+    CONFIG_KEYS = %w[GIT_TEMPLATE_DIR GIT_CONFIG GIT_CONFIG_COUNT].freeze
+
+    TRANSPORT_KEYS = %w[
       GIT_SSH GIT_SSH_COMMAND GIT_ASKPASS GIT_PROXY_COMMAND
       GIT_ALLOW_PROTOCOL
     ].freeze
+
+    NEUTRALIZED_KEYS = (LOCATION_KEYS + CONFIG_KEYS + TRANSPORT_KEYS).freeze
 
     # The oldest git these fixtures are correct on. 2.32 is where
     # GIT_CONFIG_GLOBAL and GIT_CONFIG_SYSTEM begin to be honored: below

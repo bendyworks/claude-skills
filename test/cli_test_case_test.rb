@@ -48,6 +48,20 @@ class SkipSuperProbeCase < CliTestCase
   end
 end
 
+# The variables that aim git at another repository are scrubbed for
+# every CLI suite, not only the ones that build a repository of their
+# own. A CLI shelling out to git inherits the test process's environment,
+# and `git -C <dir>` does not override an inherited GIT_DIR -- so a test
+# driving such a CLI without a fixture's neutralized environment operates
+# on whatever repository the developer's shell happens to name.
+class GitLocationProbeCase < CliTestCase
+  attr_reader :seen
+
+  def test_record_env_visibility
+    @seen = CliTestCase::GIT_LOCATION_ENV_KEYS.to_h { |key| [key, ENV.key?(key)] }
+  end
+end
+
 # A copy-paste override that re-lists a base key must not defeat the
 # restore.
 class DuplicateKeyProbeCase < CliTestCase
@@ -99,7 +113,8 @@ class BrokenShimProbeCase < CliTestCase
 end
 
 class CliTestCaseTest < Minitest::Test
-  SENTINEL_KEYS = %w[POSIXLY_CORRECT CLI_TEST_CASE_SENTINEL].freeze
+  SENTINEL_KEYS = (%w[POSIXLY_CORRECT CLI_TEST_CASE_SENTINEL] +
+                   CliTestCase::GIT_LOCATION_ENV_KEYS).freeze
 
   def setup
     @saved_sentinels = SENTINEL_KEYS.to_h { |key| [key, ENV[key]] }
@@ -150,6 +165,23 @@ class CliTestCaseTest < Minitest::Test
     probe = run_probe(DuplicateKeyProbeCase, :test_record_env_visibility)
     refute probe.seen[:base_key_present], 'duplicated key must still be scrubbed'
     assert_equal '1', ENV['POSIXLY_CORRECT']
+  end
+
+  # Scrubbed for every CLI suite rather than only where a fixture's
+  # neutralized environment reaches, because the hole is the tests that
+  # drive a git-shelling CLI without building a repository at all --
+  # argument handling, a usage error, a refusal. Those still reach far
+  # enough into the CLI for it to run git, and an ambient GIT_DIR points
+  # that git at the developer's own clone.
+  def test_git_location_keys_are_scrubbed_and_then_restored
+    ambient = CliTestCase::GIT_LOCATION_ENV_KEYS.to_h { |key| [key, "ambient-#{key}"] }
+    ambient.each { |key, value| ENV[key] = value }
+
+    probe = run_probe(GitLocationProbeCase, :test_record_env_visibility)
+
+    leaked = probe.seen.select { |_key, present| present }.keys
+    assert_empty leaked, 'git location variables leaked into the test body'
+    assert_equal ambient, CliTestCase::GIT_LOCATION_ENV_KEYS.to_h { |key| [key, ENV[key]] }
   end
 
   def test_invoking_a_shimmed_command_flunks_the_test

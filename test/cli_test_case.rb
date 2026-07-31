@@ -29,11 +29,27 @@ require 'minitest/autorun'
 require 'tmpdir'
 
 class CliTestCase < Minitest::Test
+  # The variables that aim git at a repository other than the one named
+  # on the command line. `git -C <dir>` does not override an inherited
+  # GIT_DIR, and a CLI shelling out to git passes no environment of its
+  # own -- in real use these variables are the developer saying where
+  # their repository is, and honoring them is correct. In a test they
+  # are the developer's own clone, reached by a CLI that believes it is
+  # working on a throwaway. Scrubbed for every CLI suite rather than
+  # only where a fixture builds one, because a test that drives a CLI
+  # without building anything -- argument handling, a usage error --
+  # still reaches far enough in for it to run git.
+  GIT_LOCATION_ENV_KEYS = %w[
+    GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_OBJECT_DIRECTORY
+    GIT_ALTERNATE_OBJECT_DIRECTORIES GIT_COMMON_DIR GIT_NAMESPACE
+    GIT_CEILING_DIRECTORIES
+  ].freeze
+
   # Env vars whose machine values must not leak into any CLI test run,
   # deleted before each test and restored to their original values
   # afterward. POSIXLY_CORRECT is scrubbed for every CLI because
   # OptionParser's parsing mode depends on it.
-  BASE_SCRUBBED_ENV_KEYS = %w[POSIXLY_CORRECT].freeze
+  BASE_SCRUBBED_ENV_KEYS = (%w[POSIXLY_CORRECT] + GIT_LOCATION_ENV_KEYS).freeze
 
   # Subclasses override to extend the scrub with their CLI's own env
   # keys (tokens, default-team settings, and kin).
