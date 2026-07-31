@@ -24,8 +24,11 @@
 #   Dir.chdir. A chdir survives past the failure that interrupted it,
 #   and what it aims subsequent commands at is the caller's own clone.
 #
-#   The default branch is asked of the remote with `ls-remote --symref`,
-#   never read from refs/remotes/<remote>/HEAD. That ref is a local
+#   The default branch is asked of the remote with `ls-remote --symref`.
+#   refs/remotes/<remote>/HEAD is read in exactly one place -- the
+#   offline fallback, where an older answer from the remote beats a
+#   hardcoded guess -- and never when the remote can be asked. That ref
+#   is a local
 #   cache written when the repository was cloned and not updated since,
 #   so where the default branch has changed it names the old one -- and
 #   names a branch that really exists and really is pushed, so nothing
@@ -318,7 +321,8 @@ module StaleBranches
     end
     deletions = ordered.count(&:delete?)
     lines << ''
-    lines << "#{ordered.length} branches, #{deletions} marked DELETE"
+    counted = ordered.length == 1 ? '1 branch' : "#{ordered.length} branches"
+    lines << "#{counted}, #{deletions} marked DELETE"
     "#{lines.join("\n")}\n"
   end
 
@@ -354,10 +358,13 @@ module StaleBranches
       @remote = remote
     end
 
+    # ENOENT is git missing; EACCES is a git that exists and cannot be
+    # run. Both are one sentence to the caller, and neither should
+    # arrive as a Ruby backtrace past this CLI's single rescue.
     def capture(*args)
       Open3.capture3(CHILD_ENV, 'git', '-C', @dir, *args)
-    rescue Errno::ENOENT
-      raise Error, 'git not found on PATH'
+    rescue Errno::ENOENT, Errno::EACCES => e
+      raise Error, "could not run git: #{e.message}"
     end
 
     # For the several facts git answers by succeeding or failing rather
@@ -421,8 +428,8 @@ module StaleBranches
       # upgrade git over a typo.
       stdout, = Open3.capture3(CHILD_ENV, 'git', '--version')
       @version = StaleBranches.parse_git_version(stdout.to_s)
-    rescue Errno::ENOENT
-      raise Error, 'git not found on PATH'
+    rescue Errno::ENOENT, Errno::EACCES => e
+      raise Error, "could not run git: #{e.message}"
     end
 
     # Merges into a tree git writes and never checks out, so the
@@ -455,11 +462,14 @@ module StaleBranches
     # saying a branch name is required. Both of those are failures a
     # caller reading the exit status alone reports as a clean sweep.
     #
-    # -d is asked first so git can refuse on its own terms: it declines
-    # any branch whose commits are not reachable from HEAD or its
-    # upstream, which is a second signature on the sweep's conclusion.
-    # A squash-merged branch never satisfies that however plainly its
-    # content has landed, so -D then forces what the evidence settled.
+    # -d is asked first, and its refusal is deliberately NOT a veto --
+    # worth stating plainly, because treating it as one reads like the
+    # safer design. git declines any branch whose commits are not
+    # reachable from HEAD or its upstream, which a squash-merged branch
+    # never is however plainly its content has landed; honoring the
+    # refusal would therefore keep most of what this sweep exists to
+    # clear. -D forces what the evidence settled, and the cost of that
+    # choice is issue #92.
     def delete_branch(name)
       ref = "refs/heads/#{name}"
       was = sha(ref)
@@ -567,11 +577,14 @@ module StaleBranches
     # boilerplate, and a multi-line warning carrying git's own "fatal:"
     # prefixes at the start of a line reads as though this tool broke.
     #
-    # A remote that answered and advertised nothing is not a remote
-    # that could not be reached, and saying so saves the reader from
-    # checking a network that is fine.
+    # A remote that answered without naming a default branch is not a
+    # remote that could not be reached, and saying so saves the reader
+    # from checking a network that is fine. It says "no default branch"
+    # rather than "no refs": a remote holding only tags, and a server
+    # not advertising the symref capability, both land here having
+    # advertised plenty.
     def fallback_detail(stderr, status)
-      return 'it advertises no refs' if status.success?
+      return 'it advertised no default branch' if status.success?
 
       stderr.lines.first.to_s.strip
     end
@@ -765,8 +778,8 @@ module StaleBranches
 
     def stale_tracking_warning(local)
       case tracking_relation(local)
-      when :missing
-        "#{@measured_ref} does not have what #{@git.remote} is on; run " \
+      when :behind
+        "#{@measured_ref} is behind #{@git.remote}; run " \
           "`git fetch #{@git.remote}` -- until then a keep may mean nothing more than " \
           'that the work landed after your last fetch'
       when :ahead
@@ -787,17 +800,18 @@ module StaleBranches
     # alarming message, and the fetch advice it actually needs never
     # printed.
     def tracking_relation(local)
-      return :missing unless @git.object?(@default.sha)
-      return :missing if @git.ancestor?(local, @default.sha)
+      return :behind unless @git.object?(@default.sha)
+      return :behind if @git.ancestor?(local, @default.sha)
       return :ahead if @git.ancestor?(@default.sha, local)
 
       :diverged
     end
 
-    # This sweep never reads refs/remotes/<remote>/HEAD, which is what
-    # makes a stale one harmless here and nowhere else: every
-    # `origin/HEAD` shorthand the caller types resolves through it.
-    # Having asked the remote already, saying so costs one comparison.
+    # A stale refs/remotes/<remote>/HEAD is harmless to the verdicts
+    # above -- those were measured against what the remote just said --
+    # and harmful everywhere else, since every `origin/HEAD` shorthand
+    # the caller types resolves through it. Having asked the remote
+    # already, saying so costs one comparison.
     def note_stale_head_ref
       # Only where the remote actually answered. In the fallback, the
       # name this would compare against is the sweep's own guess -- so

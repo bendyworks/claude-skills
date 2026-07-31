@@ -1435,7 +1435,9 @@ class MeasuredRefTest < OracleTestCase
 
       message = assert_raises(StaleBranches::Error) { measure(repo, remote: 'empty') }.message
 
-      assert_match(/advertises no refs/, message)
+      assert_match(/advertised no default branch/, message)
+      refute_match(/no refs/, message,
+                   'a remote holding only tags advertises plenty and is not unreachable')
     end
   end
 
@@ -1838,7 +1840,7 @@ class MissingGitTest < Minitest::Test
       ENV['PATH'] = empty
       git = StaleBranches::Git.new(dir: Dir.tmpdir, remote: 'origin')
 
-      assert_match(/git not found/, assert_raises(StaleBranches::Error) do
+      assert_match(/could not run git/, assert_raises(StaleBranches::Error) do
         git.capture('--version')
       end.message)
     ensure

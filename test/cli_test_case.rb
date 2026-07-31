@@ -33,11 +33,12 @@ require 'tmpdir'
 class CliTestCase < Minitest::Test
   # The variables that aim git at a repository other than the one named
   # on the command line. `git -C <dir>` does not override an inherited
-  # GIT_DIR, and a CLI shelling out to git passes no environment of its
-  # own -- in real use these variables are the developer saying where
-  # their repository is, and honoring them is correct. In a test they
-  # are the developer's own clone, reached by a CLI that believes it is
-  # working on a throwaway. Scrubbed for every CLI suite rather than
+  # GIT_DIR, so a CLI that passes no environment of its own inherits
+  # whatever the shell names. In a test that is the developer's own
+  # clone, reached by a CLI that believes it is working on a
+  # throwaway. (bin/stale-branches unsets these for its own children
+  # too, because it deletes; this scrub covers every CLI, including the
+  # ones that do not.) Scrubbed for every CLI suite rather than
   # only where a fixture builds one, because a test that drives a CLI
   # without building anything -- argument handling, a usage error --
   # still reaches far enough in for it to run git.
