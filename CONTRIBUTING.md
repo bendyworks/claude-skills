@@ -143,7 +143,24 @@ outside world and rescues to `abort`, dispatched behind
 bare `ruby test/<name>_test.rb`. Shared test scaffolding for
 CLI-invoking tests lives in `test/cli_test_case.rb`; its header
 comment explains the naming that keeps it outside CI's
-`test/*_test.rb` glob.
+`test/*_test.rb` glob. Subclasses name their entry point in
+`dispatch_cli` and any per-CLI safety refusal in
+`guard_cli_invocation`; `run_cli` is owned by the base class and
+refuses to be overridden, so no suite can dispatch around its own
+guard.
+
+A CLI whose work IS the shelling out (see `bin/stale-branches`) splits
+the same way, one level further in: the pure module holds the
+decisions that are a function of gathered facts, a command class is
+the only code that shells out, and the CLI class is argv and printing.
+That seam is what lets the decision table be tested without a
+repository and the shell-level traps -- the ones that cost this repo
+the defects `bin/stale-branches` was extracted to prevent -- be tested
+against real throwaway ones. Fixtures that build such a repository
+live in `test/fixtures/`, outside the `test/*_test.rb` glob for the
+same reason as the scaffolding; `test/fixtures/repo_builder.rb`
+documents the three properties that keep a build inside the directory
+it created.
 
 Coverage measurement is opt-in and test-only; the stdlib-only posture
 above is about the CLIs' runtime and is unaffected. Requiring

@@ -620,8 +620,8 @@ module StaleBranches
       return if failed.empty?
 
       failed.each do |result|
-        warn "stale-branches: could not delete #{result.branch}: " \
-             "#{result.detail.empty? ? 'it is still there' : result.detail}"
+        detail = result.detail.empty? ? 'it is still there' : result.detail
+        warn "stale-branches: could not delete #{result.branch}: #{detail}"
       end
       # A caller that scripted this has to be able to tell a sweep that
       # did what it was told from one that did not.

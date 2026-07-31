@@ -1206,6 +1206,21 @@ class MeasuredRefTest < OracleTestCase
     end
   end
 
+  # Neither the remote-tracking ref nor a local branch of that name, in
+  # a repository whose remote still reports one. Nothing honest is left
+  # to measure against, and a sweep that carried on would be comparing
+  # every branch to nothing and clearing all of them.
+  def test_with_nothing_local_naming_the_default_branch_the_run_ends
+    with_flat_fixture('nothing-to-measure') do |repo|
+      repo.git('update-ref', '-d', 'refs/remotes/origin/main')
+      repo.git('update-ref', '-d', 'refs/heads/main')
+
+      message = assert_raises(StaleBranches::Error) { measure(repo) }.message
+
+      assert_match(/main/, message, 'the refusal did not name what it looked for')
+    end
+  end
+
   # Behind the remote because nobody fetched. The verdicts stay
   # trustworthy in the direction that matters -- an older tip clears
   # fewer branches, so the sweep keeps more than it needs to -- but a
@@ -1442,6 +1457,31 @@ end
 # branch, and it is the only outcome a pull-request lookup could
 # improve on.
 class ProofATest < OracleTestCase
+  # A git from before `merge-tree --write-tree` existed. Reported
+  # rather than simulated: the command's absence is what the version
+  # check stands in for, and there is no old git to run here.
+  class AncientGit < StaleBranches::Git
+    def version
+      [2, 37]
+    end
+  end
+
+  # The refusal itself, and not only the predicate behind it. A sweep
+  # that read the version and carried on anyway would report a
+  # repository in which every branch conflicts, which looks like an
+  # answer.
+  def test_an_old_git_ends_the_run_rather_than_reporting_what_it_never_checked
+    with_flat_fixture('old-git') do |repo|
+      sweep = with_repo_env(repo) { AncientGit.new(dir: repo.work, remote: 'origin') }
+      message = assert_raises(StaleBranches::Error) do
+        with_repo_env(repo) { StaleBranches::Sweep.new(sweep).run }
+      end.message
+
+      assert_match(/2\.38/, message, 'the refusal did not say what it needs')
+      assert_match(/2\.37/, message, 'the refusal did not say what it found')
+    end
+  end
+
   def test_the_flat_table_agrees_about_what_the_content_check_finds
     with_flat_fixture('proof-a') do |repo|
       sweep = measure(repo)
@@ -1494,6 +1534,25 @@ end
 # different signature, so it fails -- and a sweep reading that failure
 # as it reads any other non-zero exit would call every branch in the
 # repository conflicted and report a table of unanswered questions.
+# git missing entirely, which is a plain sentence rather than a
+# backtrace. Nothing here touches a repository: the point is what
+# happens before one could be reached.
+class MissingGitTest < Minitest::Test
+  def test_git_absent_from_path_is_reported_as_a_sentence
+    Dir.mktmpdir('stale-branches-no-git') do |empty|
+      saved = ENV.fetch('PATH')
+      ENV['PATH'] = empty
+      git = StaleBranches::Git.new(dir: Dir.tmpdir, remote: 'origin')
+
+      assert_match(/git not found/, assert_raises(StaleBranches::Error) do
+        git.capture('--version')
+      end.message)
+    ensure
+      ENV['PATH'] = saved
+    end
+  end
+end
+
 class GitVersionTest < Minitest::Test
   def test_the_version_is_read_from_what_git_prints
     assert_equal [2, 50], StaleBranches.parse_git_version('git version 2.50.1 (Apple Git-155)')
