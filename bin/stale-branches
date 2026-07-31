@@ -20,7 +20,18 @@
 #   -C is passed through to git as `git -C DIR`, never applied with
 #   Dir.chdir. A chdir survives past the failure that interrupted it,
 #   and what it aims subsequent commands at is the caller's own clone.
+#
+#   The default branch is asked of the remote with `ls-remote --symref`,
+#   never read from refs/remotes/<remote>/HEAD. That ref is a local
+#   cache written when the repository was cloned and not updated since,
+#   so where the default branch has changed it names the old one -- and
+#   names a branch that really exists and really is pushed, so nothing
+#   about reading it fails or looks wrong. Every verdict downstream is
+#   then measured against the wrong branch. `remote set-head --auto`
+#   repairs that ref, but only for whoever remembers to run it; asking
+#   the remote needs no memory and writes nothing.
 
+require 'open3'
 require 'optparse'
 
 module StaleBranches
@@ -45,6 +56,22 @@ module StaleBranches
     landed. Unpushed work, an unanswerable question, and a missing
     remote all end in a keep.
   TXT
+
+  # Where the sweep falls back when the remote cannot be reached, in
+  # order. A local branch by one of these names is a guess, which is
+  # why taking one is always announced.
+  FALLBACK_BRANCHES = %w[main master].freeze
+
+  # The branch every verdict is measured against, and where the answer
+  # came from -- which the report has to say, because a guess that
+  # announces itself can be re-run against the real answer and a silent
+  # one cannot. The tip is carried alongside because the remote hands
+  # it over in the same breath.
+  DefaultBranch = Struct.new(:name, :sha, :source) do
+    def from_remote?
+      source == :remote
+    end
+  end
 
   # The parsed command line. Held as a value rather than a hash so a
   # stage reaching for a flag that does not exist fails where it is
@@ -110,6 +137,94 @@ module StaleBranches
     values[key] = value
   end
 
+  # `ls-remote --symref <remote> HEAD` answers in two lines: the symref
+  # naming the branch, then that branch's tip.
+  #
+  #   ref: refs/heads/develop<TAB>HEAD
+  #   55a8fc0a4f21946df49bb9900352cd09e2ef2fc2<TAB>HEAD
+  #
+  # An empty remote prints the first line and not the second, so the
+  # name is the answer and the tip is what may be missing.
+  def parse_remote_head(output)
+    name = output[%r{^ref: refs/heads/(\S+)\tHEAD$}, 1]
+    return nil unless name
+
+    DefaultBranch.new(name, output[/^([0-9a-f]{4,64})\tHEAD$/, 1], :remote)
+  end
+
+  # The only code here that shells out, and the only code that knows
+  # the repository is somewhere other than where this process is
+  # standing.
+  class Git
+    attr_reader :remote
+
+    def initialize(dir:, remote:)
+      @dir = dir
+      @remote = remote
+    end
+
+    def capture(*args)
+      Open3.capture3('git', '-C', @dir, *args)
+    rescue Errno::ENOENT
+      raise Error, 'git not found on PATH'
+    end
+
+    # For the several facts git answers by succeeding or failing rather
+    # than by printing.
+    def succeeds?(*args)
+      capture(*args).last.success?
+    end
+
+    def lines(*args)
+      stdout, stderr, status = capture(*args)
+      raise Error, "git #{args.first} failed: #{stderr.strip}" unless status.success?
+
+      stdout.lines(chomp: true)
+    end
+
+    def remotes
+      lines('remote')
+    end
+
+    # --verify with a full refname, so a tag of the same name cannot
+    # answer for a branch that does not exist.
+    def local_branch?(name)
+      succeeds?('show-ref', '--verify', '--quiet', "refs/heads/#{name}")
+    end
+
+    def default_branch
+      assert_remote_configured!
+      stdout, _stderr, status = capture('ls-remote', '--symref', remote, 'HEAD')
+      head = status.success? ? StaleBranches.parse_remote_head(stdout) : nil
+
+      head || fallback_default_branch
+    end
+
+    private
+
+    # A remote that was never configured is a misspelling, and the
+    # fallback below is not the answer to one: continuing would measure
+    # every verdict against a branch nobody named. A remote that exists
+    # and cannot be reached is the different case the fallback is for.
+    def assert_remote_configured!
+      configured = remotes
+      return if configured.include?(remote)
+
+      known = configured.empty? ? 'this repository has none' : "configured: #{configured.join(', ')}"
+      raise Error, "no such remote: #{remote} (#{known})"
+    end
+
+    def fallback_default_branch
+      name = FALLBACK_BRANCHES.find { |candidate| local_branch?(candidate) }
+      unless name
+        raise Error, "could not ask #{remote} for its default branch, and no local " \
+                     "#{FALLBACK_BRANCHES.join(' or ')} to fall back to"
+      end
+
+      DefaultBranch.new(name, nil, :fallback)
+    end
+  end
+
   # The half that talks to the outside world: everything above is a pure
   # function of what it was handed.
   class CLI
@@ -120,8 +235,21 @@ module StaleBranches
     def run(argv)
       options = StaleBranches.parse_options(argv)
       return puts(StaleBranches::USAGE) if options.help?
+
+      git = Git.new(dir: options.dir, remote: options.remote)
+      default = git.default_branch
+      warn_about_guess(git.remote, default) unless default.from_remote?
     rescue Error => e
       abort "stale-branches: #{e.message}"
+    end
+
+    private
+
+    # Named on both sides: which remote went unanswered, and which
+    # branch the verdicts below were measured against instead.
+    def warn_about_guess(remote, default)
+      warn "stale-branches: could not ask #{remote} for its default branch; " \
+           "measuring against #{default.name} instead"
     end
   end
 end

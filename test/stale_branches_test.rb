@@ -703,6 +703,47 @@ class ArgumentParsingTest < CliTestCase
   end
 end
 
+# `ls-remote --symref <remote> HEAD` is the one authoritative answer to
+# what the default branch is: it asks the remote, needs no forge, and
+# writes nothing -- where `remote set-head --auto` answers the same
+# question by writing a local ref that is then wrong until the next time
+# someone remembers to run it. Parsing its two lines is pure, so it is
+# tested without a repository.
+class RemoteHeadParsingTest < Minitest::Test
+  REAL_OUTPUT = "ref: refs/heads/develop\tHEAD\n55a8fc0a4f21946df49bb9900352cd09e2ef2fc2\tHEAD\n"
+
+  def test_the_symref_line_names_the_branch_and_the_second_line_its_tip
+    head = StaleBranches.parse_remote_head(REAL_OUTPUT)
+
+    assert_equal 'develop', head.name
+    assert_equal '55a8fc0a4f21946df49bb9900352cd09e2ef2fc2', head.sha
+    assert_predicate head, :from_remote?
+  end
+
+  # Branch names carry slashes, and release/1.x is a name both fixtures
+  # build. A pattern stopping at the slash would answer "release".
+  def test_a_slashed_branch_name_survives_intact
+    head = StaleBranches.parse_remote_head("ref: refs/heads/release/1.x\tHEAD\ndeadbee\tHEAD\n")
+
+    assert_equal 'release/1.x', head.name
+  end
+
+  # An empty remote answers with the symref alone: HEAD names a branch
+  # that has no commits yet, so there is no tip line. The name is still
+  # the answer to the question that was asked.
+  def test_a_symref_with_no_tip_still_names_the_branch
+    head = StaleBranches.parse_remote_head("ref: refs/heads/main\tHEAD\n")
+
+    assert_equal 'main', head.name
+    assert_nil head.sha
+  end
+
+  def test_output_with_no_symref_line_answers_nothing
+    assert_nil StaleBranches.parse_remote_head("55a8fc0\tHEAD\n")
+    assert_nil StaleBranches.parse_remote_head('')
+  end
+end
+
 
 # Turns the sweep's report back into rows the oracle can be compared with.
 module SweepRun
@@ -763,17 +804,31 @@ class OracleTestCase < CliTestCase
     StaleBranches::CLI.run(argv)
   end
 
+  def sweep(repo, *extra)
+    with_repo_env(repo) do
+      out, err = capture_io { run_cli(['-C', repo.work, *extra]) }
+      SweepRun::Result.new(SweepRun.parse(out), out, err)
+    end
+  end
+
+  # The command layer, driven directly for the questions a report cannot
+  # be asked yet. It goes through the same refusal run_cli gets, so a
+  # test reaching past the argv cannot reach past the guard with it.
+  def git_for(repo, remote: 'origin')
+    guard_cli_invocation(['-C', repo.work])
+    StaleBranches::Git.new(dir: repo.work, remote: remote)
+  end
+
   # The CLI shells out to git, so it runs under the same neutralized
   # environment the fixture was built with: a developer's commit.gpgsign
   # or merge.ff must not be able to change a verdict, and an ambient
   # GIT_DIR must not be able to redirect the sweep at their own clone.
   # A nil value means "unset", which is how RepoBuilder deletes the keys
   # that would redirect git.
-  def sweep(repo, *extra)
+  def with_repo_env(repo)
     saved = repo.env.keys.to_h { |key| [key, ENV[key]] }
     repo.env.each { |key, value| value.nil? ? ENV.delete(key) : ENV[key] = value }
-    out, err = capture_io { run_cli(['-C', repo.work, *extra]) }
-    SweepRun::Result.new(SweepRun.parse(out), out, err)
+    yield
   ensure
     saved&.each { |key, value| value.nil? ? ENV.delete(key) : ENV[key] = value }
   end
@@ -813,6 +868,133 @@ class OracleTestCase < CliTestCase
     Dir.mktmpdir("stale-branches-#{label}") do |dir|
       yield Fixtures::BranchRepo.new(File.join(dir, 'flat')).build
     end
+  end
+
+  def with_gitflow_fixture(label)
+    Dir.mktmpdir("stale-branches-gitflow-#{label}") do |dir|
+      yield Fixtures::GitflowRepo.new(File.join(dir, 'gf')).build
+    end
+  end
+end
+
+# Which branch the verdicts are measured against, asked of a real
+# repository. Everything the sweep decides rests on this answer, and the
+# way it goes wrong is not an error but a plausible wrong branch: the
+# sweep runs, reports confidently, and clears work that never reached
+# the branch the team ships.
+class DefaultBranchTest < OracleTestCase
+  def test_the_remote_is_asked_rather_than_main_assumed
+    with_flat_fixture('default') do |repo|
+      assert_equal 'main', resolve(repo).name
+    end
+  end
+
+  def test_a_repository_whose_default_is_not_main_answers_with_its_own
+    with_gitflow_fixture('default') do |repo|
+      default = resolve(repo)
+
+      assert_equal 'develop', default.name
+      assert_predicate default, :from_remote?
+    end
+  end
+
+  # The bug this design makes structurally impossible rather than
+  # guarded. refs/remotes/<remote>/HEAD is a local cache written once at
+  # clone time and never updated, so in a repository whose default
+  # branch has changed since, it names the old one -- and here it names
+  # main, a branch that really exists and really is pushed, so nothing
+  # about reading it fails or looks wrong. Every verdict would then be
+  # measured against main, which is exactly what the gitflow fixture is
+  # built to catch.
+  def test_a_stale_local_head_ref_is_not_consulted
+    with_gitflow_fixture('stale-head') do |repo|
+      repo.git('symbolic-ref', 'refs/remotes/origin/HEAD', 'refs/remotes/origin/main')
+
+      assert_equal 'develop', resolve(repo).name
+    end
+  end
+
+  # --remote selects which repository's ancestry the verdicts are
+  # measured against, so it has to reach the answer rather than the
+  # default one: the second remote here says main where origin says
+  # develop.
+  def test_the_named_remote_is_the_one_asked
+    with_gitflow_fixture('remotes') do |repo|
+      add_second_remote(repo, 'upstream', 'main')
+
+      assert_equal 'develop', resolve(repo, remote: 'origin').name
+      assert_equal 'main', resolve(repo, remote: 'upstream').name
+    end
+  end
+
+  # A misspelled remote must not degrade into a guess. The fallback
+  # below is for a remote that exists and cannot be reached; a remote
+  # that was never configured is the caller's mistake, and continuing
+  # would measure every verdict against a branch nobody named.
+  def test_a_remote_that_was_never_configured_is_refused_by_name
+    with_gitflow_fixture('no-remote') do |repo|
+      message = assert_raises(StaleBranches::Error) { resolve(repo, remote: 'upstrem') }.message
+
+      assert_match(/upstrem/, message)
+      assert_match(/origin/, message, 'the refusal did not say which remotes exist')
+    end
+  end
+
+  # Configured but unreachable -- offline, or a remote whose repository
+  # is gone. The sweep still has local evidence worth reporting, so it
+  # falls back rather than stopping, and says which branch it fell back
+  # to so a wrong answer is visible rather than silent.
+  def test_an_unreachable_remote_falls_back_and_says_to_what
+    with_flat_fixture('offline') do |repo|
+      repo.git('remote', 'add', 'gone', File.join(repo.root, 'no-such-repo.git'))
+      default = resolve(repo, remote: 'gone')
+
+      assert_equal 'main', default.name
+      refute_predicate default, :from_remote?
+    end
+  end
+
+  # With nothing local worth falling back to, a guess would be invented
+  # rather than degraded. The gitflow repository is one `branch -D` away
+  # from that state, and its HEAD is already detached, so main can go.
+  def test_an_unreachable_remote_with_nothing_to_fall_back_to_is_refused
+    with_gitflow_fixture('offline-empty') do |repo|
+      repo.git('branch', '-D', 'main')
+      repo.git('remote', 'add', 'gone', File.join(repo.root, 'no-such-repo.git'))
+
+      message = assert_raises(StaleBranches::Error) { resolve(repo, remote: 'gone') }.message
+
+      assert_match(/main/, message, 'the refusal did not say what it looked for')
+    end
+  end
+
+  # The warning is what makes the fallback survivable: a report measured
+  # against a guessed branch that says so can be re-run against the real
+  # one, and the same report without it is a confident wrong answer.
+  def test_the_fallback_warns_through_the_cli_naming_both_branches
+    with_flat_fixture('offline-warning') do |repo|
+      repo.git('remote', 'add', 'gone', File.join(repo.root, 'no-such-repo.git'))
+      result = sweep(repo, '--remote', 'gone')
+
+      assert_match(/gone/, result.stderr, 'the warning did not say which remote went unanswered')
+      assert_match(/main/, result.stderr, 'the warning did not name the branch it fell back to')
+    end
+  end
+
+  private
+
+  def resolve(repo, remote: 'origin')
+    with_repo_env(repo) { git_for(repo, remote: remote).default_branch }
+  end
+
+  # A second remote whose own HEAD names a different branch. Built from
+  # the fixture's own commits so the two remotes disagree about the
+  # default and about nothing else.
+  def add_second_remote(repo, name, default_branch)
+    path = File.join(repo.root, "#{name}.git")
+    repo.git('init', '-q', '-b', default_branch, '--bare', "#{name}.git", dir: repo.root)
+    repo.git('remote', 'add', name, path)
+    repo.git('push', '-q', name, "#{default_branch}:#{default_branch}")
   end
 end
 
@@ -856,7 +1038,15 @@ class SweepTargetProbeCase < OracleTestCase
   def test_sweep_the_configured_target
     return unless self.class.target
 
-    run_cli(self.class.target)
+    capture_io do
+      run_cli(self.class.target)
+    rescue SystemExit
+      # Whether the guard refused is all this probe reports on. What the
+      # CLI then makes of a target it was allowed to reach belongs to
+      # another test, and an abort here would otherwise end the process:
+      # SystemExit is not a StandardError, so minitest lets it through.
+      nil
+    end
   end
 end
 
@@ -963,8 +1153,7 @@ class GitflowOracleTest < OracleTestCase
   # fixture also ends with HEAD detached, so the whole table is graded
   # from a detached HEAD as a matter of course.
   def test_report_matches_the_oracle_with_no_forge_available
-    Dir.mktmpdir('stale-branches-gitflow') do |dir|
-      repo = Fixtures::GitflowRepo.new(File.join(dir, 'gf')).build
+    with_gitflow_fixture('oracle') do |repo|
       result = sweep(repo)
       assert_matches_oracle(Fixtures::Oracle.load(ORACLE), result)
       refute_git_complaints(result)
@@ -975,8 +1164,7 @@ class GitflowOracleTest < OracleTestCase
   # in a per-branch reason. Reporting "no pull request" for a lookup that
   # never happened states an absence nobody checked.
   def test_no_row_claims_a_pull_request_was_absent
-    Dir.mktmpdir('stale-branches-gitflow-reasons') do |dir|
-      repo = Fixtures::GitflowRepo.new(File.join(dir, 'gf')).build
+    with_gitflow_fixture('reasons') do |repo|
       rows = sweep(repo).rows
       # A report with no rows satisfies every claim about what its rows
       # may not say, which is the empty pass the oracle loader refuses
