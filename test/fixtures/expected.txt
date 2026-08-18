@@ -1,0 +1,111 @@
+# Expected verdicts for the flat fixture with pull-request lookups
+# working: the sweep's full specification, and the table it is finished
+# against. expected-degraded.txt is this same fixture with the forge
+# unreachable, and reading the two side by side is the clearest
+# statement of what consulting a forge is worth.
+#
+# One row per local branch. Columns are whitespace-separated: the branch
+# name, the verdict, the reason key the report must carry, and free prose
+# saying why the row exists.
+#
+# The reason keys, and the order the sweep decides them in. The prefix
+# names the stage that reached the verdict, which is what makes a row's
+# assertion say more than "this branch survived":
+#
+#   protected:default      the repository's default branch
+#   protected:current      the branch HEAD is on
+#   protected:worktree     checked out in another worktree
+#   protected:long-lived   a name teams keep: develop, staging,
+#                          production, gh-pages, main, master, release/*
+#                          -- the sweep's whole built-in list, not an
+#                          index of rows below. develop, staging,
+#                          production and gh-pages have arms here, main
+#                          and release/* have them in the gitflow table,
+#                          and master has none in either: it is the one
+#                          member of the list no fixture exercises.
+#   protected:backup       a name ending in -backup
+#   protected:open-pr      a pull request naming this branch is open
+#   pass1:ancestor         already an ancestor of the default branch
+#   proof-a:content-landed merging it into the default branch would
+#                          produce the default branch's own tree, and so
+#                          would merging each commit it does not share
+#                          with that branch
+#   proof-a:tip-only       merging the branch adds nothing, but a commit
+#                          on it would -- content that reached no other
+#                          branch, and that deleting this one would leave
+#                          reachable from nothing
+#   proof-a:conflict       that merge conflicts, so the check cannot say
+#                          either way, and nothing offline can clear it
+#   proof-b:pr-merged      a merged pull request, based on the default
+#                          branch, not from a fork, whose head is this
+#                          branch's tip
+#   proof-b:pr-tip-differs a merged pull request, but its head is not
+#                          this branch's tip, so what merged is not what
+#                          is here
+#   proof-b:pr-closed      its pull requests were closed, never merged
+#   proof-b:pr-from-fork   the merged pull request came from a fork, so
+#                          it is evidence about that fork's branch and
+#                          not about this one
+#   proof-b:pr-other-base  the merged pull request's base was some other
+#                          branch, so its work reached that branch and
+#                          not the default one
+#   proof-b:no-pr          no pull request ever named this branch
+#   kept:not-landed        the merge runs cleanly and produces a
+#                          different tree, so the branch definitely adds
+#                          something the default branch does not have
+#
+# proof-a:conflict is the one key with no row here. Every branch it
+# answers for offline is answered by the forge instead, which is exactly
+# what proof (b) is: it runs solely on branches proof (a) could not
+# clear, so the conflicting rows of the degraded table are the entire
+# input to every pull-request rule the sweep has. A rule with no
+# conflicting row behind it has nothing to decide and could be dropped
+# with nothing going red, which is why each of the six rejection clauses
+# below has a branch of its own.
+#
+# The five proof-b keys that keep are five distinct clauses, and they
+# are kept apart rather than collapsed into one "no merged pull request"
+# because the reason column is what a person reads when deciding whether
+# to trust a keep. Printing "no pull request" for a branch that visibly
+# has one reads as a bug in the sweep rather than a finding about the
+# branch.
+#
+# Cross-repository evidence can protect and can never clear. Proof (b)
+# refuses a merged pull request that came from a fork -- i-cross-fork --
+# because it describes the fork's branch and not this one. Open
+# pull-request protection deliberately does not apply that filter:
+# --head matches on branch name alone, nothing in the reply says whose
+# branch it describes, and protection errs toward keeping.
+# v-open-from-fork and q-open-but-landed are the same branch shape
+# differing in that one field, so a protection that starts filtering on
+# it separates them and one goes red.
+#
+# branch                 verdict  reason                  why
+main                     KEEP     protected:default       the default branch, and decided by that rule first; the long-lived list holds main too, so this row's VERDICT survives losing the default-branch rule and only its reason catches that
+o-current                KEEP     protected:current       an ancestor at the default branch's tip; only being checked out saves it
+develop                  KEEP     protected:long-lived    an ancestor; only the name saves it
+staging                  KEEP     protected:long-lived    an ancestor; only the name saves it
+production               KEEP     protected:long-lived    an ancestor; only the name saves it
+gh-pages                 KEEP     protected:long-lived    an ancestor; only the name saves it
+r-spike-backup           KEEP     protected:backup        an ancestor; only the -backup suffix saves it
+n-worktree               KEEP     protected:worktree      an ancestor, and checked out elsewhere
+q-open-but-landed        KEEP     protected:open-pr       landed by another pull request, so the content check clears it; its own pull request is open and this rule runs first
+v-open-from-fork         KEEP     protected:open-pr       the same shape, and the open pull request came from a fork; protection keeps it anyway, because nothing in the reply says whose branch it describes
+g-open                   KEEP     protected:open-pr       work never landed, and its pull request is open; kept by the protection rather than by the content check, which never runs on it
+k-merged-and-open        KEEP     protected:open-pr       merged once, and another pull request on it is still open
+p1-ancestor              DELETE   pass1:ancestor          merged with a real merge commit
+a-squash-clean           DELETE   proof-a:content-landed  squash-merged; the default branch later moved on
+c-merged-main-back       DELETE   proof-a:content-landed  squash-merged, then the default branch merged back in
+u-added-then-removed     KEEP     proof-a:tip-only        added a file and removed it, so it adds nothing while holding the only copy of what it added
+b-main-edited            DELETE   proof-b:pr-merged       the content check conflicts, and its merged pull request clears it
+j-two-merged             DELETE   proof-b:pr-merged       two merged pull requests share it and the tip matches the older; that one clears it
+d-unpushed               KEEP     proof-b:pr-tip-differs  merged, but it carries a commit no remote received, so the pull request's head is not the tip
+f-closed                 KEEP     proof-b:pr-closed       its only pull request is closed, so nothing merged it
+h-no-pr                  KEEP     proof-b:no-pr           no pull request at all ever named it
+i-cross-fork             KEEP     proof-b:pr-from-fork    the merged pull request came from a fork, so it is not evidence about this branch
+t-merged-to-release      KEEP     proof-b:pr-other-base   the merged pull request's base was a release branch, not the default one
+e-parent                 KEEP     kept:not-landed         never merged anywhere
+e-stacked-child          KEEP     kept:not-landed         merged into its parent, not the default branch, and the content check says so without asking the forge
+l-tracks-deleted-local   KEEP     kept:not-landed         never pushed; upstream was a deleted local branch
+m-gone-in-subject        KEEP     kept:not-landed         never pushed; the marker text is in its commit subject
+s-tag-shadow             KEEP     kept:not-landed         work never landed; a tag of the same name points at the default branch

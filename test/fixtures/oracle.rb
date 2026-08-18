@@ -38,16 +38,30 @@ module Fixtures
       protected:worktree
       protected:long-lived
       protected:backup
+      protected:open-pr
       pass1:ancestor
       proof-a:content-landed
       proof-a:tip-only
       proof-a:conflict
+      proof-b:pr-merged
+      proof-b:pr-tip-differs
+      proof-b:pr-closed
+      proof-b:pr-from-fork
+      proof-b:pr-other-base
+      proof-b:no-pr
       kept:not-landed
     ].freeze
 
     # The prefix before the colon names the stage that reached the
     # verdict. A table that demands deletions from only one stage is
     # satisfied by a sweep that implements only that stage.
+    #
+    # protected: is the one prefix that names a kind of answer rather
+    # than a cost. Every other protection is decided from a name or from
+    # where HEAD is standing and costs nothing, while protected:open-pr
+    # costs a forge query per candidate -- but what it has in common with
+    # the rest is that it refuses deletion whatever the content says,
+    # which is why it sits ahead of proof (a) rather than beside it.
     def self.stage(reason)
       reason.split(':').first
     end

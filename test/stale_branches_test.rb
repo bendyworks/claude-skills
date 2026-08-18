@@ -30,23 +30,44 @@
 require_relative 'cli_test_case'
 require_relative 'fixtures/branch_repo'
 require_relative 'fixtures/gitflow_repo'
+require_relative 'fixtures/forge_stub'
 require_relative 'fixtures/oracle'
+require_relative 'fixtures/pull_requests'
 
 require 'open3'
 require 'tmpdir'
 
-# The two verdict tables, named once. Four separate expansions of these
+# The verdict tables, named once. Four separate expansions of these
 # paths had already forced tests to reach into a sibling class they had
 # nothing else to do with.
-FLAT_ORACLE = File.expand_path('fixtures/expected-degraded.txt', __dir__)
+#
+# Two of the three describe the same flat fixture and differ only in
+# whether the forge answered, which is what makes the pair a statement
+# of what consulting a forge is worth. The forge table is the full
+# specification and the one whose header documents the vocabulary; the
+# degraded tables are what the same fixtures must report when no pull
+# request can be reached.
+FLAT_FORGE_ORACLE = File.expand_path('fixtures/expected.txt', __dir__)
+FLAT_DEGRADED_ORACLE = File.expand_path('fixtures/expected-degraded.txt', __dir__)
 GITFLOW_ORACLE = File.expand_path('fixtures/gitflow-expected-degraded.txt', __dir__)
 
 class OracleTableTest < Minitest::Test
-  FLAT = FLAT_ORACLE
+  FLAT = FLAT_DEGRADED_ORACLE
+  FLAT_FORGE = FLAT_FORGE_ORACLE
   GITFLOW = GITFLOW_ORACLE
+
+  # Every table, for the guarantees that hold of all of them.
+  ALL = [FLAT_FORGE, FLAT, GITFLOW].freeze
 
   def test_the_flat_table_lists_exactly_the_branches_its_fixture_builds
     assert_tables_agree(Fixtures::BranchRepo, FLAT, 'flat')
+  end
+
+  # The two flat tables describe one repository, so a branch added to
+  # the fixture has to reach both. One of them silently omitting it
+  # would leave the sweep ungraded on that branch in exactly one mode.
+  def test_the_flat_forge_table_lists_exactly_the_branches_its_fixture_builds
+    assert_tables_agree(Fixtures::BranchRepo, FLAT_FORGE, 'flat')
   end
 
   def test_the_gitflow_table_lists_exactly_the_branches_its_fixture_builds
@@ -76,12 +97,19 @@ class OracleTableTest < Minitest::Test
                              .uniq - NON_DELETING_STAGES
   end
 
-  def test_both_tables_demand_a_deletion_from_every_deciding_stage
-    [FLAT, GITFLOW].each do |path|
+  # Each table is held to the stages it actually exercises. A degraded
+  # table cannot demand a proof-b deletion -- reaching no forge is what
+  # makes it degraded -- so requiring every stage of every table would
+  # be a demand no correct table could meet. What each one must do is
+  # reach a deletion through every deciding stage it names at all, which
+  # is the same guarantee for the table it is asked of.
+  def test_every_table_demands_a_deletion_from_every_stage_it_exercises
+    ALL.each do |path|
       rows = Fixtures::Oracle.load(path)
       table = File.basename(path)
+      named = rows.map { |row| Fixtures::Oracle.stage(row.reason) }.uniq
 
-      self.class.deleting_stages.each do |stage|
+      (self.class.deleting_stages & named).each do |stage|
         deletions = rows.count do |row|
           row.verdict == 'DELETE' && Fixtures::Oracle.stage(row.reason) == stage
         end
@@ -93,6 +121,19 @@ class OracleTableTest < Minitest::Test
     end
   end
 
+  # And across the tables together, every deciding stage must reach a
+  # deletion somewhere. Without this, a stage added to REASONS and named
+  # by no row at all would satisfy the per-table test vacuously -- it
+  # only asks about stages a table names.
+  def test_every_deciding_stage_reaches_a_deletion_in_some_table
+    deleting = ALL.flat_map { |path| Fixtures::Oracle.load(path) }
+                  .select { |row| row.verdict == 'DELETE' }
+                  .map { |row| Fixtures::Oracle.stage(row.reason) }.uniq
+
+    assert_empty self.class.deleting_stages - deleting,
+                 'these stages can decide a deletion and no table asks for one'
+  end
+
   # Every reason the vocabulary documents must be demanded by some row in
   # some table. A key nothing claims is a rule the sweep can omit
   # entirely with nothing going red -- which is not a hypothetical: the
@@ -100,7 +141,7 @@ class OracleTableTest < Minitest::Test
   # graded by nothing, and a classifier with that protection deleted
   # outright scored full marks on both tables.
   def test_every_documented_reason_is_demanded_by_some_row
-    claimed = [FLAT, GITFLOW].flat_map { |path| Fixtures::Oracle.load(path).map(&:reason) }.uniq
+    claimed = ALL.flat_map { |path| Fixtures::Oracle.load(path).map(&:reason) }.uniq
     unclaimed = Fixtures::Oracle::REASONS - claimed
 
     assert_empty unclaimed,
@@ -117,7 +158,7 @@ class OracleTableTest < Minitest::Test
   # with its neighbour. Cheap to keep honest, and the two rows that were
   # hardest to tell apart had drifted to identical prose.
   def test_every_row_says_why_it_exists
-    [FLAT, GITFLOW].each do |path|
+    ALL.each do |path|
       Fixtures::Oracle.load(path).each do |row|
         refute_empty row.why, "#{File.basename(path)} row #{row.branch} says nothing about why"
       end
@@ -125,7 +166,7 @@ class OracleTableTest < Minitest::Test
   end
 
   def test_the_table_header_documents_exactly_the_enforced_vocabulary
-    documented = File.readlines(FLAT).filter_map do |line|
+    documented = File.readlines(FLAT_FORGE).filter_map do |line|
       line[/\A#   (\S+:\S+)\s/, 1]
     end
 
@@ -160,7 +201,8 @@ end
 # structure, never verdicts: what makes a row's reason reachable, not
 # what the reason is.
 class FixtureShapeTest < Minitest::Test
-  FLAT = FLAT_ORACLE
+  FLAT = FLAT_DEGRADED_ORACLE
+  FLAT_FORGE = FLAT_FORGE_ORACLE
   GITFLOW = GITFLOW_ORACLE
 
   # The reasons decided by looking at the repository rather than at a
@@ -169,6 +211,16 @@ class FixtureShapeTest < Minitest::Test
   EVIDENCE_REASONS = %w[
     pass1:ancestor proof-a:content-landed proof-a:tip-only proof-a:conflict
     kept:not-landed
+  ].freeze
+
+  # The reasons decided by what the forge says rather than by the
+  # repository. protected:open-pr is here rather than with its own
+  # family: every other protection is decided by a name and costs
+  # nothing, and this one is a claim about the canned records, so
+  # assuming it is name-decided would leave it graded by nothing.
+  FORGE_REASONS = %w[
+    protected:open-pr proof-b:pr-merged proof-b:pr-tip-differs
+    proof-b:pr-closed proof-b:pr-from-fork proof-b:pr-other-base proof-b:no-pr
   ].freeze
 
   # The rows that say "protected" are graded elsewhere; these are the ones
@@ -183,11 +235,29 @@ class FixtureShapeTest < Minitest::Test
   # stopped grading -- which is what happens the moment PR 3 adds its
   # proof-b keys, unless this list moves with it.
   def test_every_reason_is_either_graded_here_or_decided_by_a_name
-    ungraded = Fixtures::Oracle::REASONS
-               .reject { |reason| Fixtures::Oracle.stage(reason) == 'protected' }
-               .reject { |reason| EVIDENCE_REASONS.include?(reason) }
+    name_decided = Fixtures::Oracle::REASONS
+                   .select { |reason| Fixtures::Oracle.stage(reason) == 'protected' } - FORGE_REASONS
+    ungraded = Fixtures::Oracle::REASONS - name_decided - EVIDENCE_REASONS - FORGE_REASONS
 
-    assert_empty ungraded, 'these reasons are checked against git by nothing'
+    assert_empty ungraded, 'these reasons are checked against git or the records by nothing'
+  end
+
+  # The same guarantee the evidence rows get, for the half of the
+  # specification git cannot see. A record that stopped describing what
+  # its row claims -- a state changed, a base renamed, the fork flag
+  # dropped -- would leave the sweep graded against a rule with no
+  # subject, and every test here would stay green while it happened.
+  def test_the_forge_tables_forge_reasons_are_what_the_canned_records_say
+    rows = Fixtures::Oracle.load(FLAT_FORGE).select { |row| FORGE_REASONS.include?(row.reason) }
+    refute_empty rows, 'no row states a forge reason at all'
+
+    with_fixture(Fixtures::BranchRepo, 'flat') do |repo|
+      records = Fixtures::PullRequests.data(repo).fetch(Fixtures::PullRequests::CWD)
+      rows.each do |row|
+        assert_equal row.reason, forge_reason_for(repo, records, row.branch),
+                     "the table says #{row.branch} is #{row.reason}, the records disagree"
+      end
+    end
   end
 
   def test_the_flat_tables_evidence_reasons_are_what_git_reports
@@ -352,6 +422,28 @@ class FixtureShapeTest < Minitest::Test
     return 'kept:not-landed' unless tree == default_tree
 
     history_landed?(repo, default, ref, default_tree) ? 'proof-a:content-landed' : 'proof-a:tip-only'
+  end
+
+  # Reimplements the forge half of the header's documented procedure
+  # against the canned records, in its documented order. Only asked
+  # about branches whose row names a forge reason, which are exactly the
+  # branches that reach the forge at all.
+  def forge_reason_for(repo, records, branch)
+    mine = records.select { |record| record['headRefName'] == branch }
+    return 'protected:open-pr' if mine.any? { |record| record['state'] == 'OPEN' }
+    return 'proof-b:no-pr' if mine.empty?
+
+    merged = mine.select { |record| record['state'] == 'MERGED' }
+    return 'proof-b:pr-closed' if merged.empty?
+
+    same_repo = merged.reject { |record| record['isCrossRepository'] }
+    return 'proof-b:pr-from-fork' if same_repo.empty?
+
+    on_default = same_repo.select { |record| record['baseRefName'] == 'main' }
+    return 'proof-b:pr-other-base' if on_default.empty?
+
+    tip = repo.git('rev-parse', "refs/heads/#{branch}").strip
+    on_default.any? { |record| record['headRefOid'] == tip } ? 'proof-b:pr-merged' : 'proof-b:pr-tip-differs'
   end
 
   # Every commit the branch does not share with the default branch,
@@ -1603,7 +1695,7 @@ class EnumerationTest < OracleTestCase
 
   def test_the_flat_fixtures_protections_are_the_ones_its_table_demands
     with_flat_fixture('protections') do |repo|
-      assert_protections_match(FLAT_ORACLE, repo)
+      assert_protections_match(FLAT_DEGRADED_ORACLE, repo)
     end
   end
 
@@ -1665,7 +1757,7 @@ end
 class Pass1Test < OracleTestCase
   def test_the_flat_tables_ancestor_row_is_the_one_ancestry_clears
     with_flat_fixture('pass1') do |repo|
-      assert_stage_matches(FLAT_ORACLE, measure(repo), 'pass1:ancestor')
+      assert_stage_matches(FLAT_DEGRADED_ORACLE, measure(repo), 'pass1:ancestor')
     end
   end
 
@@ -1796,7 +1888,7 @@ class ProofATest < OracleTestCase
       sweep = measure(repo)
 
       %w[proof-a:content-landed proof-a:conflict kept:not-landed].each do |stage|
-        assert_stage_matches(FLAT_ORACLE, sweep, stage)
+        assert_stage_matches(FLAT_DEGRADED_ORACLE, sweep, stage)
       end
     end
   end
@@ -2311,8 +2403,65 @@ class SweepTargetTest < Minitest::Test
   end
 end
 
+# The other half of the same fixture: the sweep with a forge answering,
+# graded against expected.txt. Where OracleTestCase shims gh so any call
+# flunks, this one serves it -- the same repository, the same argv, and
+# the difference between the two tables is exactly what consulting a
+# forge is worth.
+#
+# The records are written after the repository is built, so every head
+# SHA is a real one. A hand-written SHA compares equal to nothing, which
+# would turn every rule reading it into a rule that always rejects, and
+# the branches those rules decide are KEEP either way -- so no verdict
+# would reveal it.
+class ForgeOracleTestCase < OracleTestCase
+  # The opposite of the base's refusal, and the two lists may not
+  # overlap, so this drops gh from the shims as it serves it.
+  def shimmed_commands
+    []
+  end
+
+  def served_commands
+    { 'gh' => Fixtures::ForgeStub.program }
+  end
+
+  # The stub reads its data and its failure switch from the environment,
+  # so a machine value for either must not survive into a run.
+  def extra_scrubbed_env_keys
+    %w[STUB_GH_PRS STUB_GH_FAIL]
+  end
+
+  # Serves this repository's own records for the length of the block.
+  # The file is written outside the repository: the sweep reads nothing
+  # from the working tree, but a fixture that quietly gained an
+  # untracked file would be one no clone produces.
+  def with_forge(repo, key: Fixtures::PullRequests::CWD, failing: false)
+    Dir.mktmpdir('stale-branches-forge') do |dir|
+      path = File.join(dir, 'pull-requests.json')
+      ENV['STUB_GH_PRS'] = Fixtures::PullRequests.write(repo, path, key: key)
+      ENV['STUB_GH_FAIL'] = '1' if failing
+      yield
+    end
+  end
+end
+
+class FlatFixtureForgeOracleTest < ForgeOracleTestCase
+  ORACLE = FLAT_FORGE_ORACLE
+
+  def test_report_matches_the_oracle_with_the_forge_answering
+    with_flat_fixture('flat-forge') do |repo|
+      with_forge(repo) do
+        result = sweep(repo)
+
+        assert_matches_oracle(Fixtures::Oracle.load(ORACLE), result)
+        refute_git_complaints(result)
+      end
+    end
+  end
+end
+
 class FlatFixtureOracleTest < OracleTestCase
-  ORACLE = FLAT_ORACLE
+  ORACLE = FLAT_DEGRADED_ORACLE
 
   def test_report_matches_the_oracle_with_no_forge_available
     with_flat_fixture('flat') do |repo|
