@@ -27,6 +27,10 @@
 #   failure is a message on stderr and exit 1 -- the shape the sweep
 #   degrades on, and never confusable with an empty result.
 #
+#   With no --repo, the real client answers for the repository it
+#   resolves from its own working directory, which is the resolution the
+#   sweep leaves to it. The data file's @cwd key stands for that.
+#
 # Everything else fails closed. An unserved subcommand, absent data, a
 # repo the data does not describe, a --json field a record does not
 # carry: each is recorded as a refusal, which fails the test that
@@ -135,21 +139,31 @@ module StubGh
     fields
   end
 
-  # The data file describes one or more repositories by name, and a
-  # query naming one it does not describe is refused. Serving [] there
-  # would let a sweep that asks the wrong repository -- a fork's own,
-  # rather than the upstream its pull requests live in -- come back
-  # empty and read that as "no pull request".
+  # What the real client answers for when no --repo is given: the
+  # repository it resolves from its own working directory. The sweep
+  # leaves that resolution to gh rather than deriving it, so the stub
+  # needs a key standing for it -- named so it cannot be mistaken for a
+  # repository, since a query naming a repository the data does not
+  # describe is a refusal and this one must not be.
+  CWD_KEY = '@cwd'
+
+  # A query naming a repository the data does not describe is refused
+  # rather than answered empty. Serving [] there would let a sweep that
+  # asks the wrong repository -- a fork's own, rather than the upstream
+  # its pull requests live in -- come back empty and read that as "no
+  # pull request".
   def records_for(repo)
     path = ENV.fetch('STUB_GH_PRS', nil)
     refuse('STUB_GH_PRS is unset; there is no data to serve') if path.nil?
     refuse("STUB_GH_PRS names no such file: #{path}") unless File.exist?(path)
 
     data = JSON.parse(File.read(path))
-    refuse('pr list without --repo') if repo.nil?
-    refuse("no data for repo #{repo}; served repos are #{data.keys.join(', ')}") unless data.key?(repo)
+    key = repo || CWD_KEY
+    unless data.key?(key)
+      refuse("no data for #{key}; served keys are #{data.keys.join(', ')}")
+    end
 
-    data.fetch(repo)
+    data.fetch(key)
   end
 
   # --head compares branch names and nothing else, which is gh's own

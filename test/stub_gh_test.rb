@@ -41,7 +41,8 @@ class StubGhTest < Minitest::Test
              'headRefOid' => 'c' * 40, 'baseRefName' => 'main',
              'isCrossRepository' => true }.freeze
 
-  DATA = { REPO => [MERGED, OPENED, FORKED], UPSTREAM => [] }.freeze
+  DATA = { '@cwd' => [MERGED, OPENED, FORKED], REPO => [MERGED, OPENED, FORKED],
+           UPSTREAM => [] }.freeze
 
   FIELDS = 'number,state,headRefName,headRefOid,baseRefName,isCrossRepository'
 
@@ -186,17 +187,32 @@ class StubGhTest < Minitest::Test
     assert_match(/without --json/, result.refusals.join("\n"))
   end
 
-  def test_a_listing_without_repo_is_refused
+  # With no --repo the real client answers for the repository it
+  # resolves from its own working directory, which is the resolution the
+  # sweep leaves to it rather than deriving one of its own.
+  def test_a_listing_without_repo_is_answered_from_the_working_directory
+    result = run_stub('pr', 'list', '--json', FIELDS, '--state', 'all', '--head', 'a-landed')
+
+    assert result.ok?, "stub failed: #{result.stderr}"
+    assert_equal [101, 103], result.json.map { |record| record['number'] }
+    assert_empty result.refusals
+  end
+
+  # The one case where a missing key is not the caller's mistake: data
+  # that never described the working directory cannot answer for it, and
+  # answering [] would read as "no pull request".
+  def test_a_listing_without_repo_against_data_that_names_no_working_directory_is_refused
+    File.write(@data_path, JSON.generate(UPSTREAM => []))
     result = refusal_case('pr', 'list', '--json', FIELDS)
 
-    assert_match(/without --repo/, result.refusals.join("\n"))
+    assert_match(/no data for @cwd/, result.refusals.join("\n"))
   end
 
   def test_a_repo_the_data_does_not_describe_is_refused_rather_than_answered_empty
     result = refusal_case('pr', 'list', '--repo', 'github.com/somebody/else',
                           '--json', FIELDS, '--state', 'all')
 
-    assert_match(/no data for repo github\.com\/somebody\/else/, result.refusals.join("\n"))
+    assert_match(/no data for github\.com\/somebody\/else/, result.refusals.join("\n"))
   end
 
   def test_a_repo_the_data_describes_as_empty_is_answered_empty
