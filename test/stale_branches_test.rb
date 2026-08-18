@@ -2540,17 +2540,36 @@ class PullRequestVerdictTest < Minitest::Test
                          record(state: 'MERGED', number: 1))
   end
 
-  def test_an_open_pull_request_keeps_the_branch_whatever_else_says
-    assert_equal ['KEEP', 'protected:open-pr'],
-                 verdict(record(state: 'MERGED', number: 1), record(state: 'OPEN', number: 2))
-  end
-
   # gh spells states in capitals and has changed the shape of its
   # output before. Comparing case-insensitively costs nothing, and the
   # failure it avoids is silent: every state unrecognized reads as
   # "closed", which keeps every branch.
   def test_a_state_in_another_case_is_still_that_state
     assert_equal ['DELETE', 'proof-b:pr-merged'], verdict(record(state: 'merged'))
+  end
+
+  # Proof (b) never sees an open pull request, because the protection
+  # below decides those branches before the content check runs, let
+  # alone this. So the clauses above answer only for branches whose
+  # pull requests are all finished, and an open one reaching here would
+  # be read as closed -- which is why it cannot.
+  def test_an_open_pull_request_is_not_this_stages_to_decide
+    assert StaleBranches.open_pull_request?([record(state: 'OPEN')])
+    refute StaleBranches.open_pull_request?([record(state: 'MERGED'),
+                                             record(state: 'CLOSED')])
+  end
+
+  def test_an_open_pull_request_alongside_finished_ones_still_counts
+    assert StaleBranches.open_pull_request?([record(state: 'MERGED', number: 1),
+                                             record(state: 'OPEN', number: 2)])
+  end
+
+  def test_an_open_state_in_another_case_is_still_open
+    assert StaleBranches.open_pull_request?([record(state: 'open')])
+  end
+
+  def test_no_pull_requests_at_all_is_not_an_open_one
+    refute StaleBranches.open_pull_request?([])
   end
 end
 

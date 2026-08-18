@@ -336,8 +336,19 @@ module StaleBranches
 
   # The major and minor of what `git --version` prints, or nil where
   # that is not a version at all.
+  # Whether anybody still has a pull request open on this branch. Asked
+  # of the protected set rather than of proof (b), and so asked of every
+  # branch rather than only of the ones the content check could not
+  # answer for: the branch this protects is the one whose work has
+  # already landed by another route, and proof (b) never runs on those.
+  def open_pull_request?(records)
+    records.any? { |record| state?(record, 'OPEN') }
+  end
+
   # The clause logic of proof (b): what a branch's pull requests, taken
   # together, say about whether its work reached the default branch.
+  # Every pull request reaching here is finished, because an open one
+  # would have been protected before the content check ran.
   # Pure, because every mistake available here is a comparison -- a
   # state read case-sensitively, a base compared to the wrong name, the
   # newest record read instead of the matching one -- and a comparison
@@ -347,7 +358,6 @@ module StaleBranches
   # keeps a fork's merged pull request from taking your own out of
   # consideration. The branch is only kept once nothing is left.
   def pull_request_verdict(records, tip:, default:)
-    return ['KEEP', 'protected:open-pr'] if records.any? { |record| state?(record, 'OPEN') }
     return ['KEEP', 'proof-b:no-pr'] if records.empty?
 
     merged = records.select { |record| state?(record, 'MERGED') }
@@ -775,6 +785,7 @@ module StaleBranches
       note_stale_head_ref
       partition_branches
       clear_by_ancestry
+      protect_open_pull_requests
       decide_by_content
       decide_by_pull_request
       self
@@ -810,6 +821,30 @@ module StaleBranches
 
       raise Error, "this needs git #{MINIMUM_GIT.join('.')} or newer for its content " \
                    "check, found #{@git.version&.join('.') || 'no readable version'}"
+    end
+
+    # Somebody still has a pull request open on this branch, so the
+    # sweep does not get an opinion about its content. This is the one
+    # protection that costs a network call, and it runs ahead of the
+    # content check rather than after it for a reason a keep-count
+    # cannot show: a branch whose work has already landed by another
+    # route is CLEARED by that check, so a sweep asking about open pull
+    # requests afterwards would have deleted it before the question came
+    # up. Which pull requests are open is also all this stage reads, so
+    # a fork's open pull request protects too -- gh matches --head on
+    # branch name alone and nothing in the reply says whose branch it
+    # describes, and protection is the direction where being wrong costs
+    # a branch kept rather than work destroyed.
+    #
+    # With no forge reachable, this decides nothing and every branch
+    # falls through to the checks that need no network.
+    def protect_open_pull_requests
+      decide do |branch|
+        records = @forge.pull_requests(branch)
+        next if records.nil?
+
+        ['KEEP', 'protected:open-pr'] if StaleBranches.open_pull_request?(records)
+      end
     end
 
     # What ancestry cannot answer. A branch squash-merged into the
