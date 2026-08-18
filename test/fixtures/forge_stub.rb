@@ -40,6 +40,9 @@ module Fixtures
       @program ||= write_wrapper
     end
 
+    # at_exit rather than the block form every other fixture uses: the
+    # wrapper has to outlive the call that writes it, since it is on
+    # PATH for the length of the process.
     def write_wrapper
       dir = Dir.mktmpdir('forge-stub')
       at_exit { FileUtils.remove_entry(dir) if File.directory?(dir) }

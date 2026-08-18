@@ -447,7 +447,7 @@ class FixtureShapeTest < Minitest::Test
     end
   end
 
-  def forge_reason_for(repo, records, branch, default = 'main')
+  def forge_reason_for(repo, records, branch, default)
     mine = records.select { |record| record['headRefName'] == branch }
     return 'protected:open-pr' if mine.any? { |record| record['state'] == 'OPEN' }
     return 'proof-b:no-pr' if mine.empty?
@@ -842,6 +842,16 @@ class ArgumentParsingTest < CliTestCase
     assert_equal 'duplicate --repo', refusal('--repo', 'a/b', '--repo', 'c/d')
   end
 
+  # The host component decides which server the question, and the
+  # credentials for it, are sent to.
+  def test_a_repo_that_is_not_a_project_name_is_refused
+    assert_match(/--repo/, refusal('--repo', 'not-a-project'))
+    assert_match(/--repo/, refusal('--repo', 'a/b/c/d'))
+    assert_equal 'octo/upstream', parse('--repo', 'octo/upstream').repo
+    assert_equal 'ghe.example.com/octo/upstream',
+                 parse('--repo', 'ghe.example.com/octo/upstream').repo
+  end
+
   # Accepted where a repeated value option is refused, and the
   # difference is not inconsistency: a repeated boolean discards no
   # input and leaves the sweep acting on exactly what was typed.
@@ -1152,7 +1162,7 @@ class OracleTestCase < CliTestCase
   # The stub reads both from the environment, and a machine value for
   # either must not survive into a run.
   def extra_scrubbed_env_keys
-    %w[STUB_GH_PRS STUB_GH_FAIL STUB_GH_GARBAGE]
+    %w[STUB_GH_PRS STUB_GH_FAIL STUB_GH_GARBAGE] + StaleBranches::FORGE_REDIRECTING_ENV_KEYS
   end
 
   # Set here rather than per test so that every subclass of this one is
@@ -1217,15 +1227,15 @@ class OracleTestCase < CliTestCase
   # directory, so it goes through the same refusal git_for does: a test
   # naming a directory outside the throwaway must not reach past the
   # guard by asking the forge instead.
-  def forge_for(dir, repo: nil)
+  def forge_for(dir, repo: nil, offline: false)
     guard_cli_invocation(['-C', dir])
-    StaleBranches::Forge.new(dir: dir, repo: repo)
+    StaleBranches::Forge.new(dir: dir, repo: repo, offline: offline)
   end
 
   # A sweep wired the way the CLI wires one, so a test driving stages
   # directly is driving the same object the report comes from.
   def sweep_for(git, dir: git.dir)
-    StaleBranches::Sweep.new(git, forge_for(dir))
+    StaleBranches::Sweep.new(git: git, forge: forge_for(dir))
   end
 
   # A machine with no gh installed at all, which is the other half of
@@ -1262,15 +1272,22 @@ class OracleTestCase < CliTestCase
   # wrong one. The file is written outside the repository: the sweep
   # reads nothing from the working tree, but a fixture that quietly
   # gained an untracked file would be one no clone produces.
-  def with_forge(repo, key: Fixtures::PullRequests::CWD, failing: false, garbled: false,
+  def with_forge(repo, failing: false, garbled: false, mis_shaped: false,
                  records: Fixtures::PullRequests::RECORDS)
     Dir.mktmpdir('stale-branches-forge') do |dir|
       path = File.join(dir, 'pull-requests.json')
-      ENV['STUB_GH_PRS'] = Fixtures::PullRequests.write(repo, path, key: key, records: records)
-      failing ? ENV['STUB_GH_FAIL'] = '1' : ENV.delete('STUB_GH_FAIL')
-      garbled ? ENV['STUB_GH_GARBAGE'] = '1' : ENV.delete('STUB_GH_GARBAGE')
+      ENV['STUB_GH_PRS'] = Fixtures::PullRequests.write(repo, path, records: records)
+      set_stub_switch('STUB_GH_FAIL', failing)
+      set_stub_switch('STUB_GH_GARBAGE', garbled)
+      set_stub_switch('STUB_GH_SHAPE', mis_shaped)
       yield
+    ensure
+      ENV.delete('STUB_GH_PRS')
     end
+  end
+
+  def set_stub_switch(key, on)
+    on ? ENV[key] = (on == true ? '1' : on.to_s) : ENV.delete(key)
   end
 
   # The same records, served as a clone of a fork would see them: the
@@ -1362,8 +1379,11 @@ class OracleTestCase < CliTestCase
 
   # Drives a sweep for its verdicts rather than its report, which is
   # what lets a stage be graded before there is anything to print.
-  def measure(repo, remote: 'origin')
-    with_repo_env(repo) { sweep_for(git_for(repo, remote: remote)).run }
+  def measure(repo, remote: 'origin', offline: false)
+    with_repo_env(repo) do
+      git = git_for(repo, remote: remote)
+      StaleBranches::Sweep.new(git: git, forge: forge_for(git.dir, offline: offline)).run
+    end
   end
 
   # Every row a table demands of one stage, against every row the sweep
@@ -2249,7 +2269,7 @@ class DeletionTest < OracleTestCase
   def test_a_deletion_that_fails_exits_non_zero_and_says_why
     with_flat_fixture('delete-refused') do |repo|
       with_unwritable_refs(repo) do
-        result = with_repo_env(repo) { abort_result(['-C', repo.work, '--delete']) }
+        result = with_repo_env(repo) { abort_result(['-C', repo.work, '--offline', '--delete']) }
 
         refute_equal 0, result.status, 'a sweep that deleted nothing it was told to exited clean'
         assert_match(/p1-ancestor/, result.stderr)
@@ -2268,7 +2288,7 @@ class DeletionTest < OracleTestCase
     with_flat_fixture('tip-only-delete') do |repo|
       branch = Fixtures::BranchRepo::ADDED_THEN_REMOVED
       blob = repo.git('rev-parse', "#{branch}~1:u-research.txt").strip
-      sweep(repo, '--delete')
+      sweep(repo, '--offline', '--delete')
 
       assert_includes repo.local_refs, "refs/heads/#{branch}",
                       'a branch holding content nothing else has was deleted'
@@ -2301,7 +2321,7 @@ class DeletionTest < OracleTestCase
   def test_delete_removes_exactly_the_branches_its_own_report_marked
     with_flat_fixture('delete-mode') do |repo|
       before = repo.local_refs
-      result = sweep(repo, '--delete')
+      result = sweep(repo, '--offline', '--delete')
       marked = result.rows.select { |row| row.verdict == 'DELETE' }.map(&:branch)
 
       refute_empty marked, 'the run marked nothing, so it proved nothing'
@@ -2360,7 +2380,7 @@ class DeletionTest < OracleTestCase
   # something having gone wrong.
   def test_deleting_leaks_none_of_gits_complaints
     with_flat_fixture('delete-quiet') do |repo|
-      refute_git_complaints(sweep(repo, '--delete'))
+      refute_git_complaints(sweep(repo, '--offline', '--delete'))
     end
   end
 
@@ -2423,7 +2443,19 @@ class AmbientGitDirTest < OracleTestCase
 
         with_env('GIT_DIR' => File.join(elsewhere.work, '.git'),
                  'GIT_WORK_TREE' => elsewhere.work) do
-          capture_io { run_cli(['-C', flat.work, '--delete']) }
+          # --offline because this is about where the deletion lands,
+          # not about the forge; a sweep that could not read pull
+          # requests refuses to delete at all. Wrapped like the sweep
+          # helper is, because an abort raises SystemExit, which is not
+          # a StandardError -- uncaught here it ends the whole RUN,
+          # reporting nothing and leaving every later test unreported.
+          failure = nil
+          capture_io do
+            run_cli(['-C', flat.work, '--offline', '--delete'])
+          rescue SystemExit => e
+            failure = e
+          end
+          flunk "the sweep aborted (exit #{failure.status})" if failure
         end
 
         assert_equal before, elsewhere.local_refs,
@@ -2690,13 +2722,14 @@ class ForgeTest < OracleTestCase
   def test_one_query_per_branch_naming_the_branch_and_every_state
     with_flat_fixture('forge-query') do |repo|
       with_forge(repo) do
-        forge_for(repo).pull_requests('g-open')
+        forge_in(repo).pull_requests('g-open')
 
         assert_equal 1, served_invocations.length
         call = served_invocations.first
         assert_includes call, '--head g-open'
         assert_includes call, '--state all'
-        assert_includes call, '--json '
+        assert_includes call, "--limit #{StaleBranches::Forge::LIMIT}"
+        assert_includes call, "--json #{StaleBranches::Forge::FIELDS.join(',')}"
       end
     end
   end
@@ -2704,7 +2737,7 @@ class ForgeTest < OracleTestCase
   def test_a_second_question_about_one_branch_is_answered_from_the_first
     with_flat_fixture('forge-cache') do |repo|
       with_forge(repo) do
-        forge = forge_for(repo)
+        forge = forge_in(repo)
         first = forge.pull_requests('k-merged-and-open')
         second = forge.pull_requests('k-merged-and-open')
 
@@ -2717,7 +2750,7 @@ class ForgeTest < OracleTestCase
   def test_the_records_come_back_as_the_forge_stated_them
     with_flat_fixture('forge-records') do |repo|
       with_forge(repo) do
-        records = forge_for(repo).pull_requests('k-merged-and-open')
+        records = forge_in(repo).pull_requests('k-merged-and-open')
 
         assert_equal %w[MERGED OPEN], records.map { |record| record['state'] }.sort
         assert(records.all? { |record| record['headRefName'] == 'k-merged-and-open' })
@@ -2728,7 +2761,7 @@ class ForgeTest < OracleTestCase
   def test_a_branch_no_pull_request_names_comes_back_empty_rather_than_missing
     with_flat_fixture('forge-empty') do |repo|
       with_forge(repo) do
-        assert_empty forge_for(repo).pull_requests('h-no-pr')
+        assert_empty forge_in(repo).pull_requests('h-no-pr')
       end
     end
   end
@@ -2736,7 +2769,7 @@ class ForgeTest < OracleTestCase
   def test_no_repo_is_passed_unless_the_caller_named_one
     with_flat_fixture('forge-no-repo') do |repo|
       with_forge(repo) do
-        forge_for(repo).pull_requests('g-open')
+        forge_in(repo).pull_requests('g-open')
 
         refute_includes served_invocations.first, '--repo'
       end
@@ -2749,12 +2782,94 @@ class ForgeTest < OracleTestCase
   def test_a_failing_client_answers_nothing_and_is_not_asked_again
     with_flat_fixture('forge-failing') do |repo|
       with_forge(repo, failing: true) do
-        forge = forge_for(repo)
+        forge = forge_in(repo)
 
         assert_nil forge.pull_requests('g-open')
         refute forge.available?, 'a client that failed must not still be considered available'
         assert_nil forge.pull_requests('k-merged-and-open')
         assert_equal 1, served_invocations.length, 'a failed client was asked a second time'
+      end
+    end
+  end
+
+  # The gh analogue of the ambient GIT_DIR that once fast-forwarded this
+  # repository's own main from a fixture. GH_REPO beats the directory gh
+  # resolves from, and answers with [] and exit 0 -- so nothing about it
+  # looks like a failure: no warning, no degradation, open-pull-request
+  # protection quietly stopping. The stub refuses when one reaches it,
+  # which is what turns an invisible wrong answer into a red test.
+  def test_a_redirecting_variable_in_the_environment_does_not_reach_the_client
+    with_flat_fixture('forge-env') do |repo|
+      with_forge(repo) do
+        StaleBranches::FORGE_REDIRECTING_ENV_KEYS.each { |key| ENV[key] = 'leaked' }
+        result = sweep(repo)
+
+        assert_matches_oracle(Fixtures::Oracle.load(FLAT_FORGE_ORACLE), result)
+      end
+    end
+  end
+
+  # A bare JSON object parses, so the parse rescue never fires. Taken at
+  # face value it reads as "no pull request" for every branch, and it
+  # reaches the verdict logic where indexing an Array with a String
+  # raises past the CLI's one rescue.
+  def test_a_reply_of_the_wrong_shape_degrades_rather_than_deciding_anything
+    with_flat_fixture('forge-shape') do |repo|
+      with_forge(repo, mis_shaped: true) do
+        forge = forge_in(repo)
+
+        assert_nil forge.pull_requests('g-open')
+        refute forge.available?
+        assert_match(/not a list/, forge.failure.to_s)
+      end
+    end
+  end
+
+  def test_a_list_holding_something_that_is_not_a_pull_request_degrades_too
+    with_flat_fixture('forge-shape-list') do |repo|
+      with_forge(repo, mis_shaped: '2') do
+        forge = forge_in(repo)
+
+        assert_nil forge.pull_requests('g-open')
+        assert_match(/not a pull request/, forge.failure.to_s)
+      end
+    end
+  end
+
+  # A client that fails saying nothing still has to leave the warning a
+  # sentence rather than an empty parenthetical.
+  def test_a_silent_failure_still_says_something
+    with_flat_fixture('forge-silent') do |repo|
+      with_forge(repo, failing: '2') do
+        forge = forge_in(repo)
+
+        assert_nil forge.pull_requests('g-open')
+        refute_empty forge.failure.to_s.strip
+      end
+    end
+  end
+
+  # And the whole sweep survives it, degrading to the offline table
+  # rather than ending in a backtrace.
+  def test_a_reply_of_the_wrong_shape_leaves_the_sweep_reporting_the_degraded_table
+    with_flat_fixture('forge-shape-sweep') do |repo|
+      with_forge(repo, mis_shaped: true) do
+        result = sweep(repo)
+
+        assert_matches_oracle(Fixtures::Oracle.load(FLAT_DEGRADED_ORACLE), result)
+      end
+    end
+  end
+
+  # gh matching --head is the whole trust boundary, and nothing
+  # downstream would notice if a reply arrived about another branch.
+  def test_a_record_about_another_branch_is_discarded
+    with_flat_fixture('forge-subject') do |repo|
+      with_forge(repo) do
+        records = forge_in(repo).pull_requests('g-open')
+
+        refute_empty records
+        assert(records.all? { |record| record['headRefName'] == 'g-open' })
       end
     end
   end
@@ -2767,7 +2882,7 @@ class ForgeTest < OracleTestCase
   def test_an_answer_that_is_not_json_degrades_rather_than_raising
     with_flat_fixture('forge-garbled') do |repo|
       with_forge(repo, garbled: true) do
-        forge = forge_for(repo)
+        forge = forge_in(repo)
 
         assert_nil forge.pull_requests('g-open')
         refute forge.available?
@@ -2782,7 +2897,7 @@ class ForgeTest < OracleTestCase
   def test_a_client_that_is_not_installed_answers_nothing_rather_than_raising
     with_flat_fixture('forge-absent') do |repo|
       with_forge(repo) do
-        forge = forge_for(repo)
+        forge = forge_in(repo)
         without_gh_on_path do
           assert_nil forge.pull_requests('g-open')
         end
@@ -2794,9 +2909,11 @@ class ForgeTest < OracleTestCase
 
   private
 
-  def forge_for(repo, dir: repo.work, name: nil)
-    guard_cli_invocation(['-C', dir])
-    StaleBranches::Forge.new(dir: dir, repo: name)
+  # Named differently from the inherited forge_for, which takes a
+  # directory: shadowing it with an incompatible first argument left
+  # every inherited helper in this class raising on a String.
+  def forge_in(repo)
+    forge_for(repo.work)
   end
 
   def without_gh_on_path
@@ -2840,6 +2957,7 @@ class DegradationTest < OracleTestCase
     with_flat_fixture('degraded-none') do |repo|
       with_forge(repo) do
         assert_empty measure(repo).warnings.grep(/pull request/)
+        refute_empty served_invocations, 'it never asked, so there was nothing to report on'
       end
     end
   end
@@ -2864,7 +2982,8 @@ class DegradationTest < OracleTestCase
         warnings = measure(repo).warnings.grep(/pull request/)
 
         assert_equal 1, warnings.length
-        assert_match(/gh/, warnings.first, 'the warning did not name what could not be run')
+        assert_match(/No such file|not found/i, warnings.first,
+                     'the warning carried no detail about what actually went wrong')
       end
     end
   end
@@ -2894,6 +3013,75 @@ end
 # for costs one it should never have paid, and a listing without --head
 # returns other people's branches and is truncated in silence at
 # whatever --limit says.
+# What the sweep does when the forge's answers are missing on purpose,
+# and what it refuses to do when they are missing by accident.
+class OfflineTest < OracleTestCase
+  def test_offline_asks_the_forge_nothing_at_all
+    with_flat_fixture('offline-silent') do |repo|
+      with_forge(repo) do
+        result = sweep(repo, '--offline')
+
+        assert_empty served_invocations, 'it asked despite being told not to'
+        assert_matches_oracle(Fixtures::Oracle.load(FLAT_DEGRADED_ORACLE), result)
+      end
+    end
+  end
+
+  def test_offline_says_so_rather_than_reporting_a_failure_that_did_not_happen
+    with_flat_fixture('offline-warning') do |repo|
+      with_forge(repo) do
+        warning = measure(repo, offline: true).warnings.grep(/pull request/).first.to_s
+
+        assert_match(/--offline/, warning)
+        refute_match(/could not ask/, warning, 'nothing failed; it was not asked')
+      end
+    end
+  end
+
+  # Deleting on verdicts no forge ever saw is the combination the
+  # warning describes and nothing used to prevent.
+  def test_delete_is_refused_when_the_forge_could_not_be_read
+    with_flat_fixture('offline-refusal') do |repo|
+      with_forge(repo, failing: true) do
+        message = abort_message(['-C', repo.work, '--delete'])
+
+        assert_match(/not deleting/, message)
+        assert_match(/--offline/, message, 'the refusal did not say how to proceed deliberately')
+        assert_includes repo.local_refs, 'refs/heads/p1-ancestor', 'it deleted anyway'
+      end
+    end
+  end
+
+  def test_offline_and_delete_together_are_allowed
+    with_flat_fixture('offline-delete') do |repo|
+      with_forge(repo, failing: true) do
+        sweep(repo, '--offline', '--delete')
+
+        refute_includes repo.local_refs, 'refs/heads/p1-ancestor'
+      end
+    end
+  end
+
+  # The warnings go to stderr and the report to stdout, so a redirected
+  # report would otherwise read as though every verdict had been checked
+  # against a pull request.
+  def test_a_redirected_report_still_carries_the_caveat
+    with_flat_fixture('offline-piped') do |repo|
+      with_forge(repo, failing: true) do
+        assert_match(/pull requests were not consulted/, sweep(repo).stdout)
+      end
+    end
+  end
+
+  def test_a_report_the_forge_answered_carries_no_such_caveat
+    with_flat_fixture('offline-none') do |repo|
+      with_forge(repo) do
+        refute_match(/were not consulted/, sweep(repo).stdout)
+      end
+    end
+  end
+end
+
 class SweepQueryTest < OracleTestCase
   # The reasons reached without asking anything: the protections decided
   # by a name, and the ancestry pass. Derived from the vocabulary rather
@@ -2918,6 +3106,26 @@ class SweepQueryTest < OracleTestCase
 
   def queried_branches
     served_invocations.filter_map { |call| call[/--head (\S+)/, 1] }
+  end
+
+  def queried_directories
+    served_invocations.filter_map { |call| call[/ @(\S+)\z/, 1] }
+  end
+
+  # Which directory gh runs in is how the sweep says which project to
+  # answer about, and it is invisible to every verdict: dropping the
+  # chdir leaves the whole table green while the report describes
+  # whatever repository the caller happened to be standing in.
+  def test_every_query_is_made_from_the_repository_being_swept
+    with_flat_fixture('queries-cwd') do |repo|
+      with_forge(repo) do
+        sweep(repo)
+
+        refute_empty queried_directories
+        expected = File.realpath(repo.work)
+        assert_equal [expected], queried_directories.map { |dir| File.realpath(dir) }.uniq
+      end
+    end
   end
 
   def test_every_branch_the_protections_did_not_answer_for_is_asked_about_exactly_once
@@ -3010,17 +3218,41 @@ class RepoFlagTest < OracleTestCase
         assert_equal 'proof-b:no-pr', rows.fetch('h-no-pr').reason
         assert_equal 'proof-b:no-pr', rows.fetch('b-main-edited').reason,
                      'a branch whose pull request merged upstream read as having none'
+        assert_equal 'DELETE', rows.fetch('v-open-from-fork').verdict,
+                     'the twin loses the same protection in the same way'
       end
     end
   end
 
+  # One row moves, and it is the point of the flag rather than an
+  # exception to it. On a fork clone every record is cross-repository,
+  # so naming the project stands the fork clause down -- and
+  # i-cross-fork's merged pull request carries this branch's exact tip,
+  # which under that rule is evidence its work landed. Everything else
+  # reads exactly as it does on a clone of the project itself.
   def test_naming_the_upstream_project_reaches_the_full_specification
     with_flat_fixture('repo-flag-right') do |repo|
       with_forked_forge(repo) do
         result = sweep(repo, '--repo', UPSTREAM)
 
-        assert_matches_oracle(Fixtures::Oracle.load(FLAT_FORGE_ORACLE), result)
+        assert_matches_oracle(Fixtures::Oracle.load(FLAT_FORGE_ORACLE), result,
+                              'i-cross-fork' => %w[DELETE proof-b:pr-merged])
         refute_git_complaints(result)
+      end
+    end
+  end
+
+  # Without --repo the question went to your own project, where a
+  # cross-repository record really is somebody else's fork answering
+  # about a branch that merely shares a name. The clause has to stay
+  # there, and this is the row that says so.
+  def test_a_forks_merged_pull_request_still_cannot_clear_a_branch_without_the_flag
+    with_flat_fixture('repo-flag-absent') do |repo|
+      with_forge(repo) do
+        rows = sweep(repo).rows.to_h { |row| [row.branch, row] }
+
+        assert_equal 'KEEP', rows.fetch('i-cross-fork').verdict
+        assert_equal 'proof-b:pr-from-fork', rows.fetch('i-cross-fork').reason
       end
     end
   end
@@ -3035,7 +3267,9 @@ class RepoFlagTest < OracleTestCase
       with_forked_forge(repo) do
         result = sweep(repo, '--remote', remote, '--repo', UPSTREAM)
 
-        assert_matches_oracle(Fixtures::Oracle.load(FLAT_FORGE_ORACLE), result)
+        assert_matches_oracle(Fixtures::Oracle.load(FLAT_FORGE_ORACLE), result,
+                              'i-cross-fork' => %w[DELETE proof-b:pr-merged])
+        refute_empty served_invocations
         assert(served_invocations.all? { |call| call.include?("--repo #{UPSTREAM}") })
       end
     end
@@ -3138,10 +3372,8 @@ class GitflowOracleTest < OracleTestCase
     with_flat_fixture('reasons') do |repo|
       rows = sweep(repo).rows
       # A report whose branches never reached the forge stage satisfies
-      # every claim about what that stage may not say. The flat fixture
-      # is used rather than the gitflow one for exactly this: it has
-      # eight conflicting branches, and the gitflow repository has none,
-      # so the same test there passes without the stage ever running.
+      # every claim about what that stage may not say, so the count
+      # below is asserted rather than assumed.
       forge_decided = rows.select do |row|
         Fixtures::Oracle.stage(row.reason) == 'proof-b' || row.reason == 'protected:open-pr'
       end

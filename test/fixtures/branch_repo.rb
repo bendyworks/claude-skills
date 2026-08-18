@@ -109,6 +109,12 @@ module Fixtures
     # open pull request is from this repository, stayed green.
     OPEN_FROM_FORK = 'v-open-from-fork'
 
+    # Shares its name with a tag pointing at the default branch, and is
+    # decided by proof (b) on whether its tip matches a merged pull
+    # request's head -- so it is the row that grades the last bare-name
+    # lookup the sweep could still have.
+    FORGE_TAG_SHADOWED = 'b-main-edited'
+
     # Where HEAD is left standing, and deletable on the evidence alone.
     CURRENT = 'o-current'
 
@@ -129,6 +135,7 @@ module Fixtures
       build_tag_shadowed_branch
       build_added_then_removed
       publish_and_delete_remote_branches
+      build_forge_tag_collision
       commit_after_the_last_push
       build_gone_lookalikes
       build_worktree_branch
@@ -324,6 +331,19 @@ module Fixtures
       commit('s.txt', 's', 's work that never landed')
       git('checkout', '-q', 'main')
       git('tag', TAG_SHADOWED)
+    end
+
+    # A second collision, on a branch the forge decides. The first one
+    # grades the cheap passes, which resolve a bare name and so read the
+    # tag; this grades proof (b), whose tip comparison is the last place
+    # a bare name could still be resolved. Pointed at the default
+    # branch, so a sweep reading the tag would compare the wrong object
+    # to the pull request's head and keep a branch it should delete.
+    #
+    # Made after the pushes, because `git push origin <name>` refuses a
+    # name that matches both a branch and a tag.
+    def build_forge_tag_collision
+      git('tag', FORGE_TAG_SHADOWED, 'main')
     end
 
     def build_added_then_removed

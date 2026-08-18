@@ -274,8 +274,10 @@ class CliTestCase < Minitest::Test
     @shim_hits = read_stand_in_log(@shim_log)
     @stub_refusal_hits = read_stand_in_log(@stub_refusals)
     FileUtils.remove_entry(@stand_in_dir)
-    @stand_in_dir = nil
-    @stub_log = nil
+    # All four are nilled together: they name paths inside a directory
+    # that no longer exists, and a half-cleared set invites a later read
+    # of one that looks live.
+    @stand_in_dir = @stub_log = @shim_log = @stub_refusals = nil
   end
 
   def read_stand_in_log(path)
