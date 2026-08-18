@@ -1102,12 +1102,31 @@ end
 # Shared driving and assertions. Each fixture gets its own subclass so a
 # failure names the repository shape it came from.
 class OracleTestCase < CliTestCase
-  # PR 2's sweep is the offline half and must never reach a forge. Naming
-  # gh here shadows it with a PATH shim that records the attempt and
-  # fails, so any code path that calls it flunks the test rather than
-  # silently succeeding on a developer's authenticated machine.
-  def shimmed_commands
-    ['gh']
+  # The degraded half: a gh that is present and fails every question,
+  # which is what "not authenticated", "offline", and "not a GitHub
+  # remote" all look like from here. Served rather than shimmed, because
+  # the sweep is REQUIRED to ask and then degrade -- a shim that flunked
+  # on contact would make the degraded oracle a test of a sweep that
+  # never asks, and the finished tool asks.
+  #
+  # The stub is what stands between these tests and a developer's own
+  # authenticated gh; nothing here can reach the real client.
+  def served_commands
+    { 'gh' => Fixtures::ForgeStub.program }
+  end
+
+  # The stub reads both from the environment, and a machine value for
+  # either must not survive into a run.
+  def extra_scrubbed_env_keys
+    %w[STUB_GH_PRS STUB_GH_FAIL]
+  end
+
+  # Set here rather than per test so that every subclass of this one is
+  # degraded unless it says otherwise: a suite that forgot would
+  # silently be graded against the wrong table.
+  def before_setup
+    super
+    ENV['STUB_GH_FAIL'] = '1'
   end
 
   # This sweep deletes branches, so the directory it is aimed at is not
@@ -1158,6 +1177,21 @@ class OracleTestCase < CliTestCase
   def git_for(repo, remote: 'origin', dir: repo.work)
     guard_cli_invocation(['-C', dir])
     StaleBranches::Git.new(dir: dir, remote: remote)
+  end
+
+  # The forge the sweep is given. It runs gh as a child in this
+  # directory, so it goes through the same refusal git_for does: a test
+  # naming a directory outside the throwaway must not reach past the
+  # guard by asking the forge instead.
+  def forge_for(dir, repo: nil)
+    guard_cli_invocation(['-C', dir])
+    StaleBranches::Forge.new(dir: dir, repo: repo)
+  end
+
+  # A sweep wired the way the CLI wires one, so a test driving stages
+  # directly is driving the same object the report comes from.
+  def sweep_for(git, dir: git.dir)
+    StaleBranches::Sweep.new(git, forge_for(dir))
   end
 
   # The CLI shells out to git, so it runs under the same neutralized
@@ -1228,7 +1262,7 @@ class OracleTestCase < CliTestCase
   # Drives a sweep for its verdicts rather than its report, which is
   # what lets a stage be graded before there is anything to print.
   def measure(repo, remote: 'origin')
-    with_repo_env(repo) { StaleBranches::Sweep.new(git_for(repo, remote: remote)).run }
+    with_repo_env(repo) { sweep_for(git_for(repo, remote: remote)).run }
   end
 
   # Every row a table demands of one stage, against every row the sweep
@@ -1726,7 +1760,7 @@ class EnumerationTest < OracleTestCase
   def test_a_relative_target_resolves_from_the_working_directory
     with_flat_fixture('relative') do |repo|
       Dir.chdir(repo.work) do
-        sweep = with_repo_env(repo) { StaleBranches::Sweep.new(git_for(repo, dir: '.')).run }
+        sweep = with_repo_env(repo) { sweep_for(git_for(repo, dir: '.')).run }
 
         assert_includes sweep.branches, 'main'
       end
@@ -1852,7 +1886,7 @@ class ProofATest < OracleTestCase
   def test_an_old_git_ends_the_run_rather_than_reporting_what_it_never_checked
     with_flat_fixture('old-git') do |repo|
       message = assert_raises(StaleBranches::Error) do
-        with_repo_env(repo) { StaleBranches::Sweep.new(ancient_git(repo)).run }
+        with_repo_env(repo) { sweep_for(ancient_git(repo)).run }
       end.message
 
       assert_match(/2\.38/, message, 'the refusal did not say what it needs')
@@ -1863,7 +1897,7 @@ class ProofATest < OracleTestCase
   def test_a_git_whose_version_cannot_be_read_is_refused_as_too_old
     with_flat_fixture('unreadable-git') do |repo|
       message = assert_raises(StaleBranches::Error) do
-        with_repo_env(repo) { StaleBranches::Sweep.new(unreadable_git(repo)).run }
+        with_repo_env(repo) { sweep_for(unreadable_git(repo)).run }
       end.message
 
       assert_match(/2\.38/, message, 'the refusal did not say what it needs')
@@ -2190,7 +2224,7 @@ class DeletionTest < OracleTestCase
   # wants to print them, and returns them all for one that does not.
   def test_deleting_without_a_listener_still_returns_what_it_did
     with_flat_fixture('delete-blockless') do |repo|
-      sweep = with_repo_env(repo) { StaleBranches::Sweep.new(git_for(repo)).run }
+      sweep = with_repo_env(repo) { sweep_for(git_for(repo)).run }
       results = with_repo_env(repo) { sweep.delete_marked }
 
       refute_empty results
@@ -2200,7 +2234,7 @@ class DeletionTest < OracleTestCase
 
   def test_a_deletion_that_fails_without_a_reason_still_says_something
     with_flat_fixture('silent-failure') do |repo|
-      sweep = with_repo_env(repo) { StaleBranches::Sweep.new(pretending_git(repo)).run }
+      sweep = with_repo_env(repo) { sweep_for(pretending_git(repo)).run }
       out, err = capture_io do
         assert_raises(SystemExit) { StaleBranches::CLI.new.send(:delete_marked, sweep) }
       end
@@ -2415,31 +2449,16 @@ end
 # the branches those rules decide are KEEP either way -- so no verdict
 # would reveal it.
 class ForgeOracleTestCase < OracleTestCase
-  # The opposite of the base's refusal, and the two lists may not
-  # overlap, so this drops gh from the shims as it serves it.
-  def shimmed_commands
-    []
-  end
-
-  def served_commands
-    { 'gh' => Fixtures::ForgeStub.program }
-  end
-
-  # The stub reads its data and its failure switch from the environment,
-  # so a machine value for either must not survive into a run.
-  def extra_scrubbed_env_keys
-    %w[STUB_GH_PRS STUB_GH_FAIL]
-  end
-
-  # Serves this repository's own records for the length of the block.
-  # The file is written outside the repository: the sweep reads nothing
-  # from the working tree, but a fixture that quietly gained an
-  # untracked file would be one no clone produces.
+  # Serves this repository's own records for the length of the block,
+  # and turns off the failure the base leaves on. The file is written
+  # outside the repository: the sweep reads nothing from the working
+  # tree, but a fixture that quietly gained an untracked file would be
+  # one no clone produces.
   def with_forge(repo, key: Fixtures::PullRequests::CWD, failing: false)
     Dir.mktmpdir('stale-branches-forge') do |dir|
       path = File.join(dir, 'pull-requests.json')
       ENV['STUB_GH_PRS'] = Fixtures::PullRequests.write(repo, path, key: key)
-      ENV['STUB_GH_FAIL'] = '1' if failing
+      failing ? ENV['STUB_GH_FAIL'] = '1' : ENV.delete('STUB_GH_FAIL')
       yield
     end
   end
@@ -2457,6 +2476,190 @@ class FlatFixtureForgeOracleTest < ForgeOracleTestCase
         refute_git_complaints(result)
       end
     end
+  end
+end
+
+# The clause logic of proof (b), driven directly. The oracle grades it
+# through a whole sweep against one fixture, which fixes the order the
+# clauses are reached in; these fix what each clause decides, including
+# the combinations the fixture has no branch for.
+class PullRequestVerdictTest < Minitest::Test
+  TIP = ('a' * 40).freeze
+  OTHER = ('b' * 40).freeze
+
+  def record(state:, head: TIP, base: 'main', fork: false, number: 1)
+    { 'number' => number, 'state' => state, 'headRefName' => 'branch',
+      'headRefOid' => head, 'baseRefName' => base, 'isCrossRepository' => fork }
+  end
+
+  def verdict(*records)
+    StaleBranches.pull_request_verdict(records, tip: TIP, default: 'main')
+  end
+
+  def test_no_pull_request_at_all_says_so_rather_than_guessing
+    assert_equal ['KEEP', 'proof-b:no-pr'], verdict
+  end
+
+  def test_a_closed_pull_request_merged_nothing
+    assert_equal ['KEEP', 'proof-b:pr-closed'], verdict(record(state: 'CLOSED'))
+  end
+
+  def test_a_merged_pull_request_from_a_fork_is_not_evidence_about_this_branch
+    assert_equal ['KEEP', 'proof-b:pr-from-fork'],
+                 verdict(record(state: 'MERGED', fork: true))
+  end
+
+  def test_a_merged_pull_request_based_elsewhere_reached_somewhere_else
+    assert_equal ['KEEP', 'proof-b:pr-other-base'],
+                 verdict(record(state: 'MERGED', base: 'release/2.0'))
+  end
+
+  def test_a_merged_pull_request_whose_head_is_not_this_tip_did_not_merge_what_is_here
+    assert_equal ['KEEP', 'proof-b:pr-tip-differs'],
+                 verdict(record(state: 'MERGED', head: OTHER))
+  end
+
+  def test_every_clause_satisfied_at_once_is_the_one_deletion_proof_b_can_reach
+    assert_equal ['DELETE', 'proof-b:pr-merged'], verdict(record(state: 'MERGED'))
+  end
+
+  # The clearing pull request may be any of several, and gh returns them
+  # newest first. A sweep reading only the first would keep this branch.
+  def test_the_clearing_pull_request_need_not_be_the_one_listed_first
+    assert_equal ['DELETE', 'proof-b:pr-merged'],
+                 verdict(record(state: 'MERGED', head: OTHER, number: 2),
+                         record(state: 'MERGED', number: 1))
+  end
+
+  # A fork's merged pull request sitting alongside your own must not
+  # take yours out of consideration: the clauses reject the records that
+  # fail them, never the branch.
+  def test_a_forks_merged_pull_request_does_not_discard_your_own
+    assert_equal ['DELETE', 'proof-b:pr-merged'],
+                 verdict(record(state: 'MERGED', fork: true, number: 2),
+                         record(state: 'MERGED', number: 1))
+  end
+
+  def test_an_open_pull_request_keeps_the_branch_whatever_else_says
+    assert_equal ['KEEP', 'protected:open-pr'],
+                 verdict(record(state: 'MERGED', number: 1), record(state: 'OPEN', number: 2))
+  end
+
+  # gh spells states in capitals and has changed the shape of its
+  # output before. Comparing case-insensitively costs nothing, and the
+  # failure it avoids is silent: every state unrecognized reads as
+  # "closed", which keeps every branch.
+  def test_a_state_in_another_case_is_still_that_state
+    assert_equal ['DELETE', 'proof-b:pr-merged'], verdict(record(state: 'merged'))
+  end
+end
+
+# The only code that runs gh, driven against the stub. What it asks is
+# asserted as closely as what it concludes: a sweep that queries a
+# branch it should never have reached is wrong even when every verdict
+# it prints is right, and one that asks twice for the same branch is
+# paying twice for an answer it already has.
+class ForgeTest < ForgeOracleTestCase
+  def test_one_query_per_branch_naming_the_branch_and_every_state
+    with_flat_fixture('forge-query') do |repo|
+      with_forge(repo) do
+        forge_for(repo).pull_requests('g-open')
+
+        assert_equal 1, served_invocations.length
+        call = served_invocations.first
+        assert_includes call, '--head g-open'
+        assert_includes call, '--state all'
+        assert_includes call, '--json '
+      end
+    end
+  end
+
+  def test_a_second_question_about_one_branch_is_answered_from_the_first
+    with_flat_fixture('forge-cache') do |repo|
+      with_forge(repo) do
+        forge = forge_for(repo)
+        first = forge.pull_requests('k-merged-and-open')
+        second = forge.pull_requests('k-merged-and-open')
+
+        assert_equal first, second
+        assert_equal 1, served_invocations.length, 'the same branch was queried twice'
+      end
+    end
+  end
+
+  def test_the_records_come_back_as_the_forge_stated_them
+    with_flat_fixture('forge-records') do |repo|
+      with_forge(repo) do
+        records = forge_for(repo).pull_requests('k-merged-and-open')
+
+        assert_equal %w[MERGED OPEN], records.map { |record| record['state'] }.sort
+        assert(records.all? { |record| record['headRefName'] == 'k-merged-and-open' })
+      end
+    end
+  end
+
+  def test_a_branch_no_pull_request_names_comes_back_empty_rather_than_missing
+    with_flat_fixture('forge-empty') do |repo|
+      with_forge(repo) do
+        assert_empty forge_for(repo).pull_requests('h-no-pr')
+      end
+    end
+  end
+
+  def test_no_repo_is_passed_unless_the_caller_named_one
+    with_flat_fixture('forge-no-repo') do |repo|
+      with_forge(repo) do
+        forge_for(repo).pull_requests('g-open')
+
+        refute_includes served_invocations.first, '--repo'
+      end
+    end
+  end
+
+  # A failing client is a fact about the repository, not about the
+  # branch that happened to be asked first, so the sweep must stop
+  # asking rather than pay for one failure per candidate.
+  def test_a_failing_client_answers_nothing_and_is_not_asked_again
+    with_flat_fixture('forge-failing') do |repo|
+      with_forge(repo, failing: true) do
+        forge = forge_for(repo)
+
+        assert_nil forge.pull_requests('g-open')
+        refute forge.available?, 'a client that failed must not still be considered available'
+        assert_nil forge.pull_requests('k-merged-and-open')
+        assert_equal 1, served_invocations.length, 'a failed client was asked a second time'
+      end
+    end
+  end
+
+  # gh is not installed at all, which is the ordinary case on a machine
+  # that has never needed it. It must read as a degradation rather than
+  # arrive as a Ruby backtrace.
+  def test_a_client_that_is_not_installed_answers_nothing_rather_than_raising
+    with_flat_fixture('forge-absent') do |repo|
+      with_forge(repo) do
+        forge = forge_for(repo)
+        without_gh_on_path do
+          assert_nil forge.pull_requests('g-open')
+        end
+        refute forge.available?
+        assert_empty served_invocations, 'the stub was reached after all'
+      end
+    end
+  end
+
+  private
+
+  def forge_for(repo, dir: repo.work, name: nil)
+    guard_cli_invocation(['-C', dir])
+    StaleBranches::Forge.new(dir: dir, repo: name)
+  end
+
+  def without_gh_on_path
+    saved = ENV.fetch('PATH')
+    Dir.mktmpdir('no-gh') { |dir| ENV['PATH'] = dir and yield }
+  ensure
+    ENV['PATH'] = saved
   end
 end
 
