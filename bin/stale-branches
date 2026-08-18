@@ -788,6 +788,7 @@ module StaleBranches
       protect_open_pull_requests
       decide_by_content
       decide_by_pull_request
+      note_unreachable_forge
       self
     end
 
@@ -821,6 +822,28 @@ module StaleBranches
 
       raise Error, "this needs git #{MINIMUM_GIT.join('.')} or newer for its content " \
                    "check, found #{@git.version&.join('.') || 'no readable version'}"
+    end
+
+    # Said once for the run rather than once per branch, and only when
+    # the forge was actually asked and could not answer: available? is
+    # true until something fails, so a sweep that never needed to ask
+    # says nothing.
+    #
+    # Which way the verdicts are wrong is the whole message, and they
+    # are wrong in both directions at once. The dangerous direction is
+    # the deletion: a branch whose work reached the default branch by
+    # another route while its own pull request is still open is CLEARED
+    # by the content check, and nothing is left to protect it. The mild
+    # direction is the keep, where a conflict is reported as an
+    # unanswered question rather than as a branch holding unlanded work.
+    def note_unreachable_forge
+      return if @forge.available?
+
+      @warnings << "could not ask gh about pull requests (#{@forge.failure}); every verdict " \
+                   'below was reached without them, so a branch whose work has landed while ' \
+                   'its own pull request is still open is marked DELETE here, and a branch ' \
+                   'whose merge conflicts is kept for want of an answer rather than because ' \
+                   'its work is unlanded'
     end
 
     # Somebody still has a pull request open on this branch, so the
