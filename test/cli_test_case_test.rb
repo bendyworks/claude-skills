@@ -6,6 +6,7 @@
 # Run: ruby test/cli_test_case_test.rb
 
 require_relative 'cli_test_case'
+require 'open3'
 
 # Probe subclasses observe the scaffolding from inside a real Minitest
 # run. Their test methods only record what they see -- the assertions
@@ -190,6 +191,116 @@ class AbortMessageProbeCase < CliTestCase
   end
 end
 
+# Little programs the serving probes install, written once for this
+# file and removed when the process ends. A probe names its program by
+# path rather than by body, because that is what the seam takes: it
+# copies a real executable onto PATH, which is what lets the gh stub be
+# run and read on its own as well as through a suite.
+module ProbePrograms
+  DIR = Dir.mktmpdir('cli-test-case-probe-programs')
+  Minitest.after_run { FileUtils.remove_entry(DIR) if File.directory?(DIR) }
+
+  def self.write(name, body)
+    path = File.join(DIR, name)
+    File.write(path, body)
+    File.chmod(0o755, path)
+    path
+  end
+end
+
+# Honors the two halves of the serving protocol: every invocation is
+# logged, and one it does not recognize is refused rather than answered
+# with a plausible nothing. A stub that answers an unrecognized call
+# with an empty result teaches the suite that the CLI asked a question
+# it never asked.
+SERVING_PROGRAM = ProbePrograms.write('cli-test-case-served', <<~SCRIPT)
+  #!/bin/sh
+  echo "cli-test-case-served $*" >> "$CLI_STUB_LOG"
+  if [ "${1:-}" = "unhandled" ]; then
+    echo "cli-test-case-served: unhandled: $*" >> "$CLI_STUB_REFUSALS"
+    exit 1
+  fi
+  echo "served $*"
+SCRIPT
+
+# Shims nothing, so its passing is also what proves the installer does
+# not bail out on an empty shim list and leave a serving-only suite
+# with no stub on PATH at all.
+class ServeProbeCase < CliTestCase
+  attr_reader :seen
+
+  def served_commands
+    { 'cli-test-case-served' => SERVING_PROGRAM }
+  end
+
+  def test_record_a_served_call
+    out, status = Open3.capture2('cli-test-case-served', 'pr', 'list', '--head', 'x')
+    @seen = { stdout: out.strip, ok: status.success?, log: served_invocations }
+  end
+end
+
+# Serving and refusing side by side: the served call must come back
+# answered and leave the run passing, while the shimmed one still
+# flunks it. Armed by the outer contract test only, so autorun's extra
+# pass stays green.
+class ServeAndShimProbeCase < CliTestCase
+  class << self
+    attr_accessor :armed
+  end
+
+  attr_reader :seen
+
+  def shimmed_commands
+    %w[cli-test-case-fake-command]
+  end
+
+  def served_commands
+    { 'cli-test-case-served' => SERVING_PROGRAM }
+  end
+
+  def test_call_the_served_command_and_maybe_the_shimmed_one
+    out, status = Open3.capture2('cli-test-case-served', 'ok')
+    @seen = { stdout: out.strip, ok: status.success? }
+    system('cli-test-case-fake-command', out: File::NULL, err: File::NULL) if self.class.armed
+  end
+end
+
+# A stub asked something it does not serve. The run must fail: the
+# alternative is a suite that goes green while the CLI asked a question
+# nothing answered.
+class ServedRefusalProbeCase < CliTestCase
+  class << self
+    attr_accessor :armed
+  end
+
+  def served_commands
+    { 'cli-test-case-served' => SERVING_PROGRAM }
+  end
+
+  def test_ask_the_stub_something_it_does_not_serve
+    Open3.capture2e('cli-test-case-served', 'unhandled') if self.class.armed
+  end
+end
+
+# One name in both lists is a contradiction -- refuse this command, and
+# also answer it -- and whichever list won would be silent. Armed by the
+# outer contract test only.
+class OverlapProbeCase < CliTestCase
+  class << self
+    attr_accessor :armed
+  end
+
+  def shimmed_commands
+    self.class.armed ? %w[cli-test-case-served] : []
+  end
+
+  def served_commands
+    { 'cli-test-case-served' => SERVING_PROGRAM }
+  end
+
+  def test_body_never_reached_when_the_lists_overlap; end
+end
+
 class CliTestCaseTest < Minitest::Test
   SENTINEL_KEYS = (%w[POSIXLY_CORRECT CLI_TEST_CASE_SENTINEL] +
                    CliTestCase::GIT_LOCATION_ENV_KEYS).freeze
@@ -352,4 +463,69 @@ class CliTestCaseTest < Minitest::Test
   ensure
     BrokenShimProbeCase.armed = false
   end
+
+  def test_a_serving_only_subclass_still_gets_its_stub_on_path
+    probe = run_probe(ServeProbeCase, :test_record_a_served_call)
+
+    assert probe.seen[:ok], 'the served command did not resolve or did not succeed'
+    assert_equal 'served pr list --head x', probe.seen[:stdout]
+  end
+
+  def test_served_invocations_are_readable_during_the_test
+    probe = run_probe(ServeProbeCase, :test_record_a_served_call)
+
+    assert_equal ['cli-test-case-served pr list --head x'], probe.seen[:log]
+  end
+
+  def test_a_served_call_does_not_flunk_a_run_that_also_shims
+    ServeAndShimProbeCase.armed = false
+    probe = run_probe(ServeAndShimProbeCase,
+                      :test_call_the_served_command_and_maybe_the_shimmed_one)
+
+    assert probe.seen[:ok], 'the served command must be answered, not refused'
+    assert_equal 'served ok', probe.seen[:stdout]
+  end
+
+  def test_a_shimmed_call_still_flunks_a_run_that_also_serves
+    ServeAndShimProbeCase.armed = true
+    result = ServeAndShimProbeCase.new(
+      'test_call_the_served_command_and_maybe_the_shimmed_one'
+    ).run
+
+    refute result.passed?, 'a shimmed command must still flunk when a stub is serving too'
+    assert_match(/intercepted by test shim/, result.failure.message)
+  ensure
+    ServeAndShimProbeCase.armed = false
+  end
+
+  def test_an_unrecognized_served_invocation_flunks_the_test
+    ServedRefusalProbeCase.armed = true
+    result = ServedRefusalProbeCase.new('test_ask_the_stub_something_it_does_not_serve').run
+
+    refute result.passed?, 'a stub refusal must flunk the test that caused it'
+    assert_match(/refused by test stub/, result.failure.message)
+  ensure
+    ServedRefusalProbeCase.armed = false
+  end
+
+  def test_naming_one_command_in_both_lists_is_refused
+    OverlapProbeCase.armed = true
+    result = OverlapProbeCase.new('test_body_never_reached_when_the_lists_overlap').run
+
+    refute result.passed?, 'a command named as both shimmed and served must be refused'
+    assert_match(/both shimmed and served/, result.failure.message)
+  ensure
+    OverlapProbeCase.armed = false
+  end
+
+  def test_the_stub_is_gone_from_path_after_a_serving_only_run
+    path_before = ENV.fetch('PATH')
+    run_probe(ServeProbeCase, :test_record_a_served_call)
+
+    assert_equal path_before, ENV.fetch('PATH', nil),
+                 'PATH must be restored to its exact pre-test value'
+    assert_nil system('cli-test-case-served', out: File::NULL, err: File::NULL),
+               'served command must not resolve once the test is over'
+  end
+
 end
