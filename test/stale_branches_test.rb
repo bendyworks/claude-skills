@@ -2835,6 +2835,98 @@ end
 # of a fork that repository is the fork -- where none of your pull
 # requests are. The failure is not an error but an empty answer, which
 # a sweep reads as "no pull request".
+# What the sweep asks the forge, as opposed to what it concludes. Every
+# verdict in the oracle can be right while the queries behind them are
+# wrong in ways no verdict shows: a branch asked about twice costs a
+# round trip nobody sees, a branch the protected set already answered
+# for costs one it should never have paid, and a listing without --head
+# returns other people's branches and is truncated in silence at
+# whatever --limit says.
+class SweepQueryTest < OracleTestCase
+  # The reasons reached without asking anything: the protections decided
+  # by a name, and the ancestry pass. Derived from the vocabulary rather
+  # than listed, so a protection added later is counted as free without
+  # this test being edited -- and protected:open-pr is subtracted by
+  # name because it is the one protection that costs a query, which is
+  # the distinction this whole test rests on.
+  def free_reasons
+    named = Fixtures::Oracle::REASONS.select do |reason|
+      Fixtures::Oracle.stage(reason) == 'protected'
+    end
+    named - ['protected:open-pr'] + ['pass1:ancestor']
+  end
+
+  # The branches that must reach the forge, read off the table: every
+  # row whose verdict was not reached for free.
+  def branches_needing_the_forge
+    Fixtures::Oracle.load(FLAT_FORGE_ORACLE)
+                    .reject { |row| free_reasons.include?(row.reason) }
+                    .map(&:branch).sort
+  end
+
+  def queried_branches
+    served_invocations.filter_map { |call| call[/--head (\S+)/, 1] }
+  end
+
+  def test_every_branch_the_protections_did_not_answer_for_is_asked_about_exactly_once
+    with_flat_fixture('queries') do |repo|
+      with_forge(repo) do
+        sweep(repo)
+
+        assert_equal branches_needing_the_forge, queried_branches.sort
+      end
+    end
+  end
+
+  # Set equality above already fails on a repeat, but it fails saying
+  # the lists differ, which is a poor description of "asked twice".
+  # Both stages that read a pull request read the same answer, and a
+  # second query is the bug that would not show anywhere else.
+  def test_no_branch_is_asked_about_twice
+    with_flat_fixture('queries-once') do |repo|
+      with_forge(repo) do
+        sweep(repo)
+        repeated = queried_branches.tally.select { |_branch, count| count > 1 }
+
+        assert_empty repeated, "asked more than once: #{repeated.inspect}"
+      end
+    end
+  end
+
+  # The branches nothing was spent on, stated from the other side. A
+  # sweep that asked about every branch would still print the right
+  # verdicts, since the protections decide before the answer is read.
+  def test_a_branch_a_protection_or_the_ancestry_pass_answered_for_costs_nothing
+    with_flat_fixture('queries-free') do |repo|
+      with_forge(repo) do
+        sweep(repo)
+        free = Fixtures::Oracle.load(FLAT_FORGE_ORACLE)
+                               .select { |row| free_reasons.include?(row.reason) }
+                               .map(&:branch)
+
+        refute_empty free, 'no row is decided for free, so this asserts nothing'
+        assert_empty free & queried_branches,
+                     'a branch already decided was still asked about'
+      end
+    end
+  end
+
+  # A listing with no --head is every open pull request in the project,
+  # truncated at --limit without a word. The sweep would then read a
+  # branch as having none because its pull request fell off the end.
+  def test_no_query_goes_out_without_the_branch_it_is_about
+    with_flat_fixture('queries-scoped') do |repo|
+      with_forge(repo) do
+        sweep(repo)
+
+        refute_empty served_invocations
+        assert(served_invocations.all? { |call| call.include?('--head ') },
+               "a listing went out unscoped:\n#{served_invocations.join("\n")}")
+      end
+    end
+  end
+end
+
 class RepoFlagTest < OracleTestCase
   UPSTREAM = Fixtures::PullRequests::UPSTREAM
 
