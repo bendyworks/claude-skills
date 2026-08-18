@@ -150,6 +150,14 @@ class StubGhTest < Minitest::Test
   # something that is not JSON. Served rather than refused, because the
   # sweep degrades on it, and reached by a parse error rather than by a
   # status -- so it exercises a different path than the failure above.
+  # Every line carries the directory the call was made from, which is
+  # the only place a caller's chdir is observable.
+  def test_each_logged_invocation_names_the_directory_it_was_made_from
+    list('--head', 'a-landed')
+
+    assert_match(/ @#{Regexp.escape(Dir.pwd)}\z/, read_log(@log).first)
+  end
+
   def test_a_configured_garble_is_a_clean_exit_carrying_something_that_is_not_json
     result = list('--head', 'a-landed', env: { 'STUB_GH_GARBAGE' => '1' })
 
@@ -165,7 +173,7 @@ class StubGhTest < Minitest::Test
 
     assert_equal ["gh pr list --repo #{REPO} --json #{FIELDS} --state all --head a-landed",
                   'gh pr view 1'],
-                 @log.then { read_log(_1) }
+                 read_log(@log).map { |line| line.sub(/ @\S+\z/, '') }
   end
 
   def refusal_case(*argv, env: {})

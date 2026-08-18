@@ -54,10 +54,21 @@ module StubGh
 
   module_function
 
+  # Variables that would make a real gh answer about something other
+  # than what the sweep asked. Refused rather than honoured, because
+  # honouring one produces a plausible answer -- [] with exit 0, or a
+  # colour-escaped body -- and a plausible answer is what this whole
+  # stub exists to keep out of a verdict. The sweep is required to
+  # neutralize them for its children; this is what notices when it
+  # stops.
+  REDIRECTING_ENV_KEYS = %w[GH_REPO CLICOLOR_FORCE GH_FORCE_TTY].freeze
+
   def main(argv)
     log_invocation(argv)
+    refuse_redirecting_environment
     fail_as_configured
     garble_as_configured
+    mis_shape_as_configured
     command = argv.take(2).join(' ')
     refuse("unserved command: #{command.empty? ? '(none)' : command}") unless command == 'pr list'
     list_pull_requests(parse(argv.drop(2)))
@@ -70,17 +81,34 @@ module StubGh
     log = ENV.fetch('CLI_STUB_LOG', nil)
     abort 'stub gh: CLI_STUB_LOG is unset; nothing would record this call' if log.nil?
 
-    File.open(log, 'a') { |file| file.puts(['gh', *argv].join(' ')) }
+    # The working directory goes on the line too. It is how the sweep
+    # tells gh which project to answer about when no --repo is given,
+    # and nothing else here can see it: a sweep that stopped passing
+    # chdir would read the pull requests of whatever directory it
+    # happened to be started from, and every verdict would still look
+    # right.
+    File.open(log, 'a') { |file| file.puts("#{['gh', *argv].join(' ')} @#{Dir.pwd}") }
+  end
+
+  def refuse_redirecting_environment
+    leaked = REDIRECTING_ENV_KEYS.select { |key| ENV[key] }
+    return if leaked.empty?
+
+    refuse("#{leaked.join(', ')} reached me; a real gh would answer somewhere else")
   end
 
   # The unauthenticated / offline / not-a-GitHub-remote case. It is a
   # served answer rather than a refusal: the sweep is required to
   # degrade on it, so a test asking for it is exercising the CLI, not
   # missing a stub.
+  # STUB_GH_FAIL=1 fails with a message; =2 fails saying nothing at all,
+  # which a caller quoting gh's stderr has to have something to say
+  # about.
   def fail_as_configured
-    return unless ENV['STUB_GH_FAIL'] == '1'
+    mode = ENV.fetch('STUB_GH_FAIL', nil)
+    return unless %w[1 2].include?(mode)
 
-    warn 'error connecting to api.github.com'
+    warn 'error connecting to api.github.com' if mode == '1'
     exit 1
   end
 
@@ -94,6 +122,22 @@ module StubGh
     return unless ENV['STUB_GH_GARBAGE'] == '1'
 
     puts '<html><body>gateway timeout</body></html>'
+    exit 0
+  end
+
+  # Valid JSON of the wrong shape, with a clean exit: the envelope a
+  # wrapper or a proxy answers with. It parses, so the parse rescue
+  # never fires, and a sweep that took it at face value would read every
+  # branch as having no pull request.
+  # =1 is an envelope object; =2 is a list holding something that is not
+  # a pull request. Both parse, and the second is the one a caller that
+  # checked only for an Array would walk straight into.
+  def mis_shape_as_configured
+    case ENV.fetch('STUB_GH_SHAPE', nil)
+    when '1' then puts JSON.generate('message' => 'Not Found')
+    when '2' then puts JSON.generate(['not a pull request'])
+    else return
+    end
     exit 0
   end
 
