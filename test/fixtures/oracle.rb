@@ -40,6 +40,7 @@ module Fixtures
       protected:backup
       pass1:ancestor
       proof-a:content-landed
+      proof-a:tip-only
       proof-a:conflict
       kept:not-landed
     ].freeze

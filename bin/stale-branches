@@ -700,10 +700,31 @@ module StaleBranches
       landed = @git.tree_of(@measured_ref)
 
       decide do |branch|
-        tree, merged = @git.merge_tree(@measured_ref, "refs/heads/#{branch}")
+        ref = "refs/heads/#{branch}"
+        tree, merged = @git.merge_tree(@measured_ref, ref)
         next ['KEEP', 'proof-a:conflict'] unless merged
+        next ['KEEP', 'kept:not-landed'] unless tree == landed
+        next ['KEEP', 'proof-a:tip-only'] unless history_landed?(ref, landed)
 
-        tree == landed ? ['DELETE', 'proof-a:content-landed'] : ['KEEP', 'kept:not-landed']
+        ['DELETE', 'proof-a:content-landed']
+      end
+    end
+
+    # The tip adding nothing is necessary and not sufficient. A branch
+    # that added a file and then removed it has an empty net diff and a
+    # history holding content the default branch never received -- and
+    # deleting it takes the branch's reflog too, leaving that content
+    # reachable from nothing.
+    #
+    # So every commit the branch does not share with the default branch
+    # is asked the same question its tip was asked. A commit that would
+    # add something is content that landed nowhere, whatever the tip
+    # says. This runs only for branches the tip check already cleared,
+    # which is the small minority of candidates.
+    def history_landed?(ref, landed)
+      @git.lines('rev-list', "#{@measured_ref}..#{ref}").all? do |commit|
+        tree, merged = @git.merge_tree(@measured_ref, commit)
+        merged && tree == landed
       end
     end
 
