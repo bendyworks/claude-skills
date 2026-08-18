@@ -34,6 +34,14 @@ working-tree state, so get the developer's explicit go-ahead first:
 - run the spec against the pre-change commit (main or HEAD~), confirm
   it fails there, then re-run on the branch and confirm it passes.
 
+Commit the branch's work before either option. A checkout that
+overwrites the working tree discards uncommitted changes with nothing
+to recover them from: `git checkout <ref> -- <path>` writes over them
+with no reflog entry, and restoring afterward with `git checkout HEAD
+-- <path>` returns the files to the last commit rather than to the
+state they were in. Committing first also makes that restore exact,
+which is what turns the technique from risky into routine.
+
 Specs that have never been observed RED are presumed broken until
 proven otherwise. A common temptation to skip the retroactive check is
 fixing findings from a code-review pass after the fact; it applies
