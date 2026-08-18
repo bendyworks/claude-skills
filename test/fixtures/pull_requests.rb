@@ -65,6 +65,22 @@ module Fixtures
       Record.new(115, 'OPEN', 'v-open-from-fork', 'v-open-from-fork', 'main', true)
     ].freeze
 
+    # The gitflow repository's records, and the reason it has any. Both
+    # of its conflicting branches carry a merged pull request, and the
+    # two differ only in the branch they were based on: one on develop,
+    # which is that repository's default, and one on main, which exists
+    # there and is not.
+    #
+    # A sweep comparing a base against a hardcoded main gets both wrong
+    # in opposite directions, and nothing in the flat fixture can catch
+    # it -- there the default branch IS main. Hardcoding it passed the
+    # whole suite before these two rows existed.
+    GITFLOW_RECORDS = [
+      Record.new(201, 'MERGED', 'gf-landed-on-develop', 'gf-landed-on-develop',
+                 'develop', false),
+      Record.new(202, 'MERGED', 'gf-landed-on-main', 'gf-landed-on-main', 'main', false)
+    ].freeze
+
     # A rev already spelled as a full object name is taken as written;
     # anything else is resolved through refs/heads, never as a bare
     # name, because a bare name resolves through refs/tags first and the
@@ -73,12 +89,12 @@ module Fixtures
 
     module_function
 
-    def data(repo, key: CWD)
-      { key => RECORDS.map { |record| serialize(repo, record) } }
+    def data(repo, key: CWD, records: RECORDS)
+      { key => records.map { |record| serialize(repo, record) } }
     end
 
-    def write(repo, path, key: CWD)
-      File.write(path, JSON.pretty_generate(data(repo, key: key)))
+    def write(repo, path, key: CWD, records: RECORDS)
+      File.write(path, JSON.pretty_generate(data(repo, key: key, records: records)))
       path
     end
 

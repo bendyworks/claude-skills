@@ -50,14 +50,16 @@ require 'tmpdir'
 FLAT_FORGE_ORACLE = File.expand_path('fixtures/expected.txt', __dir__)
 FLAT_DEGRADED_ORACLE = File.expand_path('fixtures/expected-degraded.txt', __dir__)
 GITFLOW_ORACLE = File.expand_path('fixtures/gitflow-expected-degraded.txt', __dir__)
+GITFLOW_FORGE_ORACLE = File.expand_path('fixtures/gitflow-expected.txt', __dir__)
 
 class OracleTableTest < Minitest::Test
   FLAT = FLAT_DEGRADED_ORACLE
   FLAT_FORGE = FLAT_FORGE_ORACLE
   GITFLOW = GITFLOW_ORACLE
+  GITFLOW_FORGE = GITFLOW_FORGE_ORACLE
 
   # Every table, for the guarantees that hold of all of them.
-  ALL = [FLAT_FORGE, FLAT, GITFLOW].freeze
+  ALL = [FLAT_FORGE, FLAT, GITFLOW_FORGE, GITFLOW].freeze
 
   def test_the_flat_table_lists_exactly_the_branches_its_fixture_builds
     assert_tables_agree(Fixtures::BranchRepo, FLAT, 'flat')
@@ -72,6 +74,10 @@ class OracleTableTest < Minitest::Test
 
   def test_the_gitflow_table_lists_exactly_the_branches_its_fixture_builds
     assert_tables_agree(Fixtures::GitflowRepo, GITFLOW, 'gitflow')
+  end
+
+  def test_the_gitflow_forge_table_lists_exactly_the_branches_its_fixture_builds
+    assert_tables_agree(Fixtures::GitflowRepo, GITFLOW_FORGE, 'gitflow')
   end
 
   # Both tables must demand a deletion from EVERY stage that can reach
@@ -248,16 +254,14 @@ class FixtureShapeTest < Minitest::Test
   # dropped -- would leave the sweep graded against a rule with no
   # subject, and every test here would stay green while it happened.
   def test_the_forge_tables_forge_reasons_are_what_the_canned_records_say
-    rows = Fixtures::Oracle.load(FLAT_FORGE).select { |row| FORGE_REASONS.include?(row.reason) }
-    refute_empty rows, 'no row states a forge reason at all'
+    assert_forge_reasons_match(Fixtures::BranchRepo, FLAT_FORGE, 'main',
+                               Fixtures::PullRequests::RECORDS, 'flat')
+  end
 
-    with_fixture(Fixtures::BranchRepo, 'flat') do |repo|
-      records = Fixtures::PullRequests.data(repo).fetch(Fixtures::PullRequests::CWD)
-      rows.each do |row|
-        assert_equal row.reason, forge_reason_for(repo, records, row.branch),
-                     "the table says #{row.branch} is #{row.reason}, the records disagree"
-      end
-    end
+  def test_the_gitflow_forge_tables_forge_reasons_are_what_the_canned_records_say
+    assert_forge_reasons_match(Fixtures::GitflowRepo, GITFLOW_FORGE_ORACLE,
+                               Fixtures::GitflowRepo::DEFAULT_BRANCH,
+                               Fixtures::PullRequests::GITFLOW_RECORDS, 'gitflow')
   end
 
   def test_the_flat_tables_evidence_reasons_are_what_git_reports
@@ -428,7 +432,22 @@ class FixtureShapeTest < Minitest::Test
   # against the canned records, in its documented order. Only asked
   # about branches whose row names a forge reason, which are exactly the
   # branches that reach the forge at all.
-  def forge_reason_for(repo, records, branch)
+  def assert_forge_reasons_match(builder, table, default, record_set, label)
+    rows = Fixtures::Oracle.load(table).select { |row| FORGE_REASONS.include?(row.reason) }
+    refute_empty rows, "#{label}: no row states a forge reason at all"
+
+    with_fixture(builder, label) do |repo|
+      records = Fixtures::PullRequests.data(repo, records: record_set)
+                                      .fetch(Fixtures::PullRequests::CWD)
+      rows.each do |row|
+        assert_equal row.reason, forge_reason_for(repo, records, row.branch, default),
+                     "#{label}: the table says #{row.branch} is #{row.reason}, " \
+                     'the records disagree'
+      end
+    end
+  end
+
+  def forge_reason_for(repo, records, branch, default = 'main')
     mine = records.select { |record| record['headRefName'] == branch }
     return 'protected:open-pr' if mine.any? { |record| record['state'] == 'OPEN' }
     return 'proof-b:no-pr' if mine.empty?
@@ -439,7 +458,7 @@ class FixtureShapeTest < Minitest::Test
     same_repo = merged.reject { |record| record['isCrossRepository'] }
     return 'proof-b:pr-from-fork' if same_repo.empty?
 
-    on_default = same_repo.select { |record| record['baseRefName'] == 'main' }
+    on_default = same_repo.select { |record| record['baseRefName'] == default }
     return 'proof-b:pr-other-base' if on_default.empty?
 
     tip = repo.git('rev-parse', "refs/heads/#{branch}").strip
@@ -1243,10 +1262,11 @@ class OracleTestCase < CliTestCase
   # wrong one. The file is written outside the repository: the sweep
   # reads nothing from the working tree, but a fixture that quietly
   # gained an untracked file would be one no clone produces.
-  def with_forge(repo, key: Fixtures::PullRequests::CWD, failing: false)
+  def with_forge(repo, key: Fixtures::PullRequests::CWD, failing: false,
+                 records: Fixtures::PullRequests::RECORDS)
     Dir.mktmpdir('stale-branches-forge') do |dir|
       path = File.join(dir, 'pull-requests.json')
-      ENV['STUB_GH_PRS'] = Fixtures::PullRequests.write(repo, path, key: key)
+      ENV['STUB_GH_PRS'] = Fixtures::PullRequests.write(repo, path, key: key, records: records)
       failing ? ENV['STUB_GH_FAIL'] = '1' : ENV.delete('STUB_GH_FAIL')
       yield
     end
@@ -2621,6 +2641,20 @@ class PullRequestVerdictTest < Minitest::Test
     assert_equal ['DELETE', 'proof-b:pr-merged'], verdict(record(state: 'merged'))
   end
 
+  # The default branch is whatever the repository's is, and on the
+  # gitflow fixture that is develop while main is present and is not it.
+  # A comparison against a hardcoded main is wrong in both directions at
+  # once, which is the shape this pins.
+  def test_the_base_is_compared_against_the_default_branch_that_was_passed
+    landed = [record(state: 'MERGED', base: 'develop')]
+    elsewhere = [record(state: 'MERGED', base: 'main')]
+
+    assert_equal ['DELETE', 'proof-b:pr-merged'],
+                 StaleBranches.pull_request_verdict(landed, tip: TIP, default: 'develop')
+    assert_equal ['KEEP', 'proof-b:pr-other-base'],
+                 StaleBranches.pull_request_verdict(elsewhere, tip: TIP, default: 'develop')
+  end
+
   # Proof (b) never sees an open pull request, because the protection
   # below decides those branches before the content check runs, let
   # alone this. So the clauses above answer only for branches whose
@@ -2985,6 +3019,27 @@ class RepoFlagTest < OracleTestCase
 
         assert_matches_oracle(Fixtures::Oracle.load(FLAT_FORGE_ORACLE), result)
         assert(served_invocations.all? { |call| call.include?("--repo #{UPSTREAM}") })
+      end
+    end
+  end
+end
+
+class GitflowFixtureForgeOracleTest < OracleTestCase
+  ORACLE = GITFLOW_FORGE_ORACLE
+
+  # The arm that makes the default branch's NAME load-bearing in proof
+  # (b). Here the default is develop and main is present and is not it,
+  # so the two conflicting branches carry merged pull requests based on
+  # different branches and must be decided differently. Comparing a base
+  # against a hardcoded main gets both wrong at once, and no other table
+  # notices.
+  def test_report_matches_the_oracle_with_the_forge_answering
+    with_gitflow_fixture('gitflow-forge') do |repo|
+      with_forge(repo, records: Fixtures::PullRequests::GITFLOW_RECORDS) do
+        result = sweep(repo)
+
+        assert_matches_oracle(Fixtures::Oracle.load(ORACLE), result)
+        refute_git_complaints(result)
       end
     end
   end
