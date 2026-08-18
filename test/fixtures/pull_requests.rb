@@ -30,6 +30,11 @@ module Fixtures
     # whichever it happens to read last.
     UNKNOWN_SHA = ('0' * 40).freeze
 
+    # Stands for the project a fork's pull requests actually live in.
+    # A fork's own repository is where gh looks by default and is
+    # exactly where they are not.
+    UPSTREAM = 'github.com/fixture/upstream'
+
     Record = Struct.new(:number, :state, :branch, :head, :base, :cross_repo)
 
     # One record per row of expected.txt that needs the forge to decide
@@ -74,6 +79,21 @@ module Fixtures
 
     def write(repo, path, key: CWD)
       File.write(path, JSON.pretty_generate(data(repo, key: key)))
+      path
+    end
+
+    # A clone of a fork: gh resolves the fork from the working
+    # directory, and the fork has no pull requests, because they were
+    # all opened against the upstream project. Both keys are present
+    # and only one of them holds anything, which is the shape that
+    # makes asking the wrong one an answer rather than an error --
+    # and an answer of [] is what a sweep reads as "no pull request".
+    def fork_data(repo, upstream: UPSTREAM)
+      { CWD => [] }.merge(data(repo, key: upstream))
+    end
+
+    def write_fork(repo, path, upstream: UPSTREAM)
+      File.write(path, JSON.pretty_generate(fork_data(repo, upstream: upstream)))
       path
     end
 

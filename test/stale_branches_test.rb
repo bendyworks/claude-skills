@@ -768,6 +768,18 @@ class ArgumentParsingTest < CliTestCase
     assert_equal 'upstream', parse('--remote', 'upstream').remote
   end
 
+  # A different knob from --remote, and the difference is the whole
+  # reason both exist: --remote selects which git ancestry is measured
+  # against, --repo selects which GitHub repository is asked about pull
+  # requests. On a fork they name different places.
+  def test_repo_names_the_forge_project_to_ask_about
+    assert_equal 'octo/upstream', parse('--repo', 'octo/upstream').repo
+  end
+
+  def test_no_repo_is_named_until_one_is_asked_for
+    assert_nil parse.repo, 'naming a repository by default would guess at one'
+  end
+
   def test_delete_is_off_until_it_is_asked_for
     assert parse('--delete').delete?
   end
@@ -783,6 +795,7 @@ class ArgumentParsingTest < CliTestCase
 
   def test_a_value_option_with_no_value_says_which_one
     assert_equal 'missing argument: --remote', refusal('--remote')
+    assert_equal 'missing argument: --repo', refusal('--repo')
   end
 
   # This CLI takes no positionals at all, so one is not a stray detail
@@ -799,6 +812,7 @@ class ArgumentParsingTest < CliTestCase
   def test_a_value_option_will_not_swallow_a_following_flag
     assert_match(/--delete/, refusal('-C', '--delete'))
     assert_match(/--delete/, refusal('--remote', '--delete'))
+    assert_match(/--delete/, refusal('--repo', '--delete'))
   end
 
   # Last-wins would silently discard the first value, which for -C means
@@ -806,6 +820,7 @@ class ArgumentParsingTest < CliTestCase
   def test_a_repeated_value_option_is_refused_rather_than_last_winning
     assert_equal 'duplicate -C', refusal('-C', '/tmp/a', '-C', '/tmp/b')
     assert_equal 'duplicate --remote', refusal('--remote', 'a', '--remote', 'b')
+    assert_equal 'duplicate --repo', refusal('--repo', 'a/b', '--repo', 'c/d')
   end
 
   # Accepted where a repeated value option is refused, and the
@@ -1235,6 +1250,28 @@ class OracleTestCase < CliTestCase
       failing ? ENV['STUB_GH_FAIL'] = '1' : ENV.delete('STUB_GH_FAIL')
       yield
     end
+  end
+
+  # The same records, served as a clone of a fork would see them: the
+  # repository gh resolves from the working directory has none, and the
+  # upstream project has them all.
+  def with_forked_forge(repo)
+    Dir.mktmpdir('stale-branches-fork') do |dir|
+      path = File.join(dir, 'pull-requests.json')
+      ENV['STUB_GH_PRS'] = Fixtures::PullRequests.write_fork(repo, path)
+      ENV.delete('STUB_GH_FAIL')
+      yield
+    end
+  end
+
+  # A second remote, added to a repository already built. It is given
+  # the same URL as origin, so what it advertises is identical and the
+  # verdicts cannot change: this arm is about which knob the sweep
+  # reads, not about two remotes disagreeing.
+  def add_upstream_remote(repo, name: 'upstream')
+    repo.git('remote', 'add', name, repo.origin)
+    repo.git('fetch', '-q', name)
+    name
   end
 
   # The CLI shells out to git, so it runs under the same neutralized
@@ -2789,6 +2826,74 @@ class DegradationTest < OracleTestCase
 
       assert_equal 1, served_invocations.length,
                    "the forge was asked again after failing:\n#{served_invocations.join("\n")}"
+    end
+  end
+end
+
+# The fork-with-upstream case, which is the whole reason --repo exists.
+# gh resolves a repository from the working directory, and on a clone
+# of a fork that repository is the fork -- where none of your pull
+# requests are. The failure is not an error but an empty answer, which
+# a sweep reads as "no pull request".
+class RepoFlagTest < OracleTestCase
+  UPSTREAM = Fixtures::PullRequests::UPSTREAM
+
+  def test_the_named_repository_is_what_the_client_is_asked_about
+    with_flat_fixture('repo-flag') do |repo|
+      with_forked_forge(repo) do
+        sweep(repo, '--repo', UPSTREAM)
+
+        refute_empty served_invocations
+        assert(served_invocations.all? { |call| call.include?("--repo #{UPSTREAM}") },
+               "a query went out without the repository it was told to ask about:\n" \
+               "#{served_invocations.join("\n")}")
+      end
+    end
+  end
+
+  # What asking the fork costs, stated as verdicts rather than as
+  # advice. The keeps are harmless -- a branch kept for want of a pull
+  # request nobody could find -- and the deletion is not: this branch
+  # has an open pull request upstream, and asking the fork about it
+  # comes back empty, so nothing protects it.
+  def test_asking_the_fork_loses_the_protection_the_upstream_would_have_given
+    with_flat_fixture('repo-flag-wrong') do |repo|
+      with_forked_forge(repo) do
+        rows = sweep(repo).rows.to_h { |row| [row.branch, row] }
+
+        assert_equal 'DELETE', rows.fetch('q-open-but-landed').verdict,
+                     'this arm is pointless unless asking the fork actually loses the protection'
+        assert_equal 'proof-b:no-pr', rows.fetch('h-no-pr').reason
+        assert_equal 'proof-b:no-pr', rows.fetch('b-main-edited').reason,
+                     'a branch whose pull request merged upstream read as having none'
+      end
+    end
+  end
+
+  def test_naming_the_upstream_project_reaches_the_full_specification
+    with_flat_fixture('repo-flag-right') do |repo|
+      with_forked_forge(repo) do
+        result = sweep(repo, '--repo', UPSTREAM)
+
+        assert_matches_oracle(Fixtures::Oracle.load(FLAT_FORGE_ORACLE), result)
+        refute_git_complaints(result)
+      end
+    end
+  end
+
+  # The two flags are separate knobs and this is the arm that says so:
+  # one selects the git ancestry, the other the forge project, and a
+  # sweep given both must honor each. A CLI that quietly used --remote
+  # for both would pass every other test here.
+  def test_the_remote_and_the_repository_are_chosen_separately
+    with_flat_fixture('repo-flag-both') do |repo|
+      remote = add_upstream_remote(repo)
+      with_forked_forge(repo) do
+        result = sweep(repo, '--remote', remote, '--repo', UPSTREAM)
+
+        assert_matches_oracle(Fixtures::Oracle.load(FLAT_FORGE_ORACLE), result)
+        assert(served_invocations.all? { |call| call.include?("--repo #{UPSTREAM}") })
+      end
     end
   end
 end

@@ -47,7 +47,7 @@ module StaleBranches
   DEFAULT_REMOTE = 'origin'
 
   USAGE = <<~TXT
-    Usage: stale-branches [-C DIR] [--remote NAME] [--delete]
+    Usage: stale-branches [-C DIR] [--remote NAME] [--repo OWNER/NAME] [--delete]
 
     Reports every local branch with a verdict and the evidence behind
     it. Nothing is deleted unless --delete is given, and then only the
@@ -56,6 +56,14 @@ module StaleBranches
       -C DIR          the repository to sweep (default: the working directory)
       --remote NAME   the remote whose default branch verdicts are measured
                       against (default: #{DEFAULT_REMOTE})
+      --repo OWNER/NAME
+                      the GitHub project whose pull requests are read
+                      (default: whichever one gh resolves from DIR). Name it
+                      when DIR is a clone of a fork: your pull requests live
+                      in the project you opened them against, and asking the
+                      fork instead comes back empty rather than failing --
+                      which reads as "no pull request" and, for a branch whose
+                      work has landed, loses the protection an open one gives
       --delete        delete the branches marked DELETE
       -h, --help      print this message
 
@@ -171,7 +179,7 @@ module StaleBranches
   # The parsed command line. Held as a value rather than a hash so a
   # stage reaching for a flag that does not exist fails where it is
   # written rather than reading as nil.
-  Options = Struct.new(:dir, :remote, :delete, :help) do
+  Options = Struct.new(:dir, :remote, :repo, :delete, :help) do
     def delete?
       delete
     end
@@ -198,8 +206,13 @@ module StaleBranches
     values = {}
     flags = { delete: false, help: false }
     rest = permute(argv, values, flags)
+    # No default for :repo. Every other value here has an obvious one,
+    # and this does not: a guess would name a GitHub project nobody
+    # asked about, and gh answering for the wrong one is an empty
+    # result rather than an error. Left nil, the question of which
+    # project to ask is gh's to answer from the repository itself.
     options = Options.new(values.fetch(:dir, '.'), values.fetch(:remote, DEFAULT_REMOTE),
-                          flags[:delete], flags[:help])
+                          values[:repo], flags[:delete], flags[:help])
     # A request for usage is answered rather than corrected. Someone
     # typing `stale-branches --help main` is asking what the command
     # takes, and telling them their argument is unexpected is a worse
@@ -226,6 +239,10 @@ module StaleBranches
       o.on('--remote NAME', VALUE_NOT_FLAG,
            'the remote whose default branch is measured against') do |v|
         set_once(values, :remote, '--remote', v)
+      end
+      o.on('--repo OWNER/NAME', VALUE_NOT_FLAG,
+           'the GitHub project whose pull requests are read') do |v|
+        set_once(values, :repo, '--repo', v)
       end
       # Repeated booleans are accepted where a repeated value option is
       # refused: repeating one discards no input and leaves the sweep
@@ -1075,7 +1092,7 @@ module StaleBranches
       return puts(USAGE) if options.help?
 
       git = Git.new(dir: options.dir, remote: options.remote)
-      sweep = Sweep.new(git, Forge.new(dir: options.dir)).run
+      sweep = Sweep.new(git, Forge.new(dir: options.dir, repo: options.repo)).run
       # Warnings come before the report rather than after it: a caller
       # reading a piped report from the top must meet the caveats
       # before the rows they apply to.
