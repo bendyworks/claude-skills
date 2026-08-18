@@ -27,6 +27,11 @@
 #   failure is a message on stderr and exit 1 -- the shape the sweep
 #   degrades on, and never confusable with an empty result.
 #
+#   STUB_GH_FAIL and STUB_GH_GARBAGE inject the two ways an answer can
+#   be useless: a non-zero exit, and a clean exit carrying something
+#   that is not JSON. Both are served, never refused, because the sweep
+#   is required to degrade on each.
+#
 #   With no --repo, the real client answers for the repository it
 #   resolves from its own working directory, which is the resolution the
 #   sweep leaves to it. The data file's @cwd key stands for that.
@@ -52,6 +57,7 @@ module StubGh
   def main(argv)
     log_invocation(argv)
     fail_as_configured
+    garble_as_configured
     command = argv.take(2).join(' ')
     refuse("unserved command: #{command.empty? ? '(none)' : command}") unless command == 'pr list'
     list_pull_requests(parse(argv.drop(2)))
@@ -76,6 +82,19 @@ module StubGh
 
     warn 'error connecting to api.github.com'
     exit 1
+  end
+
+  # An answer that is not the JSON the caller asked for, with a clean
+  # exit: a proxy serving an error page, a wrapper printing a notice on
+  # stdout. Like the failure above it is served rather than refused,
+  # because the sweep is required to degrade on it -- and it is a
+  # different code path from a non-zero exit, reached by a parse error
+  # rather than by a status.
+  def garble_as_configured
+    return unless ENV['STUB_GH_GARBAGE'] == '1'
+
+    puts '<html><body>gateway timeout</body></html>'
+    exit 0
   end
 
   # Refusals go to their own log and take the test down with them. A

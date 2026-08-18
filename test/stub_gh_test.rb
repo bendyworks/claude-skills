@@ -146,6 +146,19 @@ class StubGhTest < Minitest::Test
     assert_empty result.refusals, 'a failure the sweep must degrade on is served, not refused'
   end
 
+  # The other way an answer can be useless: a clean exit carrying
+  # something that is not JSON. Served rather than refused, because the
+  # sweep degrades on it, and reached by a parse error rather than by a
+  # status -- so it exercises a different path than the failure above.
+  def test_a_configured_garble_is_a_clean_exit_carrying_something_that_is_not_json
+    result = list('--head', 'a-landed', env: { 'STUB_GH_GARBAGE' => '1' })
+
+    assert result.ok?, 'a garbled answer must still exit 0, or it is just the failure case'
+    refute_empty result.stdout
+    assert_raises(JSON::ParserError) { result.json }
+    assert_empty result.refusals, 'a garble the sweep must degrade on is served, not refused'
+  end
+
   def test_every_invocation_is_logged_including_a_refused_one
     list('--head', 'a-landed')
     run_stub('pr', 'view', '1')

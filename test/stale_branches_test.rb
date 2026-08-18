@@ -1152,7 +1152,7 @@ class OracleTestCase < CliTestCase
   # The stub reads both from the environment, and a machine value for
   # either must not survive into a run.
   def extra_scrubbed_env_keys
-    %w[STUB_GH_PRS STUB_GH_FAIL]
+    %w[STUB_GH_PRS STUB_GH_FAIL STUB_GH_GARBAGE]
   end
 
   # Set here rather than per test so that every subclass of this one is
@@ -1262,12 +1262,13 @@ class OracleTestCase < CliTestCase
   # wrong one. The file is written outside the repository: the sweep
   # reads nothing from the working tree, but a fixture that quietly
   # gained an untracked file would be one no clone produces.
-  def with_forge(repo, key: Fixtures::PullRequests::CWD, failing: false,
+  def with_forge(repo, key: Fixtures::PullRequests::CWD, failing: false, garbled: false,
                  records: Fixtures::PullRequests::RECORDS)
     Dir.mktmpdir('stale-branches-forge') do |dir|
       path = File.join(dir, 'pull-requests.json')
       ENV['STUB_GH_PRS'] = Fixtures::PullRequests.write(repo, path, key: key, records: records)
       failing ? ENV['STUB_GH_FAIL'] = '1' : ENV.delete('STUB_GH_FAIL')
+      garbled ? ENV['STUB_GH_GARBAGE'] = '1' : ENV.delete('STUB_GH_GARBAGE')
       yield
     end
   end
@@ -2754,6 +2755,23 @@ class ForgeTest < OracleTestCase
         refute forge.available?, 'a client that failed must not still be considered available'
         assert_nil forge.pull_requests('k-merged-and-open')
         assert_equal 1, served_invocations.length, 'a failed client was asked a second time'
+      end
+    end
+  end
+
+  # A clean exit carrying something that is not JSON: a proxy serving an
+  # error page, a wrapper printing a notice on stdout. The status says
+  # the call worked, so nothing but the parse can catch it, and the
+  # sweep must degrade rather than end on an exception raised out of a
+  # branch nobody was looking at.
+  def test_an_answer_that_is_not_json_degrades_rather_than_raising
+    with_flat_fixture('forge-garbled') do |repo|
+      with_forge(repo, garbled: true) do
+        forge = forge_for(repo)
+
+        assert_nil forge.pull_requests('g-open')
+        refute forge.available?
+        assert_match(/JSON/, forge.failure.to_s, 'the failure did not say what was wrong')
       end
     end
   end
