@@ -73,17 +73,19 @@ symref is still updated, and the scoped fetch heals the dangling ref).
 Offline, proceed with the existing `origin/HEAD` -- the three-dot diff
 uses the merge base, so a stale trunk does not inflate scope.
 
-The `stale-branches` CLI in this plugin resolves the same question
-differently -- it asks the remote with `ls-remote --symref` and reads
-`origin/HEAD` only when that fails -- and the difference is deliberate
-rather than drift. Two things separate them. The stakes: a stale trunk
-here selects a slightly wrong subset of specs, blunted further by the
-merge base, while a stale default branch in a sweep that deletes
-branches destroys work, so that tool is built so the failure cannot
-happen rather than guarded against it happening. And the offline
-requirement: this skill must still work with no network, and `ls-remote`
-cannot, whereas repairing and reading a local cache degrades to an
-older answer instead of to none.
+> **Why the branch sweep resolves this differently.** The
+> `stale-branches` CLI bundled in this plugin asks the remote with
+> `ls-remote --symref` and reads the remote-tracking `HEAD` only when
+> that fails, where this skill repairs and reads that ref directly. The
+> difference is deliberate. The stakes are not equal: a stale trunk here
+> selects a slightly wrong subset of specs, blunted further by the merge
+> base, while a stale default branch in a sweep that deletes branches can
+> destroy work -- so that tool spends a network round trip to prefer the
+> remote's live answer, and says so when it had to fall back. This skill
+> has to work with no network at all, which `ls-remote` cannot, so it
+> takes the cached answer without the round trip. Offline the two read
+> the same ref; what separates them is which answer each reaches for
+> first, and whether it announces settling for the other.
 
 All paths in this skill are relative to the **app root** -- the directory
 holding the `Gemfile` and `spec/`, which may be a subdirectory of the
