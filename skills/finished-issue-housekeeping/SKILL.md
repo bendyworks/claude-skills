@@ -227,6 +227,11 @@ Report the sweep's own table as it stands. The user decides what happens
 to anything kept, and to the protected set. Do not delete those without
 an explicit instruction naming them.
 
+Before `--delete`, take out any branch the user has said this session
+they are still working on. The sweep has no way to know: it reads the
+repository, not the conversation, and a branch somebody is mid-way
+through looks exactly like an abandoned one from the outside.
+
 Read that protected set as names rather than intent, because that is all
 the tool matches: a closed list of long-lived names (`main`, `master`,
 `develop`, `staging`, `production`, `gh-pages`, and anything under
