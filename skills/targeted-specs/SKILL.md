@@ -55,39 +55,59 @@ standing rule is the full suite.
 ## Step 1 -- Compute the branch's scope (stateless)
 
 **Resolve the project remote before anything else -- the remote this
-branch's pull request will target.** Every command below says `<remote>`
-because the name is a per-clone fact, not a constant: the sole remote in
-a single-remote clone, whatever it is called; `upstream` when both
-`origin` and `upstream` exist (a fork clone -- `origin` is the fork, and
-a fork's trunk is normally behind, so measuring against it sweeps other
-people's already-landed commits into the diff and forces spurious
-escalations); `origin` otherwise. Any other multi-remote shape is
-ambiguous: ask the user when one is present; unattended, run nothing and
-end with the ESCALATED verdict, trigger `project remote ambiguous`.
+branch's pull request will target.** Every command in this step says
+`<remote>` because the name is a per-clone fact, not a constant. `git
+remote` (the first command below) lists the candidates; pick from them:
+the sole remote in a single-remote clone, whatever it is called;
+`upstream` when both `origin` and `upstream` exist (a fork clone --
+`origin` is the fork, and a fork's trunk is normally behind, so
+measuring against it sweeps other people's already-landed commits into
+the diff and forces spurious escalations); `origin` whenever it exists
+without `upstream`, however many other remotes (`heroku`, a mirror) sit
+alongside it. Two signals beat that name heuristic: a recorded
+`gh repo set-default` answer (`git config --get-regexp 'gh-resolved'`,
+readable offline) names the true PR target, and the user's word beats
+everything. Only when several remotes exist and none is named `origin`
+is the shape ambiguous: ask the user when one is present; unattended,
+run nothing and end with the ESCALATED verdict, trigger
+`project remote ambiguous`.
 
 Then refresh remote state -- never reason about the trunk from a stale
 ref:
 
 ```bash
+git remote                                           # the candidates; resolve <remote> per the rule above
 git remote set-head <remote> --auto                  # refresh <remote>/HEAD; fetch never updates it, so default-branch renames go stale without this
 git symbolic-ref --short refs/remotes/<remote>/HEAD  # the trunk, e.g. upstream/main
 git fetch <remote> <trunk-branch>                    # scoped fetch; bare branch name (main, not <remote>/main)
 ```
 
-If `<remote>/HEAD` cannot be resolved, fall back to
-`gh repo view --json defaultBranchRef` (requires the GitHub CLI and a
-GitHub-hosted remote) or ask the user; unattended, end with the
+If `<remote>/HEAD` cannot be resolved, ask the remote directly:
+`git ls-remote --symref <remote> HEAD` names the default branch on any
+host (the same recipe the stale-branches CLI uses). Failing that, try
+`gh repo view --json defaultBranchRef` -- noting it answers for gh's
+resolved default repo, which in a fork clone is the fork itself unless
+`gh repo set-default` says otherwise -- or ask the user. Unattended, try
+both commands before giving up; when neither answers, end with the
 ESCALATED verdict, trigger `trunk unresolved`. Never hardcode either
 half of `origin/main`: the remote is resolved above, and the branch is
 read from the answer, never assumed.
 
-`git remote set-head <remote> --auto` needs the network; right after a
-default-branch rename it can print a benign `Not a valid ref` error (the
-symref is still updated, and the scoped fetch heals the dangling ref).
-Offline, proceed with the existing `<remote>/HEAD` -- the three-dot diff
-uses the merge base, so a briefly stale trunk rarely inflates scope, and
-when it does the error lands on over-selection and escalation, never on
-under-selection.
+`git remote set-head <remote> --auto` and `ls-remote` need the network;
+right after a default-branch rename `set-head` can print a benign `Not
+a valid ref` error (the symref is still updated, and the scoped fetch
+heals the dangling ref). Offline, proceed with the existing
+`<remote>/HEAD` when it exists -- the three-dot diff uses the merge
+base, so a briefly stale trunk rarely inflates scope, and the usual
+error direction is over-selection and escalation rather than
+under-selection (a revert-shaped branch against a stale ref can still
+under-select, one more reason Step 6 names the base it measured). When
+the resolved remote has no HEAD symref offline -- normal for a
+hand-added `upstream`, which only a networked `set-head` or a fetch on
+a newer git creates -- do not substitute another remote's HEAD (in a
+fork clone that is the fork's stale `origin/HEAD`, the exact
+wrong-trunk measurement this rule exists to prevent): end with the
+ESCALATED verdict, trigger `trunk unresolved`.
 
 > **Why the branch sweep resolves this differently.** The
 > `stale-branches` CLI bundled in this plugin asks the remote with
@@ -97,8 +117,8 @@ under-selection.
 > network -- both spend a call. It is what each does with the answer. This
 > skill writes it into the ref, so the repair outlasts the run and every
 > later command can simply read it, and a failure is survivable: a stale
-> trunk selects a slightly wrong subset of specs, blunted further by the
-> merge base. The sweep reads without writing, and says out loud when it
+> trunk usually over-selects or escalates spuriously -- annoying, not
+> destructive. The sweep reads without writing, and says out loud when it
 > had to settle for the cached copy, because a stale default branch in a
 > run that deletes branches can destroy work -- and a quiet degradation is
 > exactly what would hide that.
@@ -132,7 +152,12 @@ line, trigger `non-git repository`.
 Some files' blast radius cannot be predicted, and you cannot select the
 specs you did not predict. If the diff touches any of these, **stop**: run
 nothing (not even lint), emit the ESCALATED verdict line naming the
-trigger, and recommend the full gate.
+trigger, and recommend the full gate. Any escalation whose trigger came
+from the diff also names, in the summary above the verdict line, the
+base the scope was measured against (e.g. `upstream/main`) -- a wrong
+project-remote pick forces exactly these spurious escalations, and this
+is the only place an unattended caller's transcript can reveal it. The
+verdict line's own shape is a contract (below) and never changes.
 
 - Spec infrastructure: `spec/spec_helper.rb`, `spec/rails_helper.rb`,
   `spec/support/**` (matchers, shared examples, shared contexts, helpers)
@@ -291,8 +316,9 @@ the proxy toward what actually tracks runtime there.
 Step 6 owns the announcement; earlier steps only record findings for it.
 Print, before running anything:
 
-- The trunk the scope was measured against, remote name included (e.g.
-  `upstream/main`) -- a wrong project-remote pick is vetoable here
+- The base the scope was measured against -- the remote-qualified trunk
+  (e.g. `upstream/main`), or the stacked branch's base -- so a wrong
+  project-remote pick is vetoable here
 - Each changed file with its selected specs and a one-line rationale
 - Named gaps (changed code with no covering spec found)
 - Deleted-spec findings, if any
