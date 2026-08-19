@@ -94,18 +94,26 @@ unlanded, but because your feet are on it. The report says
 to read past when it is the one branch you were expecting to go.
 
 ```bash
-git ls-remote --symref <remote> HEAD    # names the default branch
-git fetch --prune <remote> && git checkout <default> && git pull --ff-only
+git ls-remote --symref <remote> HEAD   # answers "ref: refs/heads/<default>"
+git fetch --prune <remote> && git checkout <default> && git pull --ff-only <remote> <default>
 ```
 
 Ask the remote for the name rather than assuming `main`: plenty of
-projects ship from `develop` or `master`, and `refs/remotes/<remote>/HEAD`
-is a clone-time cache that can still name the branch the team stopped
-shipping from. If neither yields a name, stop and ask. Pass the same
-`<remote>` you will pass the sweep, or the fetch refreshes one remote
-while the verdicts are measured against another. The second line is
-chained so a failure stops rather than leaving you on the wrong branch;
-`git checkout` fails on a dirty working tree, so commit or stash first.
+projects ship from `develop` or `master`. Strip the `refs/heads/` prefix
+off what the first line answers. If the remote cannot be reached,
+`git symbolic-ref --short refs/remotes/<remote>/HEAD` holds a local copy
+of the same answer, worth distrusting because a clone records it once and
+a later rename leaves it naming the branch the team stopped shipping
+from. If neither yields a name, stop and ask.
+
+Pass the same `<remote>` throughout, the sweep included, or one remote is
+refreshed while the verdicts are measured against another. The second
+line is chained so a failure stops rather than leaving you somewhere
+unexpected. Two things stop it: `git checkout` refuses when switching
+would overwrite a local change, and it refuses outright when the default
+branch is already checked out in another worktree -- the likelier one
+here, and the answer is to sweep from that worktree rather than to force
+anything.
 
 Then run the sweep (Step 3b), which handles this story's branch as an
 ordinary candidate along with every other -- and each of them separately,
@@ -144,19 +152,39 @@ Enabling the plugin puts it on PATH; it needs a Ruby, and git 2.38 or
 newer for the content check, below which it stops and says so. The
 pull-request half of the evidence is read through `gh`, so that half
 needs the GitHub CLI installed and authenticated, and exists only on
-GitHub. If the tool cannot run at all -- old git, no Ruby, not installed
--- skip the repo-wide sweep and say so in the Step 10 summary rather than
-abandoning the pass, and settle the story's own branch on evidence you
-gather by hand.
+GitHub.
 
-Add `--repo <owner>/<name>` when the clone is a fork and the pull
-requests live in the project it was forked from. Add `--remote <name>`
-when the project's own remote is not `origin`.
+If the tool cannot run at all -- old git, no Ruby, not installed -- skip
+the repo-wide sweep and say so in the Step 10 summary rather than
+abandoning the pass. The story's own branch still has one check that
+needs nothing but git:
+
+```bash
+git merge-base --is-ancestor <branch> refs/remotes/<remote>/<default>
+```
+
+Exit 0 means every commit on it is already on the default branch, which
+is evidence enough to delete it with `git branch -d <branch>` -- a bare
+name, because `-d` rejects a full refname and does nothing, and a tag of
+the same name shadows the branch. A non-zero exit proves nothing in the
+other direction: a squash-merged branch fails this check and has landed
+all the same. Leave those for the user.
+
+Add `--repo <owner>/<name>` whenever `gh` would resolve to the wrong
+project. That is a fork whose pull requests were opened against the
+project it was forked from, and equally a fork where the team runs its
+own pull requests while `gh` resolves to the parent. Asking the wrong
+project is not an error -- it is an empty answer, which reads as
+`proof-b:no-pr` on every branch and quietly weakens the whole sweep. Add
+`--remote <name>` when the project's own remote is not `origin`.
 
 `--delete` is a second sweep rather than a replay of the first: it
-recomputes every verdict and prints its own report before acting. That
-report is the one to read, because a pull request merging between the two
-commands changes what the second run marks.
+recomputes every verdict, prints its own report, and deletes in the same
+run without pausing. So the approval you carry is against the first
+report, while the second is the record of what actually happened. Read it
+afterwards and compare. A row there that was not in the first means a
+branch changed state between the two commands -- say so, and keep its
+`was <sha>` line, which is what restoring it would need.
 
 **The bar for deleting a branch is evidence that nothing on it is absent
 from the default branch**, and that bar is why the tool exists rather
@@ -188,16 +216,22 @@ something different, and they need different responses:
   content that reached nowhere else. Deleting it takes that content's
   last reference.
 - **`protected:open-pr` -- somebody still has a pull request open on
-  it.** Kept whatever its content says. Worth a word to the user, since
+  it.** Kept whatever the content check would have said, with one
+  exemption: a branch whose commits are already ancestors of the default
+  branch clears as `pass1:ancestor` before the forge is asked at all,
+  which is safe precisely because every one of those commits is already
+  on the branch the team ships. Worth a word to the user, since
   abandoning it is their call, and it is the one protection that costs a
   network call -- so it is the one that quietly disappears when the
   forge cannot be reached.
 
 A deletion carries a reason too, and each deserves the same glance:
 `pass1:ancestor`, every commit already on the default branch;
-`proof-a:content-landed`, merging it back would produce that branch's own
-tree; and `proof-b:pr-merged`, a merged pull request based on the default
-branch, not from a fork, whose head is this tip.
+`proof-a:content-landed`, merging it back would produce the default
+branch's own tree; and `proof-b:pr-merged`, a merged pull request based
+on the default branch whose head is this tip -- from a fork only if you
+passed `--repo`, which is you saying that is where your pull requests
+live.
 
 ### When pull requests could not be read
 
@@ -227,19 +261,28 @@ Report the sweep's own table as it stands. The user decides what happens
 to anything kept, and to the protected set. Do not delete those without
 an explicit instruction naming them.
 
-Before `--delete`, take out any branch the user has said this session
-they are still working on. The sweep has no way to know: it reads the
-repository, not the conversation, and a branch somebody is mid-way
-through looks exactly like an abandoned one from the outside.
+The sweep has no way to know about a branch the user mentioned this
+session as one they are still working on. It reads the repository, not
+the conversation, and a branch somebody is mid-way through looks exactly
+like an abandoned one from the outside. There is no flag for it either:
+`--delete` takes no exclusions and never pauses. So when such a branch is
+marked DELETE, do not run `--delete` at all. Delete the other approved
+rows one at a time instead -- `git branch -d <name>`, falling back to
+`-D` where `-d` refuses, which will be most of them: a squash-merged
+branch is an ancestor of nothing, so `-d` cannot see that it landed, and
+the tool itself drops to `-D` on its own evidence for that same reason.
+Or give the branch the user is still using a name the tool protects,
+`<name>-backup`, and sweep again.
 
 Read that protected set as names rather than intent, because that is all
-the tool matches: a closed list of long-lived names (`main`, `master`,
-`develop`, `staging`, `production`, `gh-pages`, and anything under
-`release/`), the branch you are standing on, branches checked out in
-another worktree, and names ending in exactly `-backup`. A project's own
-long-lived branch (`qa`, `trunk`, `integration`) and a safety net called
-`wip.bak` are ordinary candidates, so scan the report for this project's
-own before approving anything.
+the tool matches: whatever the remote calls its default branch, a closed
+list of long-lived names (`main`, `master`, `develop`, `staging`,
+`production`, `gh-pages`, and anything under `release/`), the branch you
+are standing on, branches checked out in another worktree, and names
+ending in exactly `-backup`. A project's own second long-lived branch
+(`qa`, `integration`, `demo`) and a safety net called `wip.bak` are
+ordinary candidates, so scan the report for this project's own before
+approving anything.
 
 ## Step 4 -- Update auto-memory
 
