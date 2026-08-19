@@ -664,6 +664,33 @@ class RepoBuilderContainmentTest < Minitest::Test
   # The guard is what turns a redirected build into a clean abort rather
   # than damage. It refuses before creating anything, so a refused build
   # leaves no trace at the root it was asked for.
+  # The stub answers differently depending on variables it reads from
+  # the environment, so one this suite does not scrub is one a
+  # developer's shell -- or an earlier test -- can use to change what
+  # every later test is graded against, without anything failing.
+  # Derived from the stub's own source rather than from its constant, so
+  # a switch added to the code and forgotten in the list is caught here
+  # rather than by a seed-dependent failure weeks later.
+  def test_every_variable_the_stub_reads_is_named_and_scrubbed
+    source = File.read(File.expand_path('fixtures/stub_gh.rb', __dir__))
+    read = source.scan(/ENV(?:\.fetch)?\[?\(?'(STUB_GH_\w+)'/).flatten.uniq
+
+    refute_empty read, 'found no environment reads at all, so this asserted nothing'
+    assert_empty read - StubGh::ENV_KEYS,
+                 'the stub reads a variable its own ENV_KEYS does not name'
+    assert_empty read - OracleTestCase.new('x').extra_scrubbed_env_keys,
+                 'the stub reads a variable no suite scrubs, so it can leak between tests'
+  end
+
+  # And the same for the variables that redirect the forge: the CLI's
+  # list is what the sweep unsets for its children, and nothing tied it
+  # to what the suite scrubs.
+  def test_every_forge_redirecting_key_the_cli_unsets_is_also_scrubbed_suite_wide
+    assert_empty StaleBranches::FORGE_REDIRECTING_ENV_KEYS -
+                 OracleTestCase.new('x').extra_scrubbed_env_keys,
+                 'the CLI unsets a variable the suite would let through'
+  end
+
   def test_a_build_refuses_a_root_outside_the_temp_directory
     outside = File.join(__dir__, 'stale-branches-guard-probe')
     refute File.exist?(outside), 'the probe path existed before the test ran'
@@ -815,6 +842,34 @@ class ArgumentParsingTest < CliTestCase
   def test_a_value_option_with_no_value_says_which_one
     assert_equal 'missing argument: --remote', refusal('--remote')
     assert_equal 'missing argument: --repo', refusal('--repo')
+  end
+
+  # OptionParser accepts any unambiguous prefix by default, so without
+  # require_exact a typo one character into a flag runs it. The flags
+  # this matters for are the two that act: --d would delete, and --o
+  # would switch to the mode allowed to delete without consulting a
+  # forge. Nothing else in this file feeds an abbreviated long option,
+  # which is why removing that one line leaves the whole suite green.
+  def test_an_abbreviated_flag_is_refused_rather_than_completed
+    %w[--d --de --del --delet].each do |abbreviation|
+      assert_equal "invalid option: #{abbreviation}", refusal(abbreviation)
+    end
+    assert_equal 'invalid option: --o', refusal('--o')
+    assert_equal 'invalid option: --rep', refusal('--rep', 'octo/upstream')
+  end
+
+  # Answering --version with OptionParser's own "version unknown" would
+  # bypass this CLI's error path entirely, and there is no version to
+  # give: the plugin this ships in is deliberately versionless.
+  def test_version_is_refused_as_the_unknown_flag_it_is
+    assert_equal 'invalid option: --version', refusal('--version')
+  end
+
+  # Naming the project to ask and saying not to ask are opposite
+  # instructions, and honouring either silently leaves the caller
+  # believing something about what the sweep did.
+  def test_repo_and_offline_together_are_refused
+    assert_match(/contradict/, refusal('--repo', 'octo/upstream', '--offline'))
   end
 
   # This CLI takes no positionals at all, so one is not a stray detail
@@ -1003,6 +1058,15 @@ class ProtectionTest < Minitest::Test
 
   private
 
+  # Standing on the default branch is the most ordinary way to run this,
+  # and both rules keep the branch, so only the reason says which fired.
+  # That reason is the report's single witness that the sweep identified
+  # the branch every other verdict is measured against -- and no fixture
+  # stands HEAD there, so nothing else notices if it stops being.
+  def test_the_default_branch_is_still_decided_as_the_default_when_it_is_current
+    assert_equal 'protected:default', protection('main', current: 'main')
+  end
+
   def protection(branch, **overrides)
     StaleBranches.protection_for(branch, **FACTS.merge(overrides))
   end
@@ -1159,10 +1223,10 @@ class OracleTestCase < CliTestCase
     { 'gh' => Fixtures::ForgeStub.program }
   end
 
-  # The stub reads both from the environment, and a machine value for
-  # either must not survive into a run.
+  # Everything the stub reads comes from the environment, and a machine
+  # value for any of it must not survive into a run.
   def extra_scrubbed_env_keys
-    %w[STUB_GH_PRS STUB_GH_FAIL STUB_GH_GARBAGE] + StaleBranches::FORGE_REDIRECTING_ENV_KEYS
+    StubGh::ENV_KEYS + StaleBranches::FORGE_REDIRECTING_ENV_KEYS
   end
 
   # Set here rather than per test so that every subclass of this one is
@@ -1258,6 +1322,22 @@ class OracleTestCase < CliTestCase
     end
   end
 
+  # Every command run in the block resolves against an empty PATH, so
+  # even git is gone. The version gate runs before anything else and
+  # captures git directly rather than through Git#capture, so its own
+  # rescue is the only thing between a missing git and a raw backtrace.
+  def with_nothing_on_path
+    Dir.mktmpdir('empty-path') do |dir|
+      saved = ENV.fetch('PATH')
+      ENV['PATH'] = dir
+      begin
+        yield
+      ensure
+        ENV['PATH'] = saved
+      end
+    end
+  end
+
   def resolve_on_path(command)
     found = ENV.fetch('PATH').split(File::PATH_SEPARATOR)
                .map { |dir| File.join(dir, command) }
@@ -1272,34 +1352,50 @@ class OracleTestCase < CliTestCase
   # wrong one. The file is written outside the repository: the sweep
   # reads nothing from the working tree, but a fixture that quietly
   # gained an untracked file would be one no clone produces.
-  def with_forge(repo, failing: false, garbled: false, mis_shaped: false,
-                 records: Fixtures::PullRequests::RECORDS)
-    Dir.mktmpdir('stale-branches-forge') do |dir|
-      path = File.join(dir, 'pull-requests.json')
-      ENV['STUB_GH_PRS'] = Fixtures::PullRequests.write(repo, path, records: records)
-      set_stub_switch('STUB_GH_FAIL', failing)
-      set_stub_switch('STUB_GH_GARBAGE', garbled)
-      set_stub_switch('STUB_GH_SHAPE', mis_shaped)
+  def with_forge(repo, records: Fixtures::PullRequests::RECORDS, **switches)
+    with_stub_switches(switches) do |dir|
+      ENV['STUB_GH_PRS'] =
+        Fixtures::PullRequests.write(repo, File.join(dir, 'pull-requests.json'),
+                                     records: records)
       yield
+    end
+  end
+
+  # The same records as a clone of a fork sees them.
+  def with_forked_forge(repo, **switches)
+    with_stub_switches(switches) do |dir|
+      ENV['STUB_GH_PRS'] =
+        Fixtures::PullRequests.write_fork(repo, File.join(dir, 'pull-requests.json'))
+      yield
+    end
+  end
+
+  # Every switch the stub reads is cleared going in and going out,
+  # derived from the stub's own list rather than named here. Naming them
+  # one at a time is how STUB_GH_SHAPE came to leak: a switch left set
+  # does not fail, it answers differently, so the tests after it are
+  # graded against a forge that is quietly broken and the suite is green
+  # or red by test order.
+  SWITCHES = { failing: 'STUB_GH_FAIL', failing_after: 'STUB_GH_FAIL_AFTER',
+               garbled: 'STUB_GH_GARBAGE', mis_shaped: 'STUB_GH_SHAPE',
+               mismatched: 'STUB_GH_MISMATCH' }.freeze
+
+  def with_stub_switches(switches)
+    unknown = switches.keys - SWITCHES.keys
+    raise ArgumentError, "unknown stub switch(es): #{unknown.join(', ')}" if unknown.any?
+
+    Dir.mktmpdir('stale-branches-forge') do |dir|
+      clear_stub_switches
+      switches.each { |name, on| ENV[SWITCHES.fetch(name)] = on == true ? '1' : on.to_s if on }
+      yield dir
     ensure
+      clear_stub_switches
       ENV.delete('STUB_GH_PRS')
     end
   end
 
-  def set_stub_switch(key, on)
-    on ? ENV[key] = (on == true ? '1' : on.to_s) : ENV.delete(key)
-  end
-
-  # The same records, served as a clone of a fork would see them: the
-  # repository gh resolves from the working directory has none, and the
-  # upstream project has them all.
-  def with_forked_forge(repo)
-    Dir.mktmpdir('stale-branches-fork') do |dir|
-      path = File.join(dir, 'pull-requests.json')
-      ENV['STUB_GH_PRS'] = Fixtures::PullRequests.write_fork(repo, path)
-      ENV.delete('STUB_GH_FAIL')
-      yield
-    end
+  def clear_stub_switches
+    StubGh::ENV_KEYS.each { |key| ENV.delete(key) unless key == 'STUB_GH_PRS' }
   end
 
   # A second remote, added to a repository already built. It is given
@@ -1664,9 +1760,36 @@ class MeasuredRefTest < OracleTestCase
     end
   end
 
-  # Neither contains the other, and this clone does not even have the
-  # commit the remote is on -- which is the ordinary shape of a
-  # force-push nobody has fetched since.
+  # Neither ref contains the other: somebody force-pushed the default
+  # branch onto a sibling commit, and this clone still has the old tip
+  # in its tracking ref along with the object the remote now advertises.
+  # This is the hazardous case -- the tracking ref holds commits the
+  # remote no longer has, so a DELETE below can clear work that is on no
+  # remote -- and reporting it as "behind, run git fetch" hands the
+  # reader the reassuring message in exactly the state that deserves
+  # alarm.
+  def test_a_tracking_ref_that_neither_contains_nor_is_contained_is_reported_as_diverged
+    with_flat_fixture('diverged-tracking') do |repo|
+      # Built here so this clone holds the object, pushed under another
+      # name so the transfer does not move refs/remotes/origin/main --
+      # `git push` updates the tracking ref for what it pushed, which
+      # would leave the two in sync and nothing to report -- then
+      # written into origin's own main directly, the way the ahead arm
+      # above does it.
+      repo.git('checkout', '-q', '-b', 'sibling', 'refs/remotes/origin/main~1')
+      repo.git('commit', '-q', '--allow-empty', '-m', 'a commit origin took instead')
+      repo.git('push', '-q', 'origin', 'sibling:refs/heads/sibling')
+      repo.git('update-ref', 'refs/heads/main', sha(repo, 'refs/heads/sibling'),
+               dir: repo.origin)
+      repo.git('checkout', '-q', 'main')
+      repo.git('branch', '-qD', 'sibling')
+      warning = warnings(repo)
+
+      assert_match(/diverged/, warning)
+      refute_match(/is behind/, warning, 'the hazardous direction was reported as the mild one')
+    end
+  end
+
   # Somebody pushed and this clone has not fetched since, which is the
   # ordinary state and the mild one. The object is not here to compare
   # against, so a check that asks about ancestry first calls every such
@@ -2688,6 +2811,19 @@ class PullRequestVerdictTest < Minitest::Test
                  StaleBranches.pull_request_verdict(elsewhere, tip: TIP, default: 'develop')
   end
 
+  # Compared whole, not by suffix. A repository whose default is main
+  # and that also has deploy-main or release/main would otherwise read a
+  # pull request merged into the other branch as evidence the work
+  # reached the default one -- an unrecoverable deletion, and no fixture
+  # base is a superstring of a default, so only this says so.
+  def test_a_base_that_merely_ends_with_the_default_branch_is_not_the_default_branch
+    %w[deploy-main release/main pre-main].each do |base|
+      assert_equal ['KEEP', 'proof-b:pr-other-base'],
+                   verdict(record(state: 'MERGED', base: base)),
+                   "#{base} was read as the default branch"
+    end
+  end
+
   # Proof (b) never sees an open pull request, because the protection
   # below decides those branches before the content check runs, let
   # alone this. So the clauses above answer only for branches whose
@@ -2752,7 +2888,7 @@ class ForgeTest < OracleTestCase
       with_forge(repo) do
         records = forge_in(repo).pull_requests('k-merged-and-open')
 
-        assert_equal %w[MERGED OPEN], records.map { |record| record['state'] }.sort
+        assert_equal %w[MERGED MERGED OPEN], records.map { |record| record['state'] }.sort
         assert(records.all? { |record| record['headRefName'] == 'k-merged-and-open' })
       end
     end
@@ -2865,11 +3001,12 @@ class ForgeTest < OracleTestCase
   # downstream would notice if a reply arrived about another branch.
   def test_a_record_about_another_branch_is_discarded
     with_flat_fixture('forge-subject') do |repo|
-      with_forge(repo) do
+      with_forge(repo, mismatched: true) do
         records = forge_in(repo).pull_requests('g-open')
 
-        refute_empty records
-        assert(records.all? { |record| record['headRefName'] == 'g-open' })
+        refute_empty records, 'the real record went missing along with the foreign one'
+        assert(records.all? { |record| record['headRefName'] == 'g-open' },
+               'a record about another branch was kept')
       end
     end
   end
@@ -2930,6 +3067,16 @@ end
 # back as a spawn that raised. A tool that handled one and not the other
 # would look fully degraded right up to the machine that has no gh.
 class DegradationTest < OracleTestCase
+  def test_git_missing_entirely_is_a_message_rather_than_a_backtrace
+    Dir.mktmpdir('no-git') do |dir|
+      error = assert_raises(StaleBranches::Error) do
+        with_nothing_on_path { forge_for(dir) && git_for(nil, dir: dir).version }
+      end
+
+      assert_match(/could not run git/, error.message)
+    end
+  end
+
   def test_a_forge_that_cannot_be_reached_is_reported_once
     with_flat_fixture('degraded-warning') do |repo|
       warnings = measure(repo).warnings.grep(/pull request/)
@@ -2988,6 +3135,34 @@ class DegradationTest < OracleTestCase
     end
   end
 
+  # A forge that answered for some branches and then stopped is not the
+  # same run as one that never answered, and the report used to describe
+  # both the same way -- saying "every verdict below was reached without
+  # them" over rows it had in fact checked.
+  def test_a_forge_that_stopped_answering_partway_says_so
+    with_flat_fixture('degraded-partial') do |repo|
+      with_forge(repo, failing_after: 2) do
+        warning = measure(repo).warnings.grep(/pull request/).first.to_s
+
+        assert_operator served_invocations.length, :>, 1, 'it never got a real answer at all'
+        assert_match(/stopped answering partway/, warning)
+        refute_match(/every verdict below/, warning,
+                     'a run with real answers above the failure claimed it had none')
+      end
+    end
+  end
+
+  def test_a_forge_that_never_answered_says_that_instead
+    with_flat_fixture('degraded-total') do |repo|
+      with_forge(repo, failing: true) do
+        warning = measure(repo).warnings.grep(/pull request/).first.to_s
+
+        assert_match(/every verdict below/, warning)
+        refute_match(/partway/, warning)
+      end
+    end
+  end
+
   # One failure ends the asking. The alternative is one failed
   # invocation per candidate, which on a repository with many branches
   # is a slow sweep whose slowness has no purpose.
@@ -3023,6 +3198,10 @@ class OfflineTest < OracleTestCase
 
         assert_empty served_invocations, 'it asked despite being told not to'
         assert_matches_oracle(Fixtures::Oracle.load(FLAT_DEGRADED_ORACLE), result)
+        # The reader of a redirected report is not necessarily the
+        # person who typed the flag, and --offline --delete is the one
+        # sanctioned destructive combination.
+        assert_match(/pull requests were not consulted/, result.stdout)
       end
     end
   end

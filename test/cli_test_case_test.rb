@@ -527,5 +527,4 @@ class CliTestCaseTest < Minitest::Test
     assert_nil system('cli-test-case-served', out: File::NULL, err: File::NULL),
                'served command must not resolve once the test is over'
   end
-
 end

@@ -64,6 +64,11 @@ module Fixtures
       Record.new(109, 'MERGED', 'j-two-merged', 'j-two-merged', 'main', false),
       Record.new(110, 'MERGED', 'j-two-merged', UNKNOWN_SHA, 'main', false),
       Record.new(111, 'MERGED', 'k-merged-and-open', 'k-merged-and-open', 'main', false),
+      # A third record on the same branch, ahead of the open one, so a
+      # limit that truncates drops the OPEN record rather than a merged
+      # one -- which is the direction that costs a keep the sweep
+      # promises. Nothing else here has more than two.
+      Record.new(116, 'MERGED', 'k-merged-and-open', 'k-merged-and-open', 'main', false),
       Record.new(112, 'OPEN', 'k-merged-and-open', 'k-merged-and-open', 'main', false),
       Record.new(113, 'OPEN', 'q-open-but-landed', 'q-open-but-landed', 'main', false),
       Record.new(114, 'MERGED', 't-merged-to-release', 't-merged-to-release', 'release/2.0', false),

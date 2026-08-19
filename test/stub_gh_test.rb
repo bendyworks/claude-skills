@@ -19,6 +19,7 @@
 # are observable from a method call.
 
 require_relative 'coverage_helper'
+require_relative 'fixtures/stub_gh'
 
 require 'json'
 require 'minitest/autorun'
@@ -70,10 +71,17 @@ class StubGhTest < Minitest::Test
     end
   end
 
+  # Every switch the stub reads is named here, cleared unless a test
+  # asks for it. Merging only what a test sets would leave the run at
+  # the mercy of the developer's shell: an ambient STUB_GH_SHAPE=1 turns
+  # most of this file red, and an ambient STUB_GH_FAIL would turn it red
+  # in a way that reads like a broken stub.
   def stub_env(overrides = {})
-    { 'STUB_GH_PRS' => @data_path,
-      'CLI_STUB_LOG' => @log,
-      'CLI_STUB_REFUSALS' => @refusals }.merge(overrides)
+    cleared = StubGh::ENV_KEYS.to_h { |key| [key, nil] }
+    cleared.merge('STUB_GH_PRS' => @data_path,
+                  'CLI_STUB_LOG' => @log,
+                  'CLI_STUB_REFUSALS' => @refusals)
+           .merge(overrides)
   end
 
   def run_stub(*argv, env: {})
@@ -165,6 +173,32 @@ class StubGhTest < Minitest::Test
     refute_empty result.stdout
     assert_raises(JSON::ParserError) { result.json }
     assert_empty result.refusals, 'a garble the sweep must degrade on is served, not refused'
+  end
+
+  # The switch that serves valid JSON of the wrong shape, which is the
+  # one the parse rescue cannot catch.
+  def test_a_configured_mis_shape_is_a_clean_exit_carrying_json_that_is_not_a_list
+    result = list('--head', 'a-landed', env: { 'STUB_GH_SHAPE' => '1' })
+
+    assert result.ok?, 'a mis-shaped answer must still exit 0, or it is just the failure case'
+    refute_kind_of Array, result.json
+    assert_empty result.refusals
+  end
+
+  def test_a_configured_mis_shape_can_also_be_a_list_of_the_wrong_things
+    result = list('--head', 'a-landed', env: { 'STUB_GH_SHAPE' => '2' })
+
+    assert result.ok?
+    assert_equal ['not a pull request'], result.json
+  end
+
+  # gh honours --head, so this stub does too, and this switch is the
+  # only way a caller's own filter gets a record to discard.
+  def test_a_configured_mismatch_serves_a_record_about_another_branch
+    result = list('--head', 'a-landed', env: { 'STUB_GH_MISMATCH' => '1' })
+
+    assert result.ok?, "stub failed: #{result.stderr}"
+    assert_includes result.json.map { |r| r['headRefName'] }, 'a-branch-nobody-asked-about'
   end
 
   def test_every_invocation_is_logged_including_a_refused_one

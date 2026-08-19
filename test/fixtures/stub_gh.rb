@@ -47,6 +47,15 @@
 require 'json'
 
 module StubGh
+  # Every variable this stub reads, named once. A suite that scrubs and
+  # resets these one at a time misses the next one added -- and a switch
+  # left set does not fail, it answers differently, so the tests after
+  # it are graded against a forge that is quietly broken. The test base
+  # derives its scrub list from this, and a guard test checks this list
+  # against the source below.
+  ENV_KEYS = %w[STUB_GH_PRS STUB_GH_FAIL STUB_GH_FAIL_AFTER STUB_GH_GARBAGE
+                STUB_GH_SHAPE STUB_GH_MISMATCH].freeze
+
   # gh's own defaults, reproduced because a sweep that omits either
   # flag must see what it would really see.
   DEFAULT_STATE = 'open'
@@ -66,6 +75,7 @@ module StubGh
   def main(argv)
     log_invocation(argv)
     refuse_redirecting_environment
+    fail_after_as_configured
     fail_as_configured
     garble_as_configured
     mis_shape_as_configured
@@ -104,6 +114,19 @@ module StubGh
   # STUB_GH_FAIL=1 fails with a message; =2 fails saying nothing at all,
   # which a caller quoting gh's stderr has to have something to say
   # about.
+  # Answers normally for the first N calls and fails from then on: the
+  # rate limit reached mid-sweep, the network dropping between branches.
+  # Counted from the log this already writes, which is one line per
+  # invocation including this one.
+  def fail_after_as_configured
+    limit = Integer(ENV.fetch('STUB_GH_FAIL_AFTER', ''), exception: false)
+    return if limit.nil?
+    return if File.readlines(ENV.fetch('CLI_STUB_LOG')).length <= limit
+
+    warn 'API rate limit exceeded'
+    exit 1
+  end
+
   def fail_as_configured
     mode = ENV.fetch('STUB_GH_FAIL', nil)
     return unless %w[1 2].include?(mode)
@@ -182,10 +205,28 @@ module StubGh
     options
   end
 
+  # A record about a branch nobody asked about, served alongside the
+  # real ones. gh honours --head, so this stub does too -- which means
+  # a caller's own filter has nothing to discard and a test of it would
+  # assert a property the stub guarantees. This switch is how that
+  # filter gets a subject.
+  # A record about a branch nobody asked about. gh honours --head, so
+  # this stub does too -- which leaves a caller's own filter nothing to
+  # discard, and a test of that filter asserting a property the stub
+  # guarantees. This switch is how the filter gets a subject.
+  MISMATCHED = {
+    'number' => 999, 'state' => 'MERGED', 'headRefName' => 'a-branch-nobody-asked-about',
+    'headRefOid' => '9' * 40, 'baseRefName' => 'main', 'isCrossRepository' => false
+  }.freeze
+
+  def mismatched_records
+    ENV['STUB_GH_MISMATCH'] == '1' ? [MISMATCHED] : []
+  end
+
   def list_pull_requests(options)
     fields = requested_fields(options)
     records = records_for(options[:repo])
-    matched = records.select { |record| matches?(record, options) }
+    matched = records.select { |record| matches?(record, options) } + mismatched_records
     puts JSON.generate(matched.first(limit_of(options)).map { |record| project(record, fields) })
   end
 

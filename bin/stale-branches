@@ -77,8 +77,8 @@ module StaleBranches
   # Repeated into the report on stdout because the warnings go to
   # stderr, and a redirected report would otherwise read as though every
   # verdict in it had been checked against a pull request.
-  UNCONSULTED_NOTICE = 'NOTE: pull requests were not consulted for this report; ' \
-                       'see the warnings on stderr.'
+  UNCONSULTED_NOTICE = 'NOTE: pull requests were not consulted for every row in this ' \
+                       'report; see the warnings on stderr.'
 
   # Which remote-tracking ref the sweep falls back to when the remote
   # cannot be reached, in order. Picking one is a guess about which
@@ -262,6 +262,10 @@ module StaleBranches
     return options if options.help?
 
     raise Error, "unexpected extra arguments: #{rest.map(&:inspect).join(', ')}" unless rest.empty?
+    # Naming the project to ask and saying not to ask are opposite
+    # instructions. Silently honouring one is how a caller ends up
+    # believing the sweep consulted an upstream it never opened.
+    raise Error, '--repo and --offline contradict each other' if options.repo && options.offline?
 
     options
   end
@@ -773,11 +777,22 @@ module StaleBranches
     # designing for, but silently reading the first 30 of them is, so
     # the limit is stated rather than inherited. Truncation stays
     # silent, and gh returns newest first while the clearing record may
-    # be an older one -- so what a truncated reply costs is a deletion,
-    # never a wrongful one.
+    # be an older one. A truncated reply usually costs a deletion the
+    # sweep could have made -- but it can also drop an OPEN record, and
+    # that costs a keep the sweep promises, which is why the limit is
+    # far above any real branch's count rather than merely stated.
     LIMIT = 100
 
     attr_reader :failure
+
+    # Whether any branch got a real answer before the forge stopped
+    # answering. A sweep that failed on its first question and one that
+    # failed halfway through report the same verdicts for the branches
+    # below the failure and different ones above it, and the caller
+    # cannot tell which rows are which without being told.
+    def answered_any?
+      @answered
+    end
 
     # Whether the caller named the project rather than leaving it to gh.
     # Proof (b) reads this: see pull_request_verdict on what it changes.
@@ -791,6 +806,7 @@ module StaleBranches
       @records = {}
       @offline = offline
       @available = !offline
+      @answered = false
     end
 
     # Asked for rather than suffered. The verdicts are the same either
@@ -831,7 +847,7 @@ module StaleBranches
       stdout, stderr, status = Open3.capture3(FORGE_ENV, 'gh', *query_for(branch), chdir: @dir)
       return unavailable(first_line(stderr)) unless status.success?
 
-      records_from(JSON.parse(stdout), branch)
+      answered(records_from(JSON.parse(stdout), branch))
     rescue Errno::ENOENT, Errno::EACCES => e
       unavailable(e.message)
     rescue JSON::ParserError => e
@@ -875,6 +891,11 @@ module StaleBranches
     # not a GitHub remote, no network -- is a fact about the repository
     # and not about the branch that happened to be asked first, so
     # asking again would buy one failure per candidate and no answers.
+    def answered(records)
+      @answered = true unless records.nil?
+      records
+    end
+
     def unavailable(detail)
       @available = false
       @failure = detail
@@ -972,11 +993,21 @@ module StaleBranches
     end
 
     def unreachable_warning
-      "could not ask gh about pull requests (#{@forge.failure}); every verdict " \
-                   'below was reached without them, so a branch whose work has landed while ' \
-                   'its own pull request is still open is marked DELETE here, and a branch ' \
-                   'whose merge conflicts is kept for want of an answer rather than because ' \
-                   'its work is unlanded'
+      "could not ask gh about pull requests (#{@forge.failure}); #{scope_of_the_gap} a " \
+        'branch whose work has landed while its own pull request is still open is marked ' \
+        'DELETE here, and a branch whose merge conflicts is kept for want of an answer ' \
+        'rather than because its work is unlanded'
+    end
+
+    # A run that failed partway through has real answers above the
+    # failure and none below it, and saying "every verdict" of that run
+    # states something about rows this did check. Which rows are which
+    # is not worth reconstructing for the report; that it happened is.
+    def scope_of_the_gap
+      return 'every verdict below was reached without them, so' unless @forge.answered_any?
+
+      'it stopped answering partway through, so the verdicts below it were reached ' \
+        'without pull requests and the ones before it were not --'
     end
 
     # Somebody still has a pull request open on this branch, so the
