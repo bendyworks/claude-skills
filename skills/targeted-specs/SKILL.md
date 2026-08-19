@@ -67,10 +67,10 @@ without `upstream`, however many other remotes (`heroku`, a mirror) sit
 alongside it. Two signals beat that name heuristic: a recorded
 `gh repo set-default` answer (`git config --get-regexp 'gh-resolved'`,
 readable offline) names the true PR target, and the user's word beats
-everything. Only when several remotes exist and none is named `origin`
-is the shape ambiguous: ask the user when one is present; unattended,
-run nothing and end with the ESCALATED verdict, trigger
-`project remote ambiguous`.
+everything. Two shapes remain -- several remotes with none named
+`origin`, and no remotes at all -- and neither is resolvable by rule:
+ask the user when a user is present; unattended, run nothing and end
+with the ESCALATED verdict, trigger `project remote ambiguous`.
 
 Then refresh remote state -- never reason about the trunk from a stale
 ref:
@@ -83,20 +83,24 @@ git fetch <remote> <trunk-branch>                    # scoped fetch; bare branch
 ```
 
 If `<remote>/HEAD` cannot be resolved, ask the remote directly:
-`git ls-remote --symref <remote> HEAD` names the default branch on any
-host (the same recipe the stale-branches CLI uses). Failing that, try
-`gh repo view --json defaultBranchRef` -- noting it answers for gh's
-resolved default repo, which in a fork clone is the fork itself unless
-`gh repo set-default` says otherwise -- or ask the user. Unattended, try
-both commands before giving up; when neither answers, end with the
-ESCALATED verdict, trigger `trunk unresolved`. Never hardcode either
-half of `origin/main`: the remote is resolved above, and the branch is
-read from the answer, never assumed.
+`git ls-remote --symref <remote> HEAD` names the default branch on most
+hosts (the same recipe the stale-branches CLI uses); a server that
+answers without the symref line counts as failing. Failing that, try
+`gh repo view --json defaultBranchRef,nameWithOwner` -- absent a
+`gh repo set-default` answer, gh prefers `upstream` over `origin`, so
+its answer normally matches the remote picked above; confirm
+`nameWithOwner` corresponds to `<remote>` before trusting it -- or ask
+the user. Unattended, try both commands before giving up; when neither
+answers, end with the ESCALATED verdict, trigger `trunk unresolved`.
+Never hardcode either half of `origin/main`: the remote is resolved
+above, and the branch is read from the answer, never assumed.
 
 `git remote set-head <remote> --auto` and `ls-remote` need the network;
-right after a default-branch rename `set-head` can print a benign `Not
-a valid ref` error (the symref is still updated, and the scoped fetch
-heals the dangling ref). Offline, proceed with the existing
+right after a default-branch rename `set-head` can print a `Not a valid
+ref` error and leave the symref stale -- the new branch name is right
+there in the error message, so take the trunk from the error (or from
+the `ls-remote` fallback) rather than trusting the symref it failed to
+update. Offline, proceed with the existing
 `<remote>/HEAD` when it exists -- the three-dot diff uses the merge
 base, so a briefly stale trunk rarely inflates scope, and the usual
 error direction is over-selection and escalation rather than
@@ -108,6 +112,11 @@ a newer git creates -- do not substitute another remote's HEAD (in a
 fork clone that is the fork's stale `origin/HEAD`, the exact
 wrong-trunk measurement this rule exists to prevent): end with the
 ESCALATED verdict, trigger `trunk unresolved`.
+
+One exception spans both `trunk unresolved` exits above: a stacked
+branch (item 1 below) diffs against its local base branch and never
+consults the trunk, so when the base is known, proceed against it
+instead of escalating.
 
 > **Why the branch sweep resolves this differently.** The
 > `stale-branches` CLI bundled in this plugin asks the remote with
