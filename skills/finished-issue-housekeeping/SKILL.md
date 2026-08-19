@@ -75,7 +75,7 @@ On a GitHub-tracked repo, once the plan file's checkboxes are finalized, reconci
 
 If no plan file (skill invoked ad-hoc), skip this step.
 
-## Step 3 -- Local branch deletion
+## Step 3 -- The story's own branch
 
 Two things have to be true before anything is swept, and neither is the
 tool's to do.
@@ -94,20 +94,34 @@ unlanded, but because your feet are on it. The report says
 to read past when it is the one branch you were expecting to go.
 
 ```bash
-git fetch --prune && git checkout <default> && git pull --ff-only
+git ls-remote --symref <remote> HEAD    # names the default branch
+git fetch --prune <remote> && git checkout <default> && git pull --ff-only
 ```
 
-Chained, so a failure stops rather than leaving you on the wrong branch;
+Ask the remote for the name rather than assuming `main`: plenty of
+projects ship from `develop` or `master`, and `refs/remotes/<remote>/HEAD`
+is a clone-time cache that can still name the branch the team stopped
+shipping from. If neither yields a name, stop and ask. Pass the same
+`<remote>` you will pass the sweep, or the fetch refreshes one remote
+while the verdicts are measured against another. The second line is
+chained so a failure stops rather than leaving you on the wrong branch;
 `git checkout` fails on a dirty working tree, so commit or stash first.
 
 Then run the sweep (Step 3b), which handles this story's branch as an
-ordinary candidate along with every other. **If it keeps the branch you
-just shipped, stop and read why.** A story branch that merged should
-clear on its content or on its pull request, so a keeper here means one
-of three things, in descending order of likelihood: the merge has not
-actually landed on the default branch yet, the branch carries commits
-made after the pull request's last push, or the work landed somewhere
-that is not the default branch. None of those is a branch to force.
+ordinary candidate along with every other -- and each of them separately,
+which matters when a story has a parent branch and a follow-up: the
+follow-up is exactly the case where the work may not have landed.
+
+**If the sweep keeps the branch you just shipped, stop and read why.** A
+story branch that merged should clear on its content or on its pull
+request, so a keeper here is worth the minute. Read that branch's own
+reason against "Reading a keeper" below rather than guessing from a
+list: the likeliest readings are that the merge has not actually landed
+on the default branch yet, that the work landed somewhere that is not
+the default branch, or that the branch's tip is not the tip the pull
+request merged -- but a keeper the sweep could not settle is an
+unanswered question, and reporting one of those as an unlanded merge
+sends the user chasing a merge that landed.
 
 Do **not** delete the remote branch. The forge's auto-delete usually
 handles it, and trackers, deploy logs and pull-request cross-references
