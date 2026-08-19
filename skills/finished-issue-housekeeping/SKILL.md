@@ -94,26 +94,33 @@ unlanded, but because your feet are on it. The report says
 to read past when it is the one branch you were expecting to go.
 
 ```bash
-git ls-remote --symref <remote> HEAD   # answers "ref: refs/heads/<default>"
+git ls-remote --symref <remote> HEAD   # "ref: refs/heads/<default>\tHEAD", then a SHA line
 git fetch --prune <remote> && git checkout <default> && git pull --ff-only <remote> <default>
 ```
 
 Ask the remote for the name rather than assuming `main`: plenty of
-projects ship from `develop` or `master`. Strip the `refs/heads/` prefix
-off what the first line answers. If the remote cannot be reached,
-`git symbolic-ref --short refs/remotes/<remote>/HEAD` holds a local copy
-of the same answer, worth distrusting because a clone records it once and
-a later rename leaves it naming the branch the team stopped shipping
-from. If neither yields a name, stop and ask.
+projects ship from `develop` or `master`. The name is what sits between
+`refs/heads/` and the tab on the first line. If the remote cannot be
+reached, `git symbolic-ref refs/remotes/<remote>/HEAD` holds a local copy
+of the same answer -- strip `refs/remotes/<remote>/` off that one, and do
+not reach for `--short`, which shortens to `<remote>/<default>` and gives
+you a name `checkout` resolves to a detached HEAD. Distrust the local
+copy either way: a clone records it once, and a later rename leaves it
+naming the branch the team stopped shipping from. If neither yields a
+name, stop and ask.
 
 Pass the same `<remote>` throughout, the sweep included, or one remote is
 refreshed while the verdicts are measured against another. The second
 line is chained so a failure stops rather than leaving you somewhere
-unexpected. Two things stop it: `git checkout` refuses when switching
-would overwrite a local change, and it refuses outright when the default
-branch is already checked out in another worktree -- the likelier one
-here, and the answer is to sweep from that worktree rather than to force
-anything.
+unexpected, and any of its three commands can be the one that stops it.
+`git fetch` fails offline or unauthenticated. `git checkout` refuses when
+switching would overwrite a local change, so commit or stash first, and
+refuses outright when the default branch is checked out in another
+worktree. In that case sweep from the worktree that already has it, but
+detach this one first (`git checkout --detach` will do): leave the story
+branch checked out here and it reports `protected:worktree` over there,
+protected for a reason that says nothing about its work, which is the
+same trap as sweeping from the branch itself.
 
 Then run the sweep (Step 3b), which handles this story's branch as an
 ordinary candidate along with every other -- and each of them separately,
@@ -160,31 +167,44 @@ abandoning the pass. The story's own branch still has one check that
 needs nothing but git:
 
 ```bash
-git merge-base --is-ancestor <branch> refs/remotes/<remote>/<default>
+git merge-base --is-ancestor refs/heads/<branch> refs/remotes/<remote>/<default>
 ```
 
-Exit 0 means every commit on it is already on the default branch, which
-is evidence enough to delete it with `git branch -d <branch>` -- a bare
-name, because `-d` rejects a full refname and does nothing, and a tag of
-the same name shadows the branch. A non-zero exit proves nothing in the
-other direction: a squash-merged branch fails this check and has landed
-all the same. Leave those for the user.
+The full refname is not decoration. A bare name is ambiguous when a tag
+shares it, and git resolves the tag: with a tag of that name on the
+default branch, the bare form answers exit 0 for a branch that has landed
+nothing, and the next thing this paragraph tells you to do is delete it.
+
+Exit 0 means every commit on the branch is already on the default branch,
+which is evidence enough to delete it with `git branch -d <branch>` --
+bare here, because `git branch` works in the branch namespace, where no
+tag can shadow anything, and `-d` rejects a full refname and does nothing
+at all. A non-zero exit proves nothing in the other direction: a
+squash-merged branch fails this check and has landed all the same. Leave
+those for the user.
 
 Add `--repo <owner>/<name>` whenever `gh` would resolve to the wrong
 project. That is a fork whose pull requests were opened against the
 project it was forked from, and equally a fork where the team runs its
 own pull requests while `gh` resolves to the parent. Asking the wrong
-project is not an error -- it is an empty answer, which reads as
-`proof-b:no-pr` on every branch and quietly weakens the whole sweep. Add
+project is not an error -- it is an empty answer, and an empty answer is
+indistinguishable from a project with no pull requests. What it costs is
+mostly silent: open-pull-request protection simply stops protecting, so a
+branch whose work reached the default branch by another route can be
+marked DELETE while somebody still has a pull request open on it. It
+shows as `proof-b:no-pr` only on the branches whose content check
+conflicted, which is why the report can look unremarkable. Add
 `--remote <name>` when the project's own remote is not `origin`.
 
 `--delete` is a second sweep rather than a replay of the first: it
 recomputes every verdict, prints its own report, and deletes in the same
 run without pausing. So the approval you carry is against the first
 report, while the second is the record of what actually happened. Read it
-afterwards and compare. A row there that was not in the first means a
-branch changed state between the two commands -- say so, and keep its
-`was <sha>` line, which is what restoring it would need.
+afterwards and compare. Every local branch gets a row in both, so what
+you are looking for is a row marked DELETE there that was not marked
+DELETE in the first -- a pull request that merged between the two
+commands looks exactly like that. Say so, and keep its `was <sha>` line,
+which is what restoring it would need.
 
 **The bar for deleting a branch is evidence that nothing on it is absent
 from the default branch**, and that bar is why the tool exists rather
@@ -271,15 +291,18 @@ rows one at a time instead -- `git branch -d <name>`, falling back to
 `-D` where `-d` refuses, which will be most of them: a squash-merged
 branch is an ancestor of nothing, so `-d` cannot see that it landed, and
 the tool itself drops to `-D` on its own evidence for that same reason.
-Or give the branch the user is still using a name the tool protects,
-`<name>-backup`, and sweep again.
+Or offer to rename the branch the user is still using to something the
+tool protects, `<name>-backup`, and sweep again -- offer it rather than
+do it, since renaming a branch somebody is working on is their call.
 
 Read that protected set as names rather than intent, because that is all
-the tool matches: whatever the remote calls its default branch, a closed
-list of long-lived names (`main`, `master`, `develop`, `staging`,
-`production`, `gh-pages`, and anything under `release/`), the branch you
-are standing on, branches checked out in another worktree, and names
-ending in exactly `-backup`. A project's own second long-lived branch
+the tool matches, in the order it prints them: whatever the remote calls
+its default branch, the branch you are standing on, branches checked out
+in another worktree, a closed list of long-lived names (`main`, `master`,
+`develop`, `staging`, `production`, `gh-pages`, and anything under
+`release/`), and names ending in exactly `-backup`. The order decides
+which reason a row carries, so `main` on a repository that defaults to it
+reports `protected:default` and never `protected:long-lived`. A project's own second long-lived branch
 (`qa`, `integration`, `demo`) and a safety net called `wip.bak` are
 ordinary candidates, so scan the report for this project's own before
 approving anything.
