@@ -73,6 +73,20 @@ symref is still updated, and the scoped fetch heals the dangling ref).
 Offline, proceed with the existing `origin/HEAD` -- the three-dot diff
 uses the merge base, so a stale trunk does not inflate scope.
 
+> **Why the branch sweep resolves this differently.** The
+> `stale-branches` CLI bundled in this plugin asks the remote with
+> `ls-remote --symref` and reads the remote-tracking `HEAD` only when
+> that fails, where this skill repairs and reads that ref directly. The
+> difference is deliberate, and it is not that one of them skips the
+> network -- both spend a call. It is what each does with the answer. This
+> skill writes it into the ref, so the repair outlasts the run and every
+> later command can simply read it, and a failure is survivable: a stale
+> trunk selects a slightly wrong subset of specs, blunted further by the
+> merge base. The sweep reads without writing, and says out loud when it
+> had to settle for the cached copy, because a stale default branch in a
+> run that deletes branches can destroy work -- and a quiet degradation is
+> exactly what would hide that.
+
 All paths in this skill are relative to the **app root** -- the directory
 holding the `Gemfile` and `spec/`, which may be a subdirectory of the
 repository (a monorepo app). Run every count and grep below from that
