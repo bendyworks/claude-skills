@@ -77,155 +77,100 @@ If no plan file (skill invoked ad-hoc), skip this step.
 
 ## Step 3 -- Local branch deletion
 
-First establish two names this step and Step 3b both depend on: the remote, and the default branch. `main` is not always the answer, and neither is `origin`.
+Two things have to be true before anything is swept, and neither is the
+tool's to do.
+
+**Fetch first.** Verdicts are measured against what the remote had as of
+your last fetch, so a stale clone keeps more than it needs to -- and, in
+the one direction that matters, a tracking ref holding commits the
+remote no longer advertises can clear work that is on no remote. The
+sweep says so when it can tell, but it cannot fetch for you.
+
+**Then check out the default branch.** The sweep protects the branch you
+are standing on, so running it from the story branch you just shipped
+keeps that branch for the wrong reason: not because its work is
+unlanded, but because your feet are on it. The report says
+`protected:current` rather than a verdict about the work, which is easy
+to read past when it is the one branch you were expecting to go.
 
 ```bash
-git remote -v                        # confirm which remote is the project's own
-git remote set-head <remote> --auto  # refresh; fetch never updates this
-git symbolic-ref --short refs/remotes/<remote>/HEAD | sed 's|^<remote>/||'
+git fetch --prune && git checkout <default> && git pull --ff-only
 ```
 
-The symref prints `<remote>/<default>`, so strip the prefix before using the result as a branch name.
+Chained, so a failure stops rather than leaving you on the wrong branch;
+`git checkout` fails on a dirty working tree, so commit or stash first.
 
-`git fetch --prune` does **not** refresh `refs/remotes/<remote>/HEAD`. After the project renames its default branch -- or on a clone made before the rename -- the symref keeps naming the old branch, and every check below then measures against the wrong one and clears work that never landed. `set-head --auto` is what corrects it; on GitHub, `gh repo view --json defaultBranchRef -q '.defaultBranchRef.name'` is the authoritative cross-check. If the two disagree, trust the forge. If neither yields a name, stop and ask rather than assuming `main`.
+Then run the sweep (Step 3b), which handles this story's branch as an
+ordinary candidate along with every other. **If it keeps the branch you
+just shipped, stop and read why.** A story branch that merged should
+clear on its content or on its pull request, so a keeper here means one
+of three things, in descending order of likelihood: the merge has not
+actually landed on the default branch yet, the branch carries commits
+made after the pull request's last push, or the work landed somewhere
+that is not the default branch. None of those is a branch to force.
 
-**Write the resolved names into the commands you run.** Every snippet below and in Step 3b shows them as `<remote>` and `<default>` placeholders rather than shell variables, because each command a session runs is typically its own shell -- a variable assigned in one does not exist in the next. A sweep that inherits an empty variable does not fail loudly: `origin/` resolves to nothing, proof (a) can never match, and every branch is reported as kept for reasons that were never actually checked.
+Do **not** delete the remote branch. The forge's auto-delete usually
+handles it, and trackers, deploy logs and pull-request cross-references
+may still resolve through the remote ref. If the user wants it gone,
+they will ask.
 
-Refresh remote-tracking state **before** deleting anything, so the checks below read current state rather than a remote ref deleted on the forge weeks ago. Chain the steps so a failure stops the sequence instead of leaving you on the wrong branch:
+## Step 3b -- Prune stale local branches (repo-wide)
+
+Shipping a story is a natural moment to sweep the whole local branch
+list. Run the `stale-branches` CLI bundled in this plugin, which reports
+every local branch with a verdict and the evidence behind it and touches
+nothing until asked:
 
 ```bash
-git fetch --prune &&
-  git checkout <default> &&
-  git pull --ff-only
+stale-branches                       # report only
+stale-branches --delete              # act on exactly what the report marked
 ```
 
-`git checkout` fails on a dirty working tree; without the chaining, `git pull --ff-only` then runs against the feature branch and the deletion below fails for the wrong reason. Commit or stash first.
+Add `--repo <owner>/<name>` when the clone is a fork and the pull
+requests live in the project it was forked from. Add `--remote <name>`
+when the project's own remote is not `origin`.
 
-Then delete the branch, gating on evidence rather than on a command's refusal:
+**The bar for deleting a branch is evidence that nothing on it is absent
+from the default branch**, and that bar is why the tool exists rather
+than a checklist. Note especially what is *not* evidence: a deleted
+remote ref, which is equally consistent with a merge, an abandoned pull
+request, a branch someone cleaned up by hand, or a rename.
 
-```bash
-git merge-base --is-ancestor refs/heads/<branch> refs/remotes/<remote>/<default> &&
-  git branch -d <branch>
-```
+### Reading a keeper
 
-Use the full `refs/heads/<branch>` form for the check and the bare name for `git branch -d` -- see Step 3b's note on tag shadowing, which applies here too.
+The verdict is the tool's; the follow-up is yours. Each reason means
+something different, and they need different responses:
 
-**`-d` is not a safety net, and must not be used as one.** It refuses only when a branch is unmerged into HEAD *or its own upstream* -- so a branch pushed with `-u` whose work never reached the default branch deletes with exit 0 and nothing but a warning. The ancestor check above is the gate; `-d` is only the deletion.
+- **The work is genuinely not on the default branch.** A positive local
+  fact. Decide whether the branch is unfinished or abandoned -- the
+  sweep cannot tell those apart, and never will.
+- **The check could not say.** The content comparison conflicts, and no
+  pull request settled it. An unanswered question, not a finding: the
+  work may well have landed.
+- **A pull request answered, and said no.** Closed rather than merged,
+  merged from a fork, merged into some other branch, or merged at a tip
+  that is not this one. Each is worth reading on its own terms; the last
+  in particular usually means local commits the pull request never saw.
+- **The branch holds the only copy of something.** Its net diff is
+  empty, so it looks landed, but a commit on it added content that
+  reached nowhere else. Deleting it takes that content's last reference.
 
-If the branch is not an ancestor:
+### When pull requests could not be read
 
-- Most common cause: the PR was squash-merged or rebase-merged, so the branch's commits do not appear by SHA in the default branch's history. Clear it with either proof in Step 3b, then delete with **`-D`** -- `-d` is guaranteed to refuse a squash-merged branch, so insisting on it here would leave the branch undeleted. A merged pull request on its own does not clear it, because the branch can carry commits made after its last push.
-- Less common: there is genuine unmerged work on the local branch that did not make it into the PR. **Stop and investigate before forcing.**
+The report says so, once, and it is the one warning worth stopping for.
+Without them the keeps are weaker -- an unanswered question rather than
+a fact -- and one class of deletion is actively wrong: a branch whose
+work landed by another route while its own pull request is still open
+has nothing left protecting it. The tool refuses `--delete` in that
+state; `--offline` is how you say you mean it, and it is rarely what you
+mean during housekeeping.
 
-Do NOT delete the *remote* branch. GitHub's auto-delete-on-merge usually handles it, and external tooling (trackers, deploy logs, PR cross-references) may still link to the remote ref. If the user wants the remote gone, they will ask.
+### The user calls every keeper
 
-If multiple local branches relate to the issue (parent + follow-up branches), each one gets its own evidence check -- a follow-up branch is exactly the case where the work may not have landed.
-
-## Step 3b -- Prune other stale local branches (repo-wide)
-
-Shipping a story is a natural moment to sweep the whole local branch list, not just this story's branch. Stale local branches from long-finished work pile up and make `git branch` noise. Prune the branches whose work has demonstrably landed; keep everything else.
-
-The bar for deleting a branch is evidence that **nothing on it is absent from the default branch**. A deleted remote ref is not that evidence: it is equally consistent with a merge, an abandoned pull request, a branch cleaned up by hand, or a rename. Two proofs below meet the bar, and either one alone is enough.
-
-Step 3 established `<remote>` and `<default>` and ran `git fetch --prune`. Re-derive both here rather than assuming they carried over, and write the literal names into each command, for the reason Step 3 gives. Never hardcode `main`: a repo defaulting to `master`, `develop`, or `trunk` is common, and a repo where `main` still exists but is *not* the default (gitflow, a half-finished rename) makes `origin/main` measure against the wrong branch and clear work that never landed.
-
-### Protected set -- never a candidate, whatever the passes below say
-
-- The current branch, and the default branch.
-- **Long-lived shared branches, even when one of them is not the default.** `main` and `master` always qualify; so do `develop`, `staging`, `production`, `release/*`, and `gh-pages` where the project uses them. On a gitflow repo the non-default one of `main`/`develop` is an ordinary-looking candidate that both passes below would happily delete.
-- **Any branch with an open pull request.** Proof (a) asks only whether the content landed, so a branch whose work reached the default branch by another route -- a duplicate or superseded pull request -- would otherwise be force-deleted while its pull request is still open and under review. Keep it and mention it; abandoning it is the user's call.
-- **Any branch checked out in another worktree** (`git worktree list --porcelain`). Both `-d` and `-D` refuse these outright, so leaving them in the candidate list only produces a mid-sweep error.
-- Intentional backup branches (names ending in `-backup`, or otherwise clearly a manual safety net). Mention them, but leave them unless the user names them explicitly.
-- Any branch the user has flagged as in-progress this session.
-
-Enumerate candidates with `git for-each-ref`, and carry full refnames through:
-
-```bash
-git for-each-ref --format='%(refname)' refs/heads/
-```
-
-That enumeration yields full `refs/heads/<branch>` refs, which is deliberate: a tag sharing a branch's name makes `%(refname:short)` yield `heads/<branch>`, and makes a bare `git rev-parse <branch>` resolve to the *tag* rather than the branch.
-
-Each command below therefore takes one of two forms, and the difference matters:
-
-- **Full ref** (`refs/heads/<branch>`) for anything that resolves an object -- `git rev-parse`, `git merge-tree`, `git merge-base`.
-- **Bare name** (the ref with `refs/heads/` stripped) for `git branch -d`/`-D` and `gh pr list --head`.
-
-**`git branch -d refs/heads/<branch>` does not work** -- it reports `branch 'refs/heads/<branch>' not found` and exits 1. A sweep that passes full refs to the delete commands therefore deletes nothing at all while appearing to run cleanly, and then reports every branch as kept.
-
-Do **not** enumerate with `git branch -vv | grep ': gone]'`. That matches a branch whose upstream is a deleted *local* branch, and a branch whose *commit subject* merely contains the text -- both typically never-pushed work -- and it stays silent until someone runs `git fetch --prune`.
-
-### Pass 1 -- already an ancestor of the default branch
-
-```bash
-git branch --merged refs/remotes/<remote>/<default> --format='%(refname)'
-```
-
-Delete each with `git branch -d <branch>`, minus the protected set -- strip the `refs/heads/` prefix from each entry, as `git branch -d` rejects a full ref.
-
-`-d` can still refuse one of these, and the refusal does not mean the work is at risk: `-d` measures against HEAD or the branch's own upstream, never against the remote default branch. A local default branch sitting behind the freshly-fetched remote is the usual cause, which is why Step 3 runs `git pull --ff-only` first. If a Pass 1 branch is refused anyway, the enumeration above already proved it an ancestor, so delete it with `git branch -D <branch>` -- the proof, not the tool's opinion, is what authorizes it.
-
-### Pass 2 -- candidates Pass 1 did not list
-
-A squash or rebase merge leaves the branch tip a non-ancestor of the default branch, so `-d` refuses even though the work landed. Use `git branch -D` only where **either** proof below holds; otherwise keep the branch and report why.
-
-**Proof (a) -- the content is already in the default branch.** Local, offline, and immune to squash and rebase merges:
-
-```bash
-tree=$(git merge-tree --write-tree refs/remotes/<remote>/<default> refs/heads/<branch>) || tree=CONFLICT
-[ "$tree" = "$(git rev-parse "refs/remotes/<remote>/<default>^{tree}")" ] && echo "nothing at risk"
-```
-
-If merging the branch into the default branch would produce the default branch's own tree, the branch adds nothing. This mode arrived in git 2.38; below that, skip proof (a) and rely on proof (b).
-
-**Quote the `^{tree}` argument.** Unquoted, zsh with `extendedglob` set (common, and the default in some shell frameworks) treats it as a glob, fails with `no matches found`, and yields an empty substitution -- the comparison is then false for every branch, so proof (a) silently clears nothing and there is no error a session would notice.
-
-`git merge-tree` **exits non-zero on conflict**, so the exit status gates the comparison -- git's own documentation wraps it in `$(...) || { ... }` for exactly this reason. Without the guard the failure is silent rather than dangerous: on conflict the command prints the tree id *plus* the conflicted stages, so the captured value is multi-line and simply never matches. Keep the guard anyway, both to say what happened and because any variant that trims the output to its first line would turn that safe mismatch into a false "nothing at risk".
-
-A conflict is not evidence of anything. It usually means the default branch later edited the same lines. It means only that proof (a) cannot clear this branch, so fall through to proof (b).
-
-**Proof (b) -- the forge merged this exact tip into the default branch.** Query per branch, not once for the repo:
-
-```bash
-gh pr list --head <branch> --state all --limit 100 \
-  --json number,state,headRefOid,baseRefName,isCrossRepository
-```
-
-A branch clears proof (b) when its results carry a pull request where **all** of the following hold:
-
-- `state` is `MERGED`;
-- `baseRefName` is the default branch, so a merge into some *other* feature branch never counts -- a stacked child branch merged into its parent has not reached the default branch;
-- `isCrossRepository` is `false`;
-- `headRefOid` is **string-equal** to `git rev-parse refs/heads/<branch>`;
-
-and where **no** pull request for that branch is `OPEN`.
-
-Query per branch rather than fetching the repo's pull requests in one call. A single bulk call has to be bounded by `--limit`, and `gh` returns the most *recently created* pull requests -- so the ones that fall off the end are the oldest, which is precisely the population a stale-branch sweep is about. A truncated merged pull request reads as "no pull request at all", and the report would then state that as fact. Scoped to one branch the result cannot meaningfully truncate, and the OPEN check reads from the same result set.
-
-Three traps in that query:
-
-- `--head` matches on branch *name* only and cannot be scoped to an owner (the `<owner>:<branch>` form returns `[]` rather than an error), so pull requests from forks share the result set with yours. That is what `isCrossRepository` filters out.
-- **Never resolve `headRefOid` as a git object.** On a squash-merge repo it is routinely absent from an ordinary clone. Compare the two strings and nothing more: `git rev-parse --verify <40-hex>` exits 0 on an object that does not exist, so it cannot screen for presence, and `git merge-base --is-ancestor` exits 128 on an absent commit, which an `if` reads as a plain "no".
-- In a clone of a fork carrying an `upstream` remote, `gh` queries the *parent* repo. A team running its own pull requests inside a fork gets no matches; name the repo explicitly with `--repo` there.
-
-**A failed query is not an answer.** `gh` missing, unauthenticated, offline, rate-limited, or pointed at a non-GitHub remote all exit non-zero, whereas a genuine no-match is `[]` with exit 0. Never let a non-zero exit collapse into the "no pull request" reading: that reading is what the report states as fact. On the first failure, treat proof (b) as unavailable for the whole sweep rather than retrying per branch -- these causes are all repo-wide, not branch-specific -- say so plainly, keep everything proof (a) could not clear, and never substitute a weaker signal.
-
-### Report
-
-Report the sweep as a small table -- branch, outcome, and the reason -- because the keepers need different follow-up from each other:
-
-| branch | outcome | reason |
-|---|---|---|
-| `old-feature` | deleted | content already in the default branch |
-| `squashed-thing` | deleted | pull request #41 merged this tip |
-| `half-done` | kept | commits not in the default branch, no pull request |
-| `awaiting-review` | kept | pull request #52 still open |
-| `abandoned-spike` | kept | pull request #48 closed unmerged |
-| `local-tweaks` | kept | tip differs from the tip the forge recorded |
-
-Word that last reason as what is actually known. A tip that differs from `headRefOid` may be ahead of it, behind it, or diverged, and only the first is unpushed work -- claiming "commits made after the last push" is wrong for a branch that is merely behind.
-
-The user makes the final call on every keeper and on the protected set; do not delete those without an explicit instruction.
+Report the sweep's own table as it stands. The user decides what happens
+to anything kept, and to the protected set -- long-lived branches,
+worktrees, anything named like a backup. Do not delete those without an
+explicit instruction naming them.
 
 ## Step 4 -- Update auto-memory
 
