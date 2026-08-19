@@ -54,24 +54,40 @@ standing rule is the full suite.
 
 ## Step 1 -- Compute the branch's scope (stateless)
 
-Refresh remote state first -- never reason about the trunk from a stale
+**Resolve the project remote before anything else -- the remote this
+branch's pull request will target.** Every command below says `<remote>`
+because the name is a per-clone fact, not a constant: the sole remote in
+a single-remote clone, whatever it is called; `upstream` when both
+`origin` and `upstream` exist (a fork clone -- `origin` is the fork, and
+a fork's trunk is normally behind, so measuring against it sweeps other
+people's already-landed commits into the diff and forces spurious
+escalations); `origin` otherwise. Any other multi-remote shape is
+ambiguous: ask the user when one is present; unattended, run nothing and
+end with the ESCALATED verdict, trigger `project remote ambiguous`.
+
+Then refresh remote state -- never reason about the trunk from a stale
 ref:
 
 ```bash
-git remote set-head origin --auto                  # refresh origin/HEAD; fetch never updates it, so default-branch renames go stale without this
-git symbolic-ref --short refs/remotes/origin/HEAD  # the trunk, e.g. origin/main
-git fetch origin <trunk-branch>                    # scoped fetch; bare branch name (main, not origin/main)
+git remote set-head <remote> --auto                  # refresh <remote>/HEAD; fetch never updates it, so default-branch renames go stale without this
+git symbolic-ref --short refs/remotes/<remote>/HEAD  # the trunk, e.g. upstream/main
+git fetch <remote> <trunk-branch>                    # scoped fetch; bare branch name (main, not <remote>/main)
 ```
 
-If `origin/HEAD` cannot be resolved, fall back to
-`gh repo view --json defaultBranchRef` (requires the GitHub CLI) or ask
-the user. Never hardcode `origin/main`.
+If `<remote>/HEAD` cannot be resolved, fall back to
+`gh repo view --json defaultBranchRef` (requires the GitHub CLI and a
+GitHub-hosted remote) or ask the user; unattended, end with the
+ESCALATED verdict, trigger `trunk unresolved`. Never hardcode either
+half of `origin/main`: the remote is resolved above, and the branch is
+read from the answer, never assumed.
 
-`git remote set-head origin --auto` needs the network; right after a
+`git remote set-head <remote> --auto` needs the network; right after a
 default-branch rename it can print a benign `Not a valid ref` error (the
 symref is still updated, and the scoped fetch heals the dangling ref).
-Offline, proceed with the existing `origin/HEAD` -- the three-dot diff
-uses the merge base, so a stale trunk does not inflate scope.
+Offline, proceed with the existing `<remote>/HEAD` -- the three-dot diff
+uses the merge base, so a briefly stale trunk rarely inflates scope, and
+when it does the error lands on over-selection and escalation, never on
+under-selection.
 
 > **Why the branch sweep resolves this differently.** The
 > `stale-branches` CLI bundled in this plugin asks the remote with
@@ -275,6 +291,8 @@ the proxy toward what actually tracks runtime there.
 Step 6 owns the announcement; earlier steps only record findings for it.
 Print, before running anything:
 
+- The trunk the scope was measured against, remote name included (e.g.
+  `upstream/main`) -- a wrong project-remote pick is vetoable here
 - Each changed file with its selected specs and a one-line rationale
 - Named gaps (changed code with no covering spec found)
 - Deleted-spec findings, if any
