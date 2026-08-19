@@ -132,17 +132,31 @@ they will ask.
 
 Shipping a story is a natural moment to sweep the whole local branch
 list. Run the `stale-branches` CLI bundled in this plugin, which reports
-every local branch with a verdict and the evidence behind it and touches
-nothing until asked:
+every local branch with a verdict and the evidence behind it and changes
+no branch, ref, or working tree until asked:
 
 ```bash
 stale-branches                       # report only
-stale-branches --delete              # act on exactly what the report marked
+stale-branches --delete              # sweeps again, then acts on what it just marked
 ```
+
+Enabling the plugin puts it on PATH; it needs a Ruby, and git 2.38 or
+newer for the content check, below which it stops and says so. The
+pull-request half of the evidence is read through `gh`, so that half
+needs the GitHub CLI installed and authenticated, and exists only on
+GitHub. If the tool cannot run at all -- old git, no Ruby, not installed
+-- skip the repo-wide sweep and say so in the Step 10 summary rather than
+abandoning the pass, and settle the story's own branch on evidence you
+gather by hand.
 
 Add `--repo <owner>/<name>` when the clone is a fork and the pull
 requests live in the project it was forked from. Add `--remote <name>`
 when the project's own remote is not `origin`.
+
+`--delete` is a second sweep rather than a replay of the first: it
+recomputes every verdict and prints its own report before acting. That
+report is the one to read, because a pull request merging between the two
+commands changes what the second run marks.
 
 **The bar for deleting a branch is evidence that nothing on it is absent
 from the default branch**, and that bar is why the tool exists rather
@@ -155,36 +169,72 @@ request, a branch someone cleaned up by hand, or a rename.
 The verdict is the tool's; the follow-up is yours. Each reason means
 something different, and they need different responses:
 
-- **The work is genuinely not on the default branch.** A positive local
-  fact. Decide whether the branch is unfinished or abandoned -- the
-  sweep cannot tell those apart, and never will.
-- **The check could not say.** The content comparison conflicts, and no
-  pull request settled it. An unanswered question, not a finding: the
-  work may well have landed.
-- **A pull request answered, and said no.** Closed rather than merged,
-  merged from a fork, merged into some other branch, or merged at a tip
-  that is not this one. Each is worth reading on its own terms; the last
-  in particular usually means local commits the pull request never saw.
-- **The branch holds the only copy of something.** Its net diff is
-  empty, so it looks landed, but a commit on it added content that
-  reached nowhere else. Deleting it takes that content's last reference.
+- **`kept:not-landed` -- the work is genuinely not on the default
+  branch.** A positive local fact. Decide whether the branch is
+  unfinished or abandoned -- the sweep cannot tell those apart, and
+  never will.
+- **`proof-a:conflict`, `proof-b:no-pr` -- the check could not say.**
+  The content comparison conflicts, and no pull request settled it. An
+  unanswered question, not a finding: the work may well have landed.
+- **`proof-b:pr-closed`, `pr-from-fork`, `pr-other-base`,
+  `pr-tip-differs` -- a pull request answered, and said no.** Closed
+  rather than merged, merged from a fork, merged into some other branch,
+  or merged at a tip that is not this one. Each is worth reading on its
+  own terms; the last says only that the two tips differ, and a tip can
+  be ahead of what merged, behind it, or diverged, of which only the
+  first is unpushed work.
+- **`proof-a:tip-only` -- the branch holds the only copy of something.**
+  Its net diff is empty, so it looks landed, but a commit on it added
+  content that reached nowhere else. Deleting it takes that content's
+  last reference.
+- **`protected:open-pr` -- somebody still has a pull request open on
+  it.** Kept whatever its content says. Worth a word to the user, since
+  abandoning it is their call, and it is the one protection that costs a
+  network call -- so it is the one that quietly disappears when the
+  forge cannot be reached.
+
+A deletion carries a reason too, and each deserves the same glance:
+`pass1:ancestor`, every commit already on the default branch;
+`proof-a:content-landed`, merging it back would produce that branch's own
+tree; and `proof-b:pr-merged`, a merged pull request based on the default
+branch, not from a fork, whose head is this tip.
 
 ### When pull requests could not be read
 
-The report says so, once, and it is the one warning worth stopping for.
-Without them the keeps are weaker -- an unanswered question rather than
-a fact -- and one class of deletion is actively wrong: a branch whose
-work landed by another route while its own pull request is still open
-has nothing left protecting it. The tool refuses `--delete` in that
-state; `--offline` is how you say you mean it, and it is rarely what you
-mean during housekeeping.
+The report says so once, and what it asks of you depends on which of two
+situations you are in.
+
+On GitHub it means `gh` failed this run -- missing, unauthenticated,
+offline, rate-limited, pointed at the wrong project. Fix that and sweep
+again rather than forcing past it. Without pull requests the keeps are
+weaker -- an unanswered question rather than a fact -- and one class of
+deletion is actively wrong: a branch whose work landed by another route
+while its own pull request is still open has nothing left protecting it.
+The tool refuses `--delete` in that state, and `--offline` is how you
+override it, which is rarely what you mean during housekeeping.
+
+On a forge `gh` does not speak -- GitLab, Bitbucket, Gitea -- there is
+nothing to fix. That half of the evidence is unavailable there
+permanently, so the warning is the steady state rather than a fault, and
+`--offline` is the ordinary way to run. What it costs is a weaker sweep,
+not a broken one: every keep is then a local fact or an unanswered
+question, none rests on a pull request, and the deletions are the rows to
+check by hand before approving.
 
 ### The user calls every keeper
 
 Report the sweep's own table as it stands. The user decides what happens
-to anything kept, and to the protected set -- long-lived branches,
-worktrees, anything named like a backup. Do not delete those without an
-explicit instruction naming them.
+to anything kept, and to the protected set. Do not delete those without
+an explicit instruction naming them.
+
+Read that protected set as names rather than intent, because that is all
+the tool matches: a closed list of long-lived names (`main`, `master`,
+`develop`, `staging`, `production`, `gh-pages`, and anything under
+`release/`), the branch you are standing on, branches checked out in
+another worktree, and names ending in exactly `-backup`. A project's own
+long-lived branch (`qa`, `trunk`, `integration`) and a safety net called
+`wip.bak` are ordinary candidates, so scan the report for this project's
+own before approving anything.
 
 ## Step 4 -- Update auto-memory
 
