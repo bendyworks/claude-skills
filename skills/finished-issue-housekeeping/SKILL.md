@@ -163,25 +163,9 @@ GitHub.
 
 If the tool cannot run at all -- old git, no Ruby, not installed -- skip
 the repo-wide sweep and say so in the Step 10 summary rather than
-abandoning the pass. The story's own branch still has one check that
-needs nothing but git:
-
-```bash
-git merge-base --is-ancestor refs/heads/<branch> refs/remotes/<remote>/<default>
-```
-
-The full refname is not decoration. A bare name is ambiguous when a tag
-shares it, and git resolves the tag: with a tag of that name on the
-default branch, the bare form answers exit 0 for a branch that has landed
-nothing, and the next thing this paragraph tells you to do is delete it.
-
-Exit 0 means every commit on the branch is already on the default branch,
-which is evidence enough to delete it with `git branch -d <branch>` --
-bare here, because `git branch` works in the branch namespace, where no
-tag can shadow anything, and `-d` rejects a full refname and does nothing
-at all. A non-zero exit proves nothing in the other direction: a
-squash-merged branch fails this check and has landed all the same. Leave
-those for the user.
+abandoning the pass. Leave the story's own branch alone and tell the user
+it is still there: the evidence this step deletes on is the tool's whole
+subject, and improvising it by hand is how unlanded work gets deleted.
 
 Add `--repo <owner>/<name>` whenever `gh` would resolve to the wrong
 project. That is a fork whose pull requests were opened against the
