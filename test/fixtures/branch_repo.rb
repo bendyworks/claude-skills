@@ -21,7 +21,7 @@ module Fixtures
     PUSHED_THEN_DELETED = %w[
       a-squash-clean b-main-edited c-merged-main-back d-unpushed
       e-stacked-child f-closed i-cross-fork j-two-merged
-      t-merged-to-release
+      t-merged-to-release v-open-from-fork
     ].freeze
 
     # Pushed to the throwaway repo's remote and left in place, matching the
@@ -94,6 +94,27 @@ module Fixtures
     # is then reachable from nothing.
     ADDED_THEN_REMOVED = 'u-added-then-removed'
 
+    # Content already in the default branch, with an OPEN pull request
+    # that came from a fork. --head matches on branch name alone, so a
+    # fork's pull request is returned by a query about this branch, and
+    # nothing in the reply says whose branch it describes.
+    #
+    # Proof (b) refuses to let cross-repository evidence CLEAR a branch,
+    # and open-pull-request protection deliberately does not apply that
+    # filter: protection errs toward keeping, and the cost of being
+    # wrong here is one branch kept that could have gone, against
+    # deleting a branch somebody still has a pull request open on. This
+    # row is what pins that asymmetry -- adding the fork filter to the
+    # protection would flip it to DELETE while q-open-but-landed, whose
+    # open pull request is from this repository, stayed green.
+    OPEN_FROM_FORK = 'v-open-from-fork'
+
+    # Shares its name with a tag pointing at the default branch, and is
+    # decided by proof (b) on whether its tip matches a merged pull
+    # request's head -- so it is the row that grades the last bare-name
+    # lookup the sweep could still have.
+    FORGE_TAG_SHADOWED = 'b-main-edited'
+
     # Where HEAD is left standing, and deletable on the evidence alone.
     CURRENT = 'o-current'
 
@@ -109,10 +130,12 @@ module Fixtures
       build_forge_deciding_branches
       build_two_merged_branch
       build_open_but_landed
+      build_open_from_fork
       build_protected_lookalikes
       build_tag_shadowed_branch
       build_added_then_removed
       publish_and_delete_remote_branches
+      build_forge_tag_collision
       commit_after_the_last_push
       build_gone_lookalikes
       build_worktree_branch
@@ -281,6 +304,18 @@ module Fixtures
       squash_into('main', 'q-open-but-landed', 'squash q via another pull request')
     end
 
+    # The same shape as the branch above, and the difference is entirely
+    # in who the open pull request belongs to. Built as its twin on
+    # purpose: the two rows differ in one field of the forge's reply, so
+    # a protection that reads that field wrongly separates them and one
+    # goes red while the other does not.
+    def build_open_from_fork
+      git('checkout', '-q', 'main')
+      git('checkout', '-qb', OPEN_FROM_FORK)
+      commit('v.txt', 'v', 'v work')
+      squash_into('main', OPEN_FROM_FORK, 'squash v via another pull request')
+    end
+
     # Branches whose only defense is the protected set. Each is a plain
     # ancestor of the default branch and so appears in the first pass's
     # own output, which is what makes the protection load-bearing rather
@@ -296,6 +331,19 @@ module Fixtures
       commit('s.txt', 's', 's work that never landed')
       git('checkout', '-q', 'main')
       git('tag', TAG_SHADOWED)
+    end
+
+    # A second collision, on a branch the forge decides. The first one
+    # grades the cheap passes, which resolve a bare name and so read the
+    # tag; this grades proof (b), whose tip comparison is the last place
+    # a bare name could still be resolved. Pointed at the default
+    # branch, so a sweep reading the tag would compare the wrong object
+    # to the pull request's head and keep a branch it should delete.
+    #
+    # Made after the pushes, because `git push origin <name>` refuses a
+    # name that matches both a branch and a tag.
+    def build_forge_tag_collision
+      git('tag', FORGE_TAG_SHADOWED, 'main')
     end
 
     def build_added_then_removed

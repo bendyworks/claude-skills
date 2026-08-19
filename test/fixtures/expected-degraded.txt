@@ -6,36 +6,10 @@
 # name, the verdict, the reason key the report must carry, and free prose
 # saying why the row exists.
 #
-# The reason keys, and the order the sweep decides them in. The prefix
-# names the stage that reached the verdict, which is what makes a row's
-# assertion say more than "this branch survived":
-#
-#   protected:default      the repository's default branch
-#   protected:current      the branch HEAD is on
-#   protected:worktree     checked out in another worktree
-#   protected:long-lived   a name teams keep: develop, staging,
-#                          production, gh-pages, main, master, release/*
-#                          -- the sweep's whole built-in list, not an
-#                          index of rows below. develop, staging,
-#                          production and gh-pages have arms here, main
-#                          and release/* have them in the gitflow table,
-#                          and master has none in either: it is the one
-#                          member of the list no fixture exercises.
-#   protected:backup       a name ending in -backup
-#   pass1:ancestor         already an ancestor of the default branch
-#   proof-a:content-landed merging it into the default branch would
-#                          produce the default branch's own tree, and so
-#                          would merging each commit it does not share
-#                          with that branch
-#   proof-a:tip-only       merging the branch adds nothing, but a commit
-#                          on it would -- content that reached no other
-#                          branch, and that deleting this one would leave
-#                          reachable from nothing
-#   proof-a:conflict       that merge conflicts, so the check cannot say
-#                          either way, and nothing offline can clear it
-#   kept:not-landed        the merge runs cleanly and produces a
-#                          different tree, so the branch definitely adds
-#                          something the default branch does not have
+# The reason keys are documented once, in expected.txt, which is the
+# full specification this table is the forge-less half of. Ten of the
+# seventeen appear below; the seven this table never reaches are the
+# ones that need a pull request to decide.
 #
 # proof-a:conflict and kept:not-landed both end in a keep, and the
 # difference between them is the point: the first is an unanswered
@@ -58,21 +32,25 @@
 # for a forge reason online rather than an unanswered one.
 #
 # So when counting what the full-forge table changes, count reasons and
-# not just verdicts. Three verdicts move: b-main-edited and j-two-merged
-# to DELETE, and q-open-but-landed the other way, from DELETE to KEEP on
-# an OPEN pull request. Several more rows keep their verdict and change
-# their reason, because open-pull-request protection is specified to sit
-# in the protected set ahead of proof (a) -- g-open and k-merged-and-open
-# among them. A full-forge table written by counting verdict flips alone
-# will be red on those rows.
+# not just verdicts. Four verdicts move: b-main-edited and j-two-merged
+# to DELETE, and q-open-but-landed and v-open-from-fork the other way,
+# from DELETE to KEEP on an OPEN pull request. Several more rows keep
+# their verdict and change their reason, because open-pull-request
+# protection is specified to sit in the protected set ahead of proof (a)
+# -- g-open and k-merged-and-open among them. A full-forge table written
+# by counting verdict flips alone will be red on those rows.
 #
 # No row's reason may read "no pull request". Nothing here consulted a
 # forge, and reporting an absence that was never checked is the specific
 # mistake this fixture exists to catch.
 #
-# q-open-but-landed is DELETE here and must become KEEP once open pull
-# requests are consulted. That flip is the whole reason the branch exists;
-# see the full-forge oracle.
+# q-open-but-landed and v-open-from-fork are DELETE here and must both
+# become KEEP once open pull requests are consulted. That flip is the
+# whole reason either branch exists. They are the same shape and differ
+# in one field of the forge's reply -- whether the open pull request came
+# from a fork -- so a protection that filters on that field separates
+# them and one goes red. Nothing here can tell them apart, which is why
+# they read identically below; see the full-forge oracle.
 #
 # branch                 verdict  reason                  why
 main                     KEEP     protected:default       the default branch, and decided by that rule first; the long-lived list holds main too, so this row's VERDICT survives losing the default-branch rule and only its reason catches that
@@ -87,6 +65,7 @@ p1-ancestor              DELETE   pass1:ancestor          merged with a real mer
 a-squash-clean           DELETE   proof-a:content-landed  squash-merged; the default branch later moved on
 c-merged-main-back       DELETE   proof-a:content-landed  squash-merged, then the default branch merged back in
 q-open-but-landed        DELETE   proof-a:content-landed  landed by another pull request; its own is still open
+v-open-from-fork         DELETE   proof-a:content-landed  landed by another pull request; a fork has one open on a branch of the same name
 b-main-edited            KEEP     proof-a:conflict        squash-merged, then the same lines were edited; a merged pull request clears it online
 j-two-merged             KEEP     proof-a:conflict        two merged pull requests share it and the tip matches the older; clears online on that one
 d-unpushed               KEEP     proof-a:conflict        merged, but carries a commit no remote received, so the pull request's head SHA is not the tip

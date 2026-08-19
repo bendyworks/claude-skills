@@ -65,12 +65,20 @@ overriding, and troubleshooting.
   the default branch, and deletes them with `--delete`. It needs git
   2.38 or newer for `merge-tree --write-tree`, the check that
   recognizes a squash-merged branch, and refuses to run on older git
-  rather than reporting verdicts it could not reach.
+  rather than reporting verdicts it could not reach. It also reads pull
+  requests through the GitHub CLI (`gh`), which is what keeps a branch
+  somebody still has open from being deleted. Without `gh` installed and
+  authenticated it says so in a warning and refuses `--delete` outright,
+  because the verdicts then cut both ways: a branch whose merge
+  conflicts is kept for want of an answer rather than because its work
+  is unlanded, and a branch whose work has already landed while its own
+  pull request is still open is marked DELETE. `--offline` is how you
+  ask for a sweep on local evidence alone and mean it.
 - `gauntlet` is tuned for Ruby on Rails projects (RSpec, RuboCop, Pundit).
   It runs elsewhere, but its audit prompts are Rails-flavored. It would be easy to re-focus a forked copy if you wish.
-- `gauntlet`, `dependabot-batch`, `finished-issue-housekeeping`, and
-  `plan-issue` lean on the GitHub CLI (`gh`) being installed and
-  authenticated. `targeted-specs` uses it only as a fallback when
+- `gauntlet`, `dependabot-batch`, `finished-issue-housekeeping`,
+  `plan-issue`, and `stale-branches` lean on the GitHub CLI (`gh`) being
+  installed and authenticated. `targeted-specs` uses it only as a fallback when
   resolving a repo's default branch.
 - `markdown-to-pdf` needs a Chromium-based browser or wkhtmltopdf, plus a
   markdown converter (kramdown gem, pandoc, or python-markdown).
