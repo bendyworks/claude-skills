@@ -181,11 +181,15 @@ For each PR in order:
    push there succeeds silently while the real PR never moves. Two
    recorded shapes need repair before proceeding. An EMPTY read: gh
    writes tracking only when it creates the branch, so a pre-existing
-   same-named local branch keeps none -- delete that stale local
-   branch and re-run `gh pr checkout <n>`, or pick the remote whose
-   URL matches the repo of record. A URL in place of a remote name:
-   gh's fallback when no configured remote points at the PR's repo --
-   add a real remote for the repo of record, then re-checkout. Since
+   same-named local branch keeps none -- check out the default branch,
+   delete that stale local branch, and re-run `gh pr checkout <n>`, or
+   pick the remote whose URL matches the repo of record. A URL in
+   place of a remote name: gh's fallback when no configured remote
+   points at the PR's repo -- add a real remote for the repo of
+   record, then check out the default branch, delete the branch the
+   fallback checkout created, and re-run `gh pr checkout <n>`; a plain
+   re-checkout would keep the URL, since gh writes the value only at
+   branch creation. Since
    Dependabot PRs always live on the repo they target, the one recorded
    remote serves both the trunk fetch and the push, and it is the same
    for every PR in the batch.
@@ -235,11 +239,10 @@ For each PR in order:
 After the last PR merges:
 
 1. `git checkout <default-branch> && git pull --ff-only <remote> <default-branch>`
-   (the same `<remote>` Phase 4 resolved). The branch config that held
-   it may be gone by
-   now -- `gh pr merge --delete-branch` removes the local branch and
-   its config with it -- so if it is, re-resolve `<remote>` as the
-   remote whose URL matches the repo of record.
+   (the same `<remote>` Phase 4 resolved). If you did not retain the
+   value from Phase 4 -- the branch config that held it is gone once
+   `gh pr merge --delete-branch` removes the local branch -- re-resolve
+   `<remote>` as the remote whose URL matches the repo of record.
 2. Re-install dependencies with the ecosystem's standard command
 3. Run the verify command (same as Phase 4 step 4) -- must be clean and green
 
