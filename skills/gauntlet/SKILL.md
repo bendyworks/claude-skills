@@ -287,7 +287,7 @@ A **guard** is code or prose whose job is to refuse, skip, or stop: something wh
 
 **The record line.** Before dispatching or asking, append one line to `.claude/gauntlets/<branch-name>-gauntlet.md` in exactly one of these forms, so the decision stays greppable across runs:
 
-- `Phase 4 decision: ran (<trigger>)`, naming the trigger from the table, e.g. `ran (risky by fixes: guard rewrite)`
+- `Phase 4 decision: ran (<triggers>)`, naming every trigger from the table that fired, e.g. `ran (risky by fixes: guard rewrite)` or `ran (large; risky by scope: migration)`
 - `Phase 4 decision: asked, <accepted|declined>` -- written as `asked` before the question, completed when the answer arrives
 - `Phase 4 decision: opted out up front`
 
