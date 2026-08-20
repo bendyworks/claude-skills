@@ -237,7 +237,7 @@ Ask the user:
 3. Are we already on a clean copy of the right branch and good to go,
    or do we need to create/checkout/rebase first? (Before answering
    this from the trunk's state, resolve the project remote and fetch
-   its trunk -- see Step 3.)
+   it -- see Step 3.)
 
 Pull the suggested branch name from Linear's "Copy git branch name"
 action or the Shortcut equivalent; for GitHub Issues, compose the
@@ -325,10 +325,11 @@ project's choice.
   read it: `git symbolic-ref --short refs/remotes/<remote>/HEAD`. That
   prints `<remote>/<branch>`; `<trunk>` is the bare branch name after
   the `<remote>/` prefix (`main`, not `origin/main`). When the symref
-  cannot be resolved (normal for a hand-added remote, offline),
+  cannot be resolved (normal for a hand-added remote),
   `git ls-remote --symref <remote> HEAD` names the default branch in
   its `ref: refs/heads/<branch>` line -- again take the bare
-  `<branch>`.
+  `<branch>`. Both the refresh and ls-remote need the network;
+  offline, proceed with the existing symref when it exists.
 
 Then `git fetch <remote>` -- the whole remote, not just the trunk:
 "is ABC-NNN merged?" and "ahead/behind?" read other branches'
@@ -342,7 +343,9 @@ decisions. After fetching, query `<remote>/<trunk>` (e.g.
 you have not refreshed this session. The targeted-specs skill (bundled
 in this plugin) carries the canonical, fuller statement of this
 resolution rule (offline behavior, rename edge cases); when the two
-ever disagree, defer to it.
+ever disagree on how to identify the remote or the trunk, defer to it.
+The whole-remote fetch above is deliberately this skill's own -- its
+questions read more refs than the trunk.
 
 Then learn what you can from the repo:
 
@@ -905,7 +908,7 @@ Do NOT auto-advance into this phase from `record`. The gap between
 "shipped" and "we're sure nothing else is needed" is real, and no mode
 closes it -- wait for the user to ask. On a project outside
 Deploy-on-Merge Mode there is a second gap to wait out first, between
-"PR merged to main" and "shipped to production".
+"PR merged to the default branch" and "shipped to production".
 
 ### Step 1 -- Confirm preconditions
 
@@ -920,7 +923,7 @@ default for a project that declares nothing.
 Then walk through these checks (the housekeeping skill will re-verify,
 but catching a "no" here lets you exit early before invoking it):
 
-1. **PR is merged to main.** Verify with `gh pr view <PR#> --json state,mergedAt,mergeCommit` (or whichever forge the project uses).
+1. **PR is merged to the default branch.** Verify with `gh pr view <PR#> --json state,mergedAt,mergeCommit` (or whichever forge the project uses).
 2. **The merged code is live in production.** Before taking any shortcut, confirm the premise: nothing after the merge can still fail or be skipped. A project whose merge *triggers* a deploy that can go red does not qualify however its rules read.
 
    With that premise confirmed, in Deploy-on-Merge Mode check 1 satisfies this one, because the merge *is* the deploy. Otherwise it is a project-specific check:
