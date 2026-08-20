@@ -339,7 +339,10 @@ trusting them without fetching has produced confidently-wrong branching
 decisions. After fetching, query `<remote>/<trunk>` (e.g.
 `git show <remote>/<trunk>:path`,
 `git rev-list --count HEAD..<remote>/<trunk>`), never a bare local ref
-you have not refreshed this session.
+you have not refreshed this session. The targeted-specs skill (bundled
+in this plugin) carries the canonical, fuller statement of this
+resolution rule (offline behavior, rename edge cases); when the two
+ever disagree, defer to it.
 
 Then learn what you can from the repo:
 
