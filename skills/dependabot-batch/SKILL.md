@@ -86,6 +86,17 @@ compatibility score. Do not auto-merge under any circumstance:
 
 ## Phase 1: Inventory
 
+**Repo of record.** Every `gh` command in this skill acts on gh's resolved
+default repo, so pin it down before inventorying anything. In a
+single-remote clone there is nothing to decide. In a multi-remote clone,
+`gh repo view --json nameWithOwner` names the repo gh has resolved; absent
+a recorded `gh repo set-default` answer, gh prefers `upstream` over
+`origin`, which is wrong for a fork that runs its own Dependabot -- the
+PRs live on the fork while gh would inventory the parent's. If the
+resolved repo is not the one whose Dependabot PRs should be processed,
+have the user run `gh repo set-default` (or confirm with them which repo
+is intended). Every later phase inherits this answer.
+
 Run `gh pr list --state open --author app/dependabot --json number,title,headRefName,body`.
 
 For each PR, extract and display in a compact table:
@@ -158,8 +169,19 @@ Surface the order to the user and proceed.
 
 For each PR in order:
 
-1. `gh pr checkout <n>`
-2. `git fetch origin <default-branch> && git rebase origin/<default-branch>`
+1. `gh pr checkout <n>` -- besides checking out the branch, this resolves
+   the git remote for the whole loop: checkout records the remote whose
+   URL matches the repo that owns the PR in `branch.<branch>.remote`.
+   Read it once (`git config branch.<branch>.remote`) and use it as
+   `<remote>` in every git command below and in Phase 5. Never write
+   `origin` literally here: in a fork clone `origin` is the fork, and a
+   push there succeeds silently while the real PR never moves. Since
+   Dependabot PRs always live on the repo they target, the one recorded
+   remote serves both the trunk fetch and the push, and it is the same
+   for every PR in the batch.
+2. `git fetch <remote> <default-branch> && git rebase <remote>/<default-branch>`
+   (the default branch Phase 2 already resolved -- do not re-derive it
+   or assume `main`)
    - If rebase conflicts, stop and surface to the user
 3. Install dependencies with the ecosystem's standard command (`bundle install`,
    `npm ci`, `pip install -r ...`, etc.)
@@ -175,7 +197,11 @@ For each PR in order:
    - If linting surfaces new offenses (e.g. from a new cop / rule introduced
      by a linter-plugin bump), fix at source in one attempt. Never silence
      with disable-comments. If not cleanly fixable in one pass, stop and ask.
-5. `git push --force-with-lease origin <branch>`
+5. `git push --force-with-lease <remote> HEAD` -- name the remote
+   explicitly, taking it from the branch config step 1 recorded. A bare
+   `git push` follows `remote.pushDefault` / `branch.<name>.pushRemote`
+   in triangular-push setups, which silently redirects the push to a
+   fork the PR does not live on.
 6. Monitor CI with the Monitor tool polling `gh pr checks <n>`
 7. **Gating decision** once CI is `SUCCESS`:
 
@@ -188,15 +214,19 @@ For each PR in order:
    | Either dial set to `ask` | Announce green, wait for user merge |
 
 8. After each auto-merge or user-reported merge,
-   `git checkout <default-branch> && git pull --ff-only` and re-rebase the
-   next PR on the updated base before processing it. This avoids CI running
-   on a stale base.
+   `git checkout <default-branch> && git pull --ff-only <remote> <default-branch>`
+   and re-rebase the next PR on the updated base before processing it.
+   This avoids CI running on a stale base. The remote is named explicitly
+   because a fork clone's local default branch tracks the fork, so a bare
+   `git pull --ff-only` would pull the fork's stale trunk.
 
 ## Phase 5: Post-batch verification
 
 After the last PR merges:
 
-1. `git checkout <default-branch> && git pull --ff-only`
+1. `git checkout <default-branch> && git pull --ff-only <remote> <default-branch>`
+   (the same `<remote>` Phase 4 resolved, named explicitly for the same
+   fork-clone reason)
 2. Re-install dependencies with the ecosystem's standard command
 3. Run the verify command (same as Phase 4 step 4) -- must be clean and green
 
