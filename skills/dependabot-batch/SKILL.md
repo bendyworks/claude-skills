@@ -190,8 +190,10 @@ For each PR in order:
    remote serves both the trunk fetch and the push, and it is the same
    for every PR in the batch.
 2. `git fetch <remote> <default-branch> && git rebase <remote>/<default-branch>`
-   (the default branch Phase 2 already resolved -- do not re-derive it
-   or assume `main`)
+   (the default branch Phase 1 already resolved -- do not re-derive it
+   or assume `main`). Skip the fetch half when step 8 refreshed
+   `<remote>/<default-branch>` moments ago for the previous PR's merge;
+   the rebase always runs.
    - If rebase conflicts, stop and surface to the user
 3. Install dependencies with the ecosystem's standard command (`bundle install`,
    `npm ci`, `pip install -r ...`, etc.)
@@ -224,9 +226,9 @@ For each PR in order:
 
 8. After each auto-merge or user-reported merge,
    `git checkout <default-branch> && git pull --ff-only <remote> <default-branch>`
-   and re-rebase the next PR on the updated base before processing it.
-   This avoids CI running on a stale base. (Named remote: the local
-   default branch may track a fork.)
+   so the next PR's step 2 rebase runs against the just-updated base
+   rather than a stale one. (Named remote: the local default branch may
+   track a fork.)
 
 ## Phase 5: Post-batch verification
 
