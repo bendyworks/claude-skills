@@ -319,16 +319,25 @@ project's choice.
   (`git config --get-regexp 'gh-resolved'`) and the user's word both
   beat that name heuristic. When no rule applies (several remotes,
   none named `origin`; no remotes at all), ask the user.
-- **The trunk** is read, never assumed:
-  `git symbolic-ref --short refs/remotes/<remote>/HEAD`, falling back
-  to `git ls-remote --symref <remote> HEAD` when the symref is missing
-  (normal for a hand-added remote).
+- **The trunk** is read, never assumed. Refresh the symref first with
+  `git remote set-head <remote> --auto` -- fetch never updates it, so
+  after a default-branch rename it stays stale with no error -- then
+  read it: `git symbolic-ref --short refs/remotes/<remote>/HEAD`. That
+  prints `<remote>/<branch>`; `<trunk>` is the bare branch name after
+  the `<remote>/` prefix (`main`, not `origin/main`). When the symref
+  cannot be resolved (normal for a hand-added remote, offline),
+  `git ls-remote --symref <remote> HEAD` names the default branch in
+  its `ref: refs/heads/<branch>` line -- again take the bare
+  `<branch>`.
 
-Then `git fetch <remote> <trunk>`. The local remote-tracking ref and
-the session-start git snapshot are both point-in-time and go stale the
-moment someone else merges; trusting them without fetching has produced
-confidently-wrong branching decisions. After fetching, query
-`<remote>/<trunk>` (e.g. `git show <remote>/<trunk>:path`,
+Then `git fetch <remote>` -- the whole remote, not just the trunk:
+"is ABC-NNN merged?" and "ahead/behind?" read other branches'
+remote-tracking refs too, and a trunk-only fetch leaves those stale.
+The local remote-tracking refs and the session-start git snapshot are
+both point-in-time and go stale the moment someone else pushes;
+trusting them without fetching has produced confidently-wrong branching
+decisions. After fetching, query `<remote>/<trunk>` (e.g.
+`git show <remote>/<trunk>:path`,
 `git rev-list --count HEAD..<remote>/<trunk>`), never a bare local ref
 you have not refreshed this session.
 
