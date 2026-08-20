@@ -158,11 +158,14 @@ the tracker can auto-link the branch/PR to the story.
   --checkout`, the CLI form of GitHub's "create a branch for this
   issue" web action. It creates a *linked branch* (visible in the
   issue's Development section) and checks it out with upstream
-  tracking already set. Two caveats: it creates the branch on the
-  remote immediately (never run it just to preview a name), and a PR
+  tracking already set. Three caveats: it creates the branch on the
+  remote immediately (never run it just to preview a name); it creates
+  it on whatever repo gh resolves as the default -- in a fork clone
+  normally the parent, so confirm `gh repo view --json nameWithOwner`
+  names the intended repo when more than one remote exists; and a PR
   opened from a linked branch AUTO-CLOSES the issue at merge
   regardless of PR-body keywords (see the ship-tail steps for when
-  that matters and how to prevent it). If either caveat is unwanted,
+  that matters and how to prevent it). If any caveat is unwanted,
   or you lack write access to the repo, fall back to a local
   `git checkout -b` with the same slug.
 
@@ -233,7 +236,8 @@ Ask the user:
    plan that needs its own deviating name?
 3. Are we already on a clean copy of the right branch and good to go,
    or do we need to create/checkout/rebase first? (Before answering
-   this from `origin/main`'s state, `git fetch origin` -- see Step 3.)
+   this from the trunk's state, resolve the project remote and fetch
+   it -- see Step 3.)
 
 Pull the suggested branch name from Linear's "Copy git branch name"
 action or the Shortcut equivalent; for GitHub Issues, compose the
@@ -297,17 +301,51 @@ issues. Note the current workflow state.
 
 ### Step 3 -- Research the code
 
-**Fetch before reasoning about remote state.** Run `git fetch origin`
-as the first action of this step, before drawing any conclusion that
-depends on what is on a remote branch -- "is ABC-NNN merged?", "does
-main already contain X?", "where should this branch from?", "how many
-commits is this branch ahead/behind?". The local `origin/main`
-remote-tracking ref and the session-start git snapshot are both
-point-in-time and go stale the moment someone else merges; trusting
-them without fetching has produced confidently-wrong branching
-decisions. After fetching, query `origin/main` (e.g.
-`git show origin/main:path`, `git rev-list --count HEAD..origin/main`),
-never a bare local ref you have not refreshed this session.
+**Fetch before reasoning about remote state.** Before drawing any
+conclusion that depends on what is on a remote branch -- "is ABC-NNN
+merged?", "does the trunk already contain X?", "where should this
+branch from?", "how many commits is this branch ahead/behind?" --
+resolve the project remote and its trunk, then fetch, as the first
+action of this step. Neither half of `origin/main` is a constant: the
+remote name is a per-clone fact, and the default branch is the
+project's choice.
+
+- **The remote** is the one this work's pull request will target: the
+  sole remote in a single-remote clone, whatever it is called;
+  `upstream` over `origin` when both exist (a fork clone -- `origin`
+  is the fork, whose trunk goes stale); `origin` whenever it exists
+  without `upstream`, however many other remotes sit alongside it. A
+  recorded `gh repo set-default` answer
+  (`git config --get-regexp 'gh-resolved'`) and the user's word both
+  beat that name heuristic. When no rule applies (several remotes,
+  none named `origin`; no remotes at all), ask the user.
+- **The trunk** is read, never assumed. Refresh the symref first with
+  `git remote set-head <remote> --auto` -- fetch never updates it, so
+  after a default-branch rename it stays stale with no error -- then
+  read it: `git symbolic-ref --short refs/remotes/<remote>/HEAD`. That
+  prints `<remote>/<branch>`; `<trunk>` is the bare branch name after
+  the `<remote>/` prefix (`main`, not `origin/main`). When the symref
+  cannot be resolved (normal for a hand-added remote),
+  `git ls-remote --symref <remote> HEAD` names the default branch in
+  its `ref: refs/heads/<branch>` line -- again take the bare
+  `<branch>`. Both the refresh and ls-remote need the network;
+  offline, proceed with the existing symref when it exists.
+
+Then `git fetch <remote>` -- the whole remote, not just the trunk:
+"is ABC-NNN merged?" and "ahead/behind?" read other branches'
+remote-tracking refs too, and a trunk-only fetch leaves those stale.
+The local remote-tracking refs and the session-start git snapshot are
+both point-in-time and go stale the moment someone else pushes;
+trusting them without fetching has produced confidently-wrong branching
+decisions. After fetching, query `<remote>/<trunk>` (e.g.
+`git show <remote>/<trunk>:path`,
+`git rev-list --count HEAD..<remote>/<trunk>`), never a bare local ref
+you have not refreshed this session. The targeted-specs skill (bundled
+in this plugin) carries the canonical, fuller statement of this
+resolution rule (offline behavior, rename edge cases); when the two
+ever disagree on how to identify the remote or the trunk, defer to it.
+The whole-remote fetch above is deliberately this skill's own -- its
+questions read more refs than the trunk.
 
 Then learn what you can from the repo:
 
@@ -870,7 +908,7 @@ Do NOT auto-advance into this phase from `record`. The gap between
 "shipped" and "we're sure nothing else is needed" is real, and no mode
 closes it -- wait for the user to ask. On a project outside
 Deploy-on-Merge Mode there is a second gap to wait out first, between
-"PR merged to main" and "shipped to production".
+"PR merged to the default branch" and "shipped to production".
 
 ### Step 1 -- Confirm preconditions
 
@@ -885,7 +923,7 @@ default for a project that declares nothing.
 Then walk through these checks (the housekeeping skill will re-verify,
 but catching a "no" here lets you exit early before invoking it):
 
-1. **PR is merged to main.** Verify with `gh pr view <PR#> --json state,mergedAt,mergeCommit` (or whichever forge the project uses).
+1. **PR is merged to the default branch.** Verify with `gh pr view <PR#> --json state,mergedAt,mergeCommit` (or whichever forge the project uses).
 2. **The merged code is live in production.** Before taking any shortcut, confirm the premise: nothing after the merge can still fail or be skipped. A project whose merge *triggers* a deploy that can go red does not qualify however its rules read.
 
    With that premise confirmed, in Deploy-on-Merge Mode check 1 satisfies this one, because the merge *is* the deploy. Otherwise it is a project-specific check:
