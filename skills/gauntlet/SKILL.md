@@ -13,7 +13,7 @@ This skill orchestrates that pass in five phases:
 2. **Phase 1** -- finding sources: `/code-review`, then parallel sub-agent audits (report-only)
 3. **Phase 2** -- consolidate findings into one triaged punch list
 4. **Phase 3** -- triage with the user, then fix what they approve
-5. **Phase 4** -- a fresh-eyes "find the bug" sub-agent on the final state; runs on its own on larger or riskier branches and is offered otherwise (see "When Phase 4 runs")
+5. **Phase 4** -- a fresh-eyes "find the bug" sub-agent on the final state; runs on its own when its triggers fire and is offered otherwise (see "When Phase 4 runs")
 
 The main agent's job is orchestration: dispatch sub-agents in parallel, merge their reports, dedupe, rank by severity, present a single coherent list. Sub-agents do not make code changes. Fixes happen in Phase 3 with full cross-cutting context.
 
@@ -21,7 +21,7 @@ The main agent's job is orchestration: dispatch sub-agents in parallel, merge th
 
 When the user invokes the gauntlet, every component step and nested skill call is **already approved**. Run them all without pausing to ask permission: `/code-review`, `/security-review` (the security agent), every Phase 1 sub-agent dispatch, and the Phase 4 "find the bug" pass whenever "When Phase 4 runs" says it runs. Never stop to ask "is it ok to run /code-review?" or "should I dispatch the audit agents?" -- just proceed through the phases.
 
-The built-in pauses are the **Phase 3 triage decision**, where the user chooses which findings to fix; the Phase 4 offer, when "When Phase 4 runs" says to ask rather than run; and confirming the severity of anything Phase 4 finds. Each is a genuine decision point and stays. Everything mechanical runs unprompted.
+The built-in pauses are the **Phase 3 triage decision**, where the user chooses which findings to fix; the Phase 4 offer, when "When Phase 4 runs" says to ask rather than run; and triaging anything Phase 4 finds. Each is a genuine decision point and stays. Everything mechanical runs unprompted.
 
 ## Rules already covered elsewhere -- do NOT restate
 
@@ -50,7 +50,7 @@ If any precondition is off, surface it and pause -- don't push forward on a brok
 
 **Non-git version control:** the commands throughout this skill assume git. If the user works in another VCS (e.g. Jujutsu colocated with git), ask them for the change range ("which revisions are the current work?") and translate the `git diff main...HEAD` commands to that tool's equivalents -- the phases themselves don't change. Don't make the user volunteer this; ask when the working-copy state looks unfamiliar.
 
-**Cost expectations:** a full run is deliberately thorough and correspondingly token-hungry -- /code-review plus five parallel audits, plus a Phase 4 agent when its triggers fire, can consume a noticeable slice of a subscription session's budget. Before starting Phase 1, tell the user the planned agent count so they can trim (Step 3), choose light mode, or exclude Phase 4 -- this is the moment for that opt-out. Phase 0 can only predict Phase 4: two of its three triggers are measured after the Phase 3 fixes (see "When Phase 4 runs"). On a large diff, say explicitly that this will be an expensive pass and that Phase 4 is expected to run on its own.
+**Cost expectations:** a full run is deliberately thorough and correspondingly token-hungry -- /code-review plus five parallel audits, plus a Phase 4 agent when its triggers fire, can consume a noticeable slice of a subscription session's budget. Before starting Phase 1, tell the user the planned agent count so they can trim (Step 3), choose light mode, or exclude Phase 4 -- an opt-out given any time before the Phase 3 tail is honored, and this is the natural moment for it. Phase 0 can only predict Phase 4: two of its three triggers are measured after the Phase 3 fixes (see "When Phase 4 runs"). On a large diff, say explicitly that this will be an expensive pass and that Phase 4 is expected to run on its own.
 
 ### Step 2 -- Snapshot the scope
 
@@ -99,7 +99,7 @@ After Phase 3 fixes, re-run coverage as part of the final gate -- fixes add line
 
 ### Light mode for small PRs
 
-If the diff is under ~50 lines across fewer than ~5 files, sub-agent dispatch overhead probably isn't worth it. Tell the user, then run the same checks (including `/code-review`) **sequentially in the main agent** without spawning sub-agents. Keep the same Phase 2 / Phase 3 structure (consolidate, then triage, then fix).
+If the diff is under ~50 lines across fewer than ~5 files, sub-agent dispatch overhead probably isn't worth it. Tell the user, then run the same checks (including `/code-review`) **sequentially in the main agent** without spawning sub-agents. Keep the same Phase 2 / Phase 3 structure (consolidate, then triage, then fix). Light mode does not change the Phase 4 decision; see "When Phase 4 runs".
 
 ---
 
@@ -259,9 +259,8 @@ For each accepted finding:
 After all accepted findings are addressed -- or immediately, when there were none to address -- this tail runs on every gauntlet:
 
 1. Run the project's full lint+test gate again (via the project's suite-runner skill if it has one), **with coverage on**, capturing complete output to a uniquely-named log under /tmp to grep for follow-ups -- never re-run just to re-read output (a suite-runner that already captures this way satisfies the capture rule). Then re-run the Step 4 patch-coverage check -- the fixes added lines too, and those should be covered before the branch leaves draft. In Targeted Spec Verification Mode, re-run the targeted-specs skill (bundled in this plugin) with coverage on instead and act on its verdict line. When Phase 3 changed nothing in the tree, the Phase 0 gate result still stands: skip to step 2.
-2. Report the PR size in lines changed across files (insertions plus deletions), and whether it's over or under the 400-line easy-review threshold. This is the number the `large` trigger reads.
-3. Decide whether Phase 4 runs, per "When Phase 4 runs" in Phase 4 below: write the record line, then either announce and dispatch, or ask, or -- after an up-front opt-out with no guard rewrite -- tell the user the gauntlet is complete and the branch is ready for human review. That subsection owns the triggers; do not re-derive them here.
-4. If Phase 4 was offered and the user declines, tell them the gauntlet is complete and the branch is ready for human review.
+2. Report the PR size in lines changed across files -- insertions plus deletions from `git diff main...HEAD --shortstat`, excluding generated files such as lockfiles, schema dumps, and recorded cassettes -- and whether it's over or under the 400-line easy-review threshold. This is the number the `large` trigger reads.
+3. Decide whether Phase 4 runs, per "When Phase 4 runs" in Phase 4 below: write the record line, then announce and dispatch, ask, or close out, exactly as that subsection says. It owns the triggers and the closing sentence; do not re-derive them here.
 
 If the gauntlet uncovered work too large for this branch (a real refactor, a sibling-bug audit elsewhere), surface it and suggest filing a follow-up issue in the project's tracker rather than ballooning this PR. A PR owns the bugs *it* introduces -- fixing those is the PR finishing its job, not scope creep -- but cleanups that predate the branch are separate work.
 
@@ -271,31 +270,35 @@ If the gauntlet uncovered work too large for this branch (a real refactor, a sib
 
 ### When Phase 4 runs
 
-Phase 4 is decided, not offered. At the end of Phase 3 the main agent checks the triggers below, writes the decision to the record file, announces it, and acts. **Every gauntlet run ends with Phase 4 running, offered, or recorded as opted out; a run that ends with none of those is a bug in this skill.** This subsection is the only home of that rule: the overview, the standing pre-approval, the Phase 0 cost paragraph, and the Phase 3 tail point here rather than restating it.
+Phase 4 is decided, not offered. At the end of Phase 3 the main agent checks the triggers below, writes the decision to the record file, announces it, and acts. **Every gauntlet run ends with Phase 4 running, offered, or recorded as opted out; a run that ends with none of those is a bug in this skill.** This subsection is the only home of that rule: the overview, the standing pre-approval, the Phase 0 cost paragraph, the Phase 3 tail, and the findings section point here rather than restating it.
 
 All three triggers are measured at the end of Phase 3, after the fixes, because two of them cannot be known any earlier:
 
-| Trigger          | Fires when ...                                                                                                                                                                                                                                                                                                        |
-|------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `large`          | The post-fix size report exceeds the 400-line easy-review threshold, measured as insertions plus deletions from `git diff main...HEAD --shortstat`.                                                                                                                                                                    |
+| Trigger          | Fires when ...                                                                                                                                                                                                                                              |
+|------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `large`          | The size report from step 2 of the Phase 3 tail exceeds the 400-line easy-review threshold.                                                                                                                                                                  |
 | `risky by scope` | The Step 2 risk note names anything in a risk category (a migration; authorization; money or units; an external integration), or a Phase 3 fix added a file in one -- re-run `git diff main...HEAD --name-only` at the tail and compare it with the Step 2 list. |
-| `risky by fixes` | Phase 3 fixed any must-fix finding (a must-fix the user declined in triage was not fixed, so it does not count), or a Phase 3 fix is tagged `(guard rewrite)` in the record file -- a guard as defined next. |
+| `risky by fixes` | Phase 3 fixed any must-fix finding (a must-fix the user declined in triage was not fixed, so it does not count), or a Phase 3 fix is tagged `(guard rewrite)` in the record file -- a guard as defined next.                                                  |
 
-A **guard** is code or prose whose job is to refuse, skip, or stop: something whose failure lets the wrong thing proceed silently rather than produce a visibly wrong answer. In code: a `before_action` filter, a policy method, a validation or database constraint, an early-return guard clause, an idempotency check, a strong-params allowlist, a `rescue` that swallows. In a skill or guidance file: a precondition, a STOP rule, a detection or recognition rule. Fixes are code too, and they ship without the review the original change got -- the suite and coverage re-run after Phase 3, but no judgment pass looks at the fixes unless this trigger fires. Phase 1 audited the pre-fix state and could not have caught a bug the fixes introduced.
+A **guard** is code or prose whose job is to refuse, skip, or stop: something whose failure lets the wrong thing proceed silently rather than produce a visibly wrong answer. In code: a `before_action` filter, a policy method, a validation or database constraint, an early-return guard clause, an idempotency check, a rate limit, a strong-params allowlist, a `rescue` that swallows. In a skill or guidance file: a precondition, a STOP rule, a detection or recognition rule.
 
-**When a trigger clearly fires:** announce in a sentence or two that Phase 4 is running and which trigger fired, then dispatch the sub-agent in the same message. Do not wait for acknowledgement -- the run may be unattended, and a stall at this point is the cost this rule exists to remove. **When no trigger fires, or when unsure:** ask, "Want to run a 'find the bug' pass?", and wait; the answer decides.
+Why fixes are a trigger at all: fixes are code too, and they ship without the review the original change got. The suite and coverage re-run after Phase 3, but no judgment pass looks at the fixes unless this trigger fires, and Phase 1 audited the pre-fix state, so it could not have caught a bug the fixes introduced.
 
-**The up-front opt-out.** A user who excluded the pass when invoking the gauntlet ("gauntlet but no phase 4") is honored the same way Phase 0 Step 3 honors "gauntlet but skip security": Phase 4 neither runs nor is offered, and the record line says so. One exception: when Phase 3 rewrote a guard after an opt-out, ask anyway, naming the guard -- the fixes that created the risk happened after the opt-out was given, so the premise of the opt-out changed. Never auto-run through an opt-out.
+**When a trigger clearly fires:** announce in a sentence or two that Phase 4 is running and which trigger fired, then dispatch the sub-agent in the same message. Do not wait for acknowledgement -- the run may be unattended, and a stall at this point is the cost this rule exists to remove. **When no trigger fires, or when unsure:** ask, and say which case this is -- "none of the Phase 4 triggers fired" when nothing did, or name what you are unsure about ("the second fix may have rewritten a guard: ...") when that is the reason, because the user decides differently in the two cases. Then wait; the answer decides. **A direct request** ("run phase 4", "run it anyway", at any point, including after a decline or an opt-out) runs it: the user's ask outranks every rule here.
 
-**The record line.** Before dispatching or asking, append one line to `.claude/gauntlets/<branch-name>-gauntlet.md` in exactly one of these forms, so the decision stays greppable across runs:
+**The up-front opt-out.** An opt-out given at any point before the Phase 3 tail ("gauntlet but no phase 4" at invocation, or "skip phase 4" in reply to the cost note) is honored the same way Phase 0 Step 3 honors "gauntlet but skip security": Phase 4 neither runs nor is offered, and the record line says so. One exception: when `risky by fixes` fires after an opt-out, ask anyway, naming the must-fix fix or the guard -- the fixes that created the risk happened after the opt-out was given, so the premise of the opt-out changed. Never auto-run through an opt-out; only a direct request does that.
 
-- `Phase 4 decision: ran (<triggers>)`, naming every trigger from the table that fired, e.g. `ran (risky by fixes: guard rewrite)` or `ran (large; risky by scope: migration)`
-- `Phase 4 decision: asked, <accepted|declined>` -- written as `asked` before the question, completed when the answer arrives
+**The record line.** Before dispatching or asking, append one line to `.claude/gauntlets/<branch-name>-gauntlet.md` (a shell `>>` is fine; there is no need to read the file first) in exactly one of these forms, so the decision is greppable after the fact:
+
+- `Phase 4 decision: ran (<triggers>)`, naming every trigger from the table that fired, e.g. `ran (risky by fixes: guard rewrite)` or `ran (large; risky by scope: migration)`; a direct request is `ran (user request)`
+- `Phase 4 decision: asked` -- the ask that follows an opt-out included -- followed, once the user answers, by a second appended line, `Phase 4 answer: accepted` or `Phase 4 answer: declined`; two write-once lines, never an in-place edit
 - `Phase 4 decision: opted out up front`
 
 Writing it before dispatch means a crash mid-Phase-4 still leaves evidence that the decision was made.
 
-**Two things the decision does not change.** Light mode (Phase 0) runs the Phase 1 checks in the main agent, but Phase 4 is always a dispatched agent -- fresh eyes need a separate context -- and light mode does not alter the triggers: a sub-50-line diff can still carry a migration or a guard rewrite. And the trigger is for the announcement and the record only; the sub-agent brief below stays as written regardless of why Phase 4 ran, because telling the agent what to look for anchors it.
+**Closing out.** However Phase 4 ends -- declined, opted out, ran and found nothing, or ran and its findings were fixed -- tell the user the gauntlet is complete and the branch is ready for human review. That sentence lives here; the Phase 3 tail and the findings section point to it.
+
+**Two things the decision does not change.** Light mode (Phase 0) runs the Phase 1 checks in the main agent, but Phase 4 is always a dispatched agent, and light mode does not alter the triggers: a sub-50-line diff can still carry a migration or a guard rewrite. And the trigger is for the announcement and the record only; the brief below stays as written regardless of why Phase 4 ran ("Dispatch a fresh sub-agent" says why).
 
 ### Why this pass is different
 
@@ -334,12 +337,12 @@ If the agent finds something credible:
 
 1. Append the findings to `.claude/gauntlets/<branch-name>-gauntlet.md` under a new "Phase 4 -- find-the-bug" section, so the persisted record stays complete.
 2. Present the findings to the user. A bug found here is almost always `must-fix` severity by nature, but flag it for the user's confirmation rather than assuming.
-3. If accepted, fix it via the same TDD-first, one-commit-per-change flow as Phase 3 -- write the failing spec that captures the bug, watch it RED, then fix and confirm GREEN.
+3. If accepted, fix it via the same TDD-first, one-commit-per-change flow as Phase 3 -- write the failing spec that captures the bug, watch it RED, then fix and confirm GREEN. Then re-run step 1 of the Phase 3 tail (the full gate with coverage, and the patch-coverage check): Phase 4 fixes are unreviewed fixes too. Phase 4 runs once per gauntlet; its own fixes do not trigger a second pass. Close out per "When Phase 4 runs".
 
 If the agent finds nothing:
 
 1. Briefly relay the agent's "where I looked" summary to the user. This is signal, not noise -- it tells the user the bug-hunt happened and what it covered.
-2. Tell the user the gauntlet is complete and the branch is ready for human review.
+2. Close out per "When Phase 4 runs".
 
 ---
 
