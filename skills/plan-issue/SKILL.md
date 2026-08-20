@@ -158,11 +158,14 @@ the tracker can auto-link the branch/PR to the story.
   --checkout`, the CLI form of GitHub's "create a branch for this
   issue" web action. It creates a *linked branch* (visible in the
   issue's Development section) and checks it out with upstream
-  tracking already set. Two caveats: it creates the branch on the
-  remote immediately (never run it just to preview a name), and a PR
+  tracking already set. Three caveats: it creates the branch on the
+  remote immediately (never run it just to preview a name); it creates
+  it on whatever repo gh resolves as the default -- in a fork clone
+  normally the parent, so confirm `gh repo view --json nameWithOwner`
+  names the intended repo when more than one remote exists; and a PR
   opened from a linked branch AUTO-CLOSES the issue at merge
   regardless of PR-body keywords (see the ship-tail steps for when
-  that matters and how to prevent it). If either caveat is unwanted,
+  that matters and how to prevent it). If any caveat is unwanted,
   or you lack write access to the repo, fall back to a local
   `git checkout -b` with the same slug.
 
@@ -233,7 +236,8 @@ Ask the user:
    plan that needs its own deviating name?
 3. Are we already on a clean copy of the right branch and good to go,
    or do we need to create/checkout/rebase first? (Before answering
-   this from `origin/main`'s state, `git fetch origin` -- see Step 3.)
+   this from the trunk's state, resolve the project remote and fetch
+   its trunk -- see Step 3.)
 
 Pull the suggested branch name from Linear's "Copy git branch name"
 action or the Shortcut equivalent; for GitHub Issues, compose the
@@ -297,17 +301,36 @@ issues. Note the current workflow state.
 
 ### Step 3 -- Research the code
 
-**Fetch before reasoning about remote state.** Run `git fetch origin`
-as the first action of this step, before drawing any conclusion that
-depends on what is on a remote branch -- "is ABC-NNN merged?", "does
-main already contain X?", "where should this branch from?", "how many
-commits is this branch ahead/behind?". The local `origin/main`
-remote-tracking ref and the session-start git snapshot are both
-point-in-time and go stale the moment someone else merges; trusting
-them without fetching has produced confidently-wrong branching
-decisions. After fetching, query `origin/main` (e.g.
-`git show origin/main:path`, `git rev-list --count HEAD..origin/main`),
-never a bare local ref you have not refreshed this session.
+**Fetch before reasoning about remote state.** Before drawing any
+conclusion that depends on what is on a remote branch -- "is ABC-NNN
+merged?", "does the trunk already contain X?", "where should this
+branch from?", "how many commits is this branch ahead/behind?" --
+resolve the project remote and its trunk, then fetch, as the first
+action of this step. Neither half of `origin/main` is a constant: the
+remote name is a per-clone fact, and the default branch is the
+project's choice.
+
+- **The remote** is the one this work's pull request will target: the
+  sole remote in a single-remote clone, whatever it is called;
+  `upstream` over `origin` when both exist (a fork clone -- `origin`
+  is the fork, whose trunk goes stale); `origin` whenever it exists
+  without `upstream`, however many other remotes sit alongside it. A
+  recorded `gh repo set-default` answer
+  (`git config --get-regexp 'gh-resolved'`) and the user's word both
+  beat that name heuristic. When no rule applies (several remotes,
+  none named `origin`; no remotes at all), ask the user.
+- **The trunk** is read, never assumed:
+  `git symbolic-ref --short refs/remotes/<remote>/HEAD`, falling back
+  to `git ls-remote --symref <remote> HEAD` when the symref is missing
+  (normal for a hand-added remote).
+
+Then `git fetch <remote> <trunk>`. The local remote-tracking ref and
+the session-start git snapshot are both point-in-time and go stale the
+moment someone else merges; trusting them without fetching has produced
+confidently-wrong branching decisions. After fetching, query
+`<remote>/<trunk>` (e.g. `git show <remote>/<trunk>:path`,
+`git rev-list --count HEAD..<remote>/<trunk>`), never a bare local ref
+you have not refreshed this session.
 
 Then learn what you can from the repo:
 
