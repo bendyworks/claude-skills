@@ -396,11 +396,27 @@ For a caller standing in for a full-gate step, the verdicts mean:
 **ESCALATED** -- run the full gate; no targeted run happened.
 **FAILED** -- the branch is red (lint or specs); fix before
 proceeding, exactly as with a red full gate. **PASSED** -- the
-targeted check passed. One caveat: a PASSED reporting 0 spec files
-means lint alone ran; when the announcement listed named gaps
-(changed code with no covering spec), that PASSED does not establish
-a "specs pass" precondition -- surface the gaps or fall back to the
-full gate instead of treating the branch as verified.
+targeted check passed.
+
+Two things a PASSED does not say, kept apart because their remedies
+differ.
+
+**A PASSED reporting 0 spec files means lint alone ran.** Whether it
+establishes a "specs pass" precondition depends on why the subset was
+empty (Step 7). With no named gaps -- only no-spec-impact files, a
+docs-only branch -- it does, because the branch changed nothing a spec
+could exercise. With named gaps, it does not: the branch changed code
+and nothing ran against it. In that second case surface the gaps and
+fall back to the full gate, whose broader run may execute a covering
+spec that one-hop selection missed.
+
+**Named gaps alongside a PASSED that did run spec files are a coverage
+signal, not a verdict on greenness.** The specs that exist passed, so
+the precondition stands; the gaps belong in the caller's own coverage
+handling, for the developer to accept or close (Step 3). Do not route
+them back into the verdict. A gap voids no passing spec, and failing
+the precondition on every gap would send most branches to the full
+gate, which is the mode defeating itself.
 
 ## Other stacks (reduced depth)
 
