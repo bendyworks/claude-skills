@@ -552,8 +552,9 @@ Draft a plan with:
    to-dos consecutively, leaving no gap.
 
    1. Run the project's full lint+test suite once, capturing complete output to a uniquely-named log under /tmp to grep for follow-ups -- never re-run just to re-read output
-      (use the project's suite-runner skill if it provides one; one
-      that already captures this way satisfies the capture rule). This
+      (invoke a suite-runner skill or script if one is available, at
+      any level, instead of hand-typing the command; one that already
+      captures this way satisfies the capture rule). This
       is the slow step in Full Verification Mode. In Targeted Spec
       Verification Mode (declared in the project's CLAUDE.md or rules
       files), run the targeted-specs skill (bundled in this plugin)
@@ -866,8 +867,9 @@ phase or to-do (your judgment on grouping):
 2. If production code changed: run the project's full lint+test suite
    once, capturing complete output to a uniquely-named log under /tmp to grep for follow-ups -- never re-run just to re-read output,
    per the clean-and-green guidance's capture rule, where a team
-   imports it (use the project's suite-runner skill if it provides
-   one; one that already captures this way satisfies the rule; in
+   imports it (invoke a suite-runner skill or script if one is
+   available, at any level, instead of hand-typing the command; one
+   that already captures this way satisfies the rule; in
    Targeted Spec Verification Mode, a run of the targeted-specs skill
    (bundled in this plugin) stands in here -- act on its verdict
    line). If only tests changed: just the affected specs are fine. You may bundle

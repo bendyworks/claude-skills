@@ -13,9 +13,9 @@ verdict. CI owns the full suite.
 Two boundaries keep this skill honest:
 
 - **It is not the project's full-suite runner.** Where another skill or
-  rule calls for "the project's suite-runner skill" or the full gate,
-  this skill substitutes only where the project's declared targeted
-  mode says a subset may stand in -- mode-aware callers (the gauntlet's
+  rule calls for a suite-runner skill or the full gate, this skill
+  substitutes only where the project's declared targeted mode says a
+  subset may stand in -- mode-aware callers (the gauntlet's
   gates and plan-issue's suite steps are examples, not a complete
   list) route here on that declaration. On a project with no
   declaration, the full gate still means the full suite. And even
@@ -44,11 +44,11 @@ default. Before anything else, confirm one of:
 - The user explicitly invoked this skill or asked for a targeted run in so
   many words -- the developer accepting a targeted run for this check.
 
-Neither true? Recommend **the full gate** -- the project's suite-runner
-skill if it provides one, otherwise the project's full lint+test command
--- and end with the ESCALATED verdict line (below), trigger
-`targeted mode not authorized`. Do not subset specs on a project whose
-standing rule is the full suite.
+Neither true? Recommend **the full gate** -- a suite-runner skill or
+script if one is available, at any level, otherwise the project's full
+lint+test command -- and end with the ESCALATED verdict line (below),
+trigger `targeted mode not authorized`. Do not subset specs on a project
+whose standing rule is the full suite.
 
 "The full gate" keeps this meaning everywhere below.
 
