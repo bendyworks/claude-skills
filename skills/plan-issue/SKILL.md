@@ -559,8 +559,14 @@ Draft a plan with:
       Verification Mode (declared in the project's CLAUDE.md or rules
       files), run the targeted-specs skill (bundled in this plugin)
       instead and act on its verdict line; if the final per-to-do
-      checkpoint already ran on a tree unchanged since (apart from
-      plan and doc edits), its verdict stands -- don't repeat the run.
+      checkpoint already ran on a tree unchanged since -- apart from
+      the bookkeeping files this skill maintains, such as the plan file
+      under `.claude/plans/`, which no suite exercises -- its verdict
+      stands; don't repeat the run. Judge that by whether a suite could
+      exercise the file, never by its extension: on a project whose
+      deliverable is prose (a documentation site, a skills or guidance
+      repository), editing a shipped markdown file is a production
+      change and invalidates the verdict like any other.
       The capture rule and both modes are defined in the
       clean-and-green guidance, where a team imports it.
    2. Run the gauntlet skill (bundled in this plugin) via the Skill
