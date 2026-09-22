@@ -1,6 +1,6 @@
 ---
 name: linear
-description: Read or write Linear issues using the bundled `linear` CLI instead of raw curl + GraphQL. Use whenever the user asks to fetch a Linear issue, look up comments, search Linear, create a Linear issue, update a Linear state, post a comment on a Linear issue, or similar phrasings ("get ABC-NNN", "what's on ABC-592", "comment on the Linear story", "move it to PR Review", "open a Linear issue for ..."). The CLI reads LINEAR_API_TOKEN from the environment and pretty-prints by default.
+description: Read or write Linear issues using the bundled `linear` CLI instead of raw curl + GraphQL. Use whenever the user asks to fetch a Linear issue, look up comments, search Linear, create a Linear issue, update a Linear state, post a comment on a Linear issue, or similar phrasings ("get ABC-NNN", "what's on ABC-592", "comment on the Linear story", "move it to PR Review", "open a Linear issue for ..."). Not for an ID whose prefix the project's CLAUDE.md declares as its GitHub issue key ("PRJ-NNN is issue #NNN") -- that is a GitHub issue; use `gh`. The CLI reads LINEAR_API_TOKEN from the environment and pretty-prints by default.
 ---
 
 # linear CLI
