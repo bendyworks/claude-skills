@@ -872,6 +872,9 @@ phase or to-do (your judgment on grouping):
 1. Run rubocop (or standardrb) and fix all failures.
 2. If production code changed: run the project's full lint+test suite
    once, capturing complete output to a uniquely-named log under /tmp to grep for follow-ups -- never re-run just to re-read output,
+   judging "production code" by whether a suite or a project check
+   could read the file rather than by its extension, so that on a
+   project whose deliverable is prose a shipped markdown edit counts,
    per the clean-and-green guidance's capture rule, where a team
    imports it (invoke a suite-runner skill or script if one is
    available, at any level, instead of hand-typing the command; one

@@ -216,10 +216,12 @@ escalation.
 
 **Coarse width pre-gate:** before any mapping, set aside the obvious
 no-spec-impact files (docs, images, build outputs -- Step 3's ignore
-bucket); if the remaining changed code-file count alone already exceeds
-the Step 5 ceiling fraction of the suite's spec-file count, escalate now
-(trigger `subset too wide`) rather than paying for per-file mapping Step 5
-would throw away.
+bucket, including the narrow qualification it carries, so a repository
+whose deliverable is prose counts its shipped markdown here as code
+rather than setting it aside); if the remaining changed code-file count
+alone already exceeds the Step 5 ceiling fraction of the suite's
+spec-file count, escalate now (trigger `subset too wide`) rather than
+paying for per-file mapping Step 5 would throw away.
 
 The trigger list is where the full-run habit's value is preserved; do not
 talk yourself past it because the subset "looks fine".
@@ -231,6 +233,20 @@ First set aside files with **no spec impact** -- documentation (`*.md`),
 (`app/assets/builds/**`, `public/packs/**`, and kin). Record them under
 that label for the Step 6 announcement so the "gap" label below stays
 meaningful.
+
+One qualification, and it is narrow on purpose. In a repository whose
+**deliverable** is prose -- a documentation site, a skills or guidance
+repository -- a shipped markdown file is production code, and a check
+that validates it *as that deliverable* is a spec for this purpose.
+There, such a file is not a no-spec-impact file, and a branch touching
+only those files is not a docs-only branch.
+
+The test is what the file IS to the project, not what happens to read
+it. A formatter or linter configured over `**/*.md` reads every
+markdown file in every repository, so "a tool reads it" would drag
+each README typo fix out of the ignore bucket, produce a named gap no
+spec could ever close, and escalate the branch to the full gate. That
+is the mode defeating itself for the sake of a wording.
 
 **The generic rule:** every remaining changed code file gets, at minimum,
 its convention-mirrored spec (`app/anything/foo.rb` ->
@@ -387,6 +403,16 @@ Targeted run: PASSED -- <n> spec files (<p> pinned), 0 failures, log: <path>
 Targeted run: FAILED -- <n> spec files (<p> pinned), <f> failures, log: <path>
 ```
 
+When `<n>` is 0, append `, named gaps: <g>, deleted specs: <d>` to the
+PASSED line, with counts rather than prose. What a 0-file PASSED
+establishes turns on those two numbers (below), and a caller holding
+only the verdict line has no other way to reach them -- the gaps
+themselves live in the Step 6 announcement, which a caller keying off
+this contract never parses. Both zero is the whole test: the third
+condition below follows from `named gaps: 0` rather than adding to it,
+since a changed file outside the no-spec-impact bucket that no spec
+covers is exactly what Step 3 labels a gap.
+
 Calling skills key off these lines to decide what happens next (hand off
 to the full gate, proceed to ship steps, or stop on failures), so their
 shape is not editable in passing -- treat any change as a breaking change
@@ -403,12 +429,19 @@ differ.
 
 **A PASSED reporting 0 spec files means lint alone ran.** Whether it
 establishes a "specs pass" precondition depends on why the subset was
-empty (Step 7). With no named gaps -- only no-spec-impact files, a
-docs-only branch -- it does, because the branch changed nothing a spec
-could exercise. With named gaps, it does not: the branch changed code
-and nothing ran against it. In that second case surface the gaps and
-fall back to the full gate, whose broader run may execute a covering
-spec that one-hop selection missed.
+empty (Step 7). It does only when both hold: no named gaps, and no
+deleted-spec finding from Step 1 -- which together mean every changed
+file sat in the no-spec-impact bucket as Step 3 qualifies it. That is the genuinely
+empty case -- the branch changed nothing the suite could exercise.
+
+Fail any one of them and it does not. Named gaps mean the branch changed
+code and nothing ran against it. A deleted spec is the sharper version
+of the same thing: the branch changed production code and removed the
+only thing that ran against it, while leaving neither a subset entry nor
+a gap label behind, so it would otherwise pass through this test
+invisibly. In any of those cases surface what was found and fall back to
+the full gate, whose broader run may execute a covering spec that
+one-hop selection missed.
 
 **Named gaps alongside a PASSED that did run spec files are a coverage
 signal, not a verdict on greenness.** The specs that exist passed, so
@@ -417,6 +450,15 @@ handling, for the developer to accept or close (Step 3). Do not route
 them back into the verdict. A gap voids no passing spec, and failing
 the precondition on every gap would send most branches to the full
 gate, which is the mode defeating itself.
+
+The boundary between the two paragraphs is whether any spec ran at all,
+which is deliberate rather than incidental. A run that executed specs
+produced evidence about this branch and the gaps qualify it; a run that
+executed none produced no such evidence, so there is nothing for a gap
+to qualify. It does mean a diff of five uncovered files reads
+differently once a sixth, covered file joins it -- so where those gaps
+matter, they are the caller's coverage handling to act on, in both
+cases.
 
 ## Other stacks (reduced depth)
 
