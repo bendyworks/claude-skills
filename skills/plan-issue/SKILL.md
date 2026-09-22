@@ -153,7 +153,9 @@ the tracker can auto-link the branch/PR to the story.
   from the agreed (possibly renamed) title in GitHub's own
   `NNN-title-slug` shape, shortened to roughly 40 characters (e.g.
   `525-fix-pdf-uploads`), and confirm it with the user along with the
-  title. Then, at branch-creation time -- only after the title and
+  title. **When the project declares an issue key, the slug is
+  `<key>-NNN-title-slug` instead** (e.g. `prj-525-fix-pdf-uploads`) --
+  see Declared issue key below. Then, at branch-creation time -- only after the title and
   slug are locked -- run `gh issue develop NNN --name <slug>
   --checkout`, the CLI form of GitHub's "create a branch for this
   issue" web action. It creates a *linked branch* (visible in the
@@ -171,13 +173,64 @@ the tracker can auto-link the branch/PR to the story.
 
 Never hand-roll a slug like `fix-flakey-specs` when a tracker issue
 exists -- the SC-/ABC- style tracker prefix is what lets Shortcut/Linear
-detect the PR, and the `NNN-` prefix keeps a GitHub branch recognizably
-tied to its issue.
+detect the PR, and the `NNN-` prefix (or the declared `prj-NNN-` form)
+keeps a GitHub branch recognizably tied to its issue.
 
 If the existing issue title is too long or restates a whole
 sentence, propose a rename **before** creating the plan file or branch
 so all three artifacts can match. Do not silently use a different name
 across artifacts.
+
+### Declared issue key (GitHub Issues only)
+
+**When a project declares an issue key, every GitHub slug this skill
+composes carries it, and the pull request title leads with it.** Bare
+issue numbers look alike across repositories; a key such as `PRJ` lets
+a branch, plan file, or session name say which project it belongs to,
+the way Linear and Shortcut slugs already do.
+
+A project declares its key in its checked-in CLAUDE.md or a rules
+file, in wording like:
+
+> GitHub issues here are called PRJ-NNN: PRJ-NNN is issue #NNN.
+> Branch, plan, and session slugs are `prj-NNN-title-slug`.
+
+Recommend that wording, mapping sentence included: every session loads
+CLAUDE.md, so it is what lets other skills read `PRJ-NNN` as a GitHub
+issue rather than a Linear identifier. With the declaration present:
+
+- **Slugs:** the branch (`gh issue develop NNN --name`), the plan
+  filename, and the `/rename` suggestion all use `prj-NNN-title-slug`
+  (key lowercased), whether the user invoked `PRJ-NNN` or `#NNN`. The
+  multi-plan deviation case keeps the key too
+  (`prj-502-followup-report-cleanup`). `gh issue develop` links through
+  the issue's Development section, not the branch name, so a keyed
+  slug stays linked.
+- **Prose:** the pull request title reads `PRJ-NNN <Title>`, and chat
+  and plan text say `PRJ-NNN`.
+- **A key Linear also uses here is ambiguous:** when the project's
+  files say any of this repo's work is tracked in Linear under the
+  same key, ask which tracker `PRJ-NNN` means before any tracker call.
+- **Machine tokens stay `#NNN`:** `Closes #NNN`, `Refs: #NNN`, `gh`
+  arguments, `gh-issue-sync` arguments, and `(deferred to #NNN)`
+  notes. GitHub parses only the number.
+
+Recognize the declaration by meaning, with the same floor as
+Deploy-on-Merge Mode: it must state that this project's GitHub issues
+carry the key. **Never infer a key** -- not from the repository name,
+existing branch names, a key mentioned in passing ("PRJ-NNN landed last
+month"), or an autolink reference that happens to exist. A project
+that only describes such a key is undeclared: use `NNN-title-slug`,
+and if the prefix looks intended, ask. Without a declaration nothing
+here applies, including the pull request title rule. A key declared on
+a Linear- or Shortcut-tracked project changes nothing; those trackers
+supply their own prefixed slugs.
+
+Suggest a matching GitHub autolink reference alongside the declaration
+(Settings > Autolink references, key prefix `PRJ-`, URL
+`https://github.com/<owner>/<repo>/issues/<num>`, numeric only), so
+`PRJ-NNN` in prose links to the issue. Adding one changes repository
+settings, so it waits for the user's go-ahead.
 
 ### When deviation is allowed
 
@@ -204,7 +257,8 @@ cannot be invoked from a tool call. So: prompt the user to run
 
 - If a tracker issue exists (or has just been created) and
   the canonical git branch slug has been chosen, use `<branch-slug>`
-  (e.g. `abc-525-fix-pdf-uploads`, `525-fix-pdf-uploads`).
+  (e.g. `abc-525-fix-pdf-uploads`, `525-fix-pdf-uploads`,
+  `prj-525-fix-pdf-uploads`).
 - If no issue exists and none will be created (planning-only
   exercise, exploratory spike, pure-refactor plan with no tracker),
   use the same slug that will be the plan filename under
@@ -241,7 +295,8 @@ Ask the user:
 
 Pull the suggested branch name from Linear's "Copy git branch name"
 action or the Shortcut equivalent; for GitHub Issues, compose the
-`NNN-title-slug` form per the canonical-title section -- do NOT run
+`NNN-title-slug` form (`prj-NNN-title-slug` when the project declares
+an issue key) per the canonical-title section -- do NOT run
 `gh issue develop` during the interview, since it creates the remote
 branch immediately and the title may still be renamed. Do not invent
 a slug from scratch when the issue tracker already has one.
@@ -269,6 +324,12 @@ a rename now so the plan filename and branch can share the base name.
 
 ### Step 2 -- Read the issue
 
+**Check for a declared issue key before matching the `ABC-NNN` shape.**
+When the project declares one (see Declared issue key), `PRJ-NNN` in
+the declared key is GitHub issue #NNN: read it with `gh`, per the
+GitHub bullet below, not with `linear` -- unless Linear also uses the
+key here, where that section says to ask first.
+
 - **Linear URL or identifier** (`linear.app/...` or `ABC-NNN`): use the
   `linear` CLI bundled with this plugin (on PATH when the plugin is
   installed; requires Ruby and a `LINEAR_API_TOKEN` env var) -- not raw
@@ -292,7 +353,7 @@ a rename now so the plan filename and branch can share the base name.
   A bare `#NNN` means GitHub Issues only when the repo actually tracks
   work there -- issues enabled on the repo, the project's CLAUDE.md
   naming GitHub as the tracker, or existing plan-file slugs carrying
-  the `NNN-` prefix. If the project could plausibly have two trackers
+  the `NNN-` prefix (or the declared `prj-NNN-` form). If the project could plausibly have two trackers
   in play, ask rather than assume. Refer to GitHub issues as "issues",
   never "stories".
 
@@ -578,7 +639,9 @@ Draft a plan with:
       pass; run it before step 3 because any findings the user accepts
       should be in the PR before it leaves draft for human review. Skip
       only if the user explicitly opts out for this issue.
-   3. Open the draft PR. Its body leads with the plan's opening Why
+   3. Open the draft PR. In a project that declares an issue key, its
+      title leads with the key (`PRJ-NNN <Title>`; see Declared issue
+      key). Its body leads with the plan's opening Why
       paragraph (just the motivation, not the paired user story and
       acceptance criteria), before any What/mechanism content; the
       pull-requests guidance, where the team imports it, carries the
@@ -730,7 +793,8 @@ slug** -- the same slug used for the git branch. If Linear's
 "Copy git branch name" produces `abc-525-fix-pdf-uploads`, the plan
 file is `abc-525-fix-pdf-uploads.md`; if `gh issue develop` named the
 branch `525-fix-pdf-uploads`, the plan file is
-`525-fix-pdf-uploads.md`.
+`525-fix-pdf-uploads.md` (`prj-525-fix-pdf-uploads.md` in a project
+that declares an issue key).
 
 The only time the plan filename should diverge is when this plan is
 one of multiple spawned by a single story (a follow-up cluster, an
