@@ -185,7 +185,8 @@ across artifacts.
 ### Declared issue key (GitHub Issues only)
 
 **When a project declares an issue key, every GitHub slug this skill
-composes carries it, and the pull request title leads with it.** Bare
+composes carries it, and so does a GitHub issue's pull request
+title.** Bare
 issue numbers look alike across repositories; a key such as `PRJ` lets
 a branch, plan file, or session name say which project it belongs to,
 the way Linear and Shortcut slugs already do.
@@ -210,9 +211,10 @@ whether to declare it. Before recommending the wording, check that no
 Linear or Shortcut team this project uses has the same key.
 
 **Establish the declaration from the project's checked-in files at
-every site that uses it** -- the slug here, Step 2's routing, and the
-pull request title in the ship tail -- exactly as Deploy-on-Merge Mode
-requires; a key remembered from conversation does not count. With the
+every site that uses it** -- the slug here, the Step 1 and Step 2
+routing, the tracker moves in record Step 5 and ship-tail step 4, and
+the pull request title in ship-tail step 3 -- exactly as
+Deploy-on-Merge Mode requires; a key remembered from conversation does not count. With the
 declaration present:
 
 - **Slugs:** the branch (`gh issue develop NNN --name`), the plan
@@ -225,12 +227,19 @@ declaration present:
   declaration keeps its `NNN-title-slug`: the checklist section is
   keyed on the plan's basename, and a renamed plan would start a
   second one.
-- **Prose:** the pull request title reads `PRJ-NNN <Title>`, and chat
-  and plan text say `PRJ-NNN`.
+- **Prose:** chat and plan text say `PRJ-NNN`, and a GitHub issue's
+  pull request title reads `PRJ-NNN <Title>` -- unless the title
+  becomes the commit subject on the default branch. Where squash is
+  the only merge method (`gh repo view --json
+  mergeCommitAllowed,rebaseMergeAllowed`) or a workflow lints pull
+  request titles, keep the title in the project's commit shape and
+  put `PRJ-NNN` on the body's first line instead. A Linear or
+  Shortcut issue's pull request follows that tracker's convention.
 - **Machine tokens stay `#NNN`:** `Closes #NNN`, `Refs: #NNN`,
-  `(deferred to #NNN)`, and "filed as #NNN" notes, which GitHub and
-  the housekeeping skill parse by number. `gh` and `gh-issue-sync`
-  arguments take the bare number.
+  `(deferred to #NNN)`, and "filed as #NNN" notes -- GitHub links
+  and closes by number, and the housekeeping skill cross-references
+  "filed as #NNN". `gh` and `gh-issue-sync` arguments take the bare
+  number.
 - **A key Linear also uses here is ambiguous:** when the project's
   files say any of this repo's work is tracked in Linear under the
   same key, ask which tracker `PRJ-NNN` means before any tracker call.
@@ -306,9 +315,13 @@ Ask the user:
    this from the trunk's state, resolve the project remote and fetch
    it -- see Step 3.)
 
+**When the project declares an issue key, a `PRJ-NNN` ID is a GitHub
+issue** (Step 2 has the full routing rule): compose its slug rather than
+looking for a Linear branch name.
+
 Pull the suggested branch name from Linear's "Copy git branch name"
 action or the Shortcut equivalent; for GitHub Issues, compose the
-`NNN-title-slug` form per the canonical-title section -- do NOT run
+slug per the canonical-title section -- do NOT run
 `gh issue develop` during the interview, since it creates the remote
 branch immediately and the title may still be renamed. Do not invent
 a slug from scratch when the issue tracker already has one.
@@ -652,8 +665,9 @@ Draft a plan with:
       should be in the PR before it leaves draft for human review. Skip
       only if the user explicitly opts out for this issue.
    3. Open the draft PR. In a GitHub-tracked project that declares an
-      issue key, its title leads with the key (`PRJ-NNN <Title>`; see
-      Declared issue key). Its body leads with the plan's opening Why
+      issue key, its title leads with the key (`PRJ-NNN <Title>`) unless
+      the title becomes the commit subject; see Declared issue key for
+      that exception. Its body leads with the plan's opening Why
       paragraph (just the motivation, not the paired user story and
       acceptance criteria), before any What/mechanism content; the
       pull-requests guidance, where the team imports it, carries the
@@ -688,7 +702,8 @@ Draft a plan with:
       housekeeping uses to detect a half-run pass. A multi-PR epic on
       such a team still needs unlinking, or its first merge closes it.
    4. Hand the PR off for review and merge, then move the issue to PR
-      Review. The hand-off happens on every tracker, including the
+      Review (a declared `PRJ-NNN` is a GitHub issue; see Declared
+      issue key). The hand-off happens on every tracker, including the
       ones where the state move below is a no-op: say plainly what the
       PR is waiting on rather than offering to merge it.
 
@@ -909,6 +924,10 @@ toggleable view of progress (Ctrl-T) alongside the markdown plan file.
 Before starting the work, transition the tracker issue out of Todo and
 into the active state -- and assign it in the same call. A started state
 (In Progress) without an owner is the error this step exists to prevent.
+
+**A declared issue key is not a Linear ID:** when the project declares
+one (see Declared issue key), `PRJ-NNN` is GitHub issue #NNN -- use the
+GitHub command below with the bare number, never `linear update`.
 
 For Linear:
 
