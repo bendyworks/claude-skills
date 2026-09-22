@@ -1,6 +1,6 @@
 ---
 name: linear
-description: Read or write Linear issues using the bundled `linear` CLI instead of raw curl + GraphQL. Use whenever the user asks to fetch a Linear issue, look up comments, search Linear, create a Linear issue, update a Linear state, post a comment on a Linear issue, or similar phrasings ("get ABC-NNN", "what's on ABC-592", "comment on the Linear story", "move it to PR Review", "open a Linear issue for ..."). Not for an ID whose prefix the project's CLAUDE.md declares as its GitHub issue key ("PRJ-NNN is issue #NNN") -- that is a GitHub issue; use `gh`. The CLI reads LINEAR_API_TOKEN from the environment and pretty-prints by default.
+description: Read or write Linear issues using the bundled `linear` CLI instead of raw curl + GraphQL. Use whenever the user asks to fetch a Linear issue, look up comments, search Linear, create a Linear issue, update a Linear state, post a comment on a Linear issue, or similar phrasings ("get ABC-NNN", "what's on ABC-592", "comment on the Linear story", "move it to PR Review", "open a Linear issue for ..."). Not for an ID whose prefix the project's CLAUDE.md (or an always-loaded rules file) declares as its GitHub issue key ("PRJ-NNN is issue #NNN") -- that is a GitHub issue; use `gh`. The CLI reads LINEAR_API_TOKEN from the environment and pretty-prints by default.
 ---
 
 # linear CLI
@@ -105,7 +105,7 @@ a dash needs care:
 
 ## When to use
 
-- The user mentions a Linear identifier (ABC-NNN, etc.) and wants info on it: `linear get`.
+- The user mentions a Linear identifier (ABC-NNN, etc.) and wants info on it: `linear get`. Not when the project declares that prefix as its GitHub issue key ("PRJ-NNN is issue #NNN"): that ID is a GitHub issue, so use `gh issue view NNN`.
 - The user wants to scan recent activity on an issue: `linear get --full` or `linear comments`.
 - The user wants to find tickets by phrase: `linear search`.
 - The user asks to open a new ticket, move an issue's state, or post a comment.
