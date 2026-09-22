@@ -28,8 +28,10 @@ from them, so a red run there is a bug to fix, not a deploy that failed.
 
 ## Tracker
 
-GitHub Issues is this repo's tracker of record. Plan files, branches, and PRs
-are named after the issue they serve, in `NNN-title-slug` form.
+GitHub Issues is this repo's tracker of record. GitHub issues here are called
+CS-NNN: CS-NNN is issue #NNN. Branch, plan, and session slugs are
+`cs-NNN-title-slug`, and plan files, branches, and PRs are named after the
+issue they serve.
 
 ## Everything here is public
 
