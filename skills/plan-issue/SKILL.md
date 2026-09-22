@@ -552,14 +552,21 @@ Draft a plan with:
    to-dos consecutively, leaving no gap.
 
    1. Run the project's full lint+test suite once, capturing complete output to a uniquely-named log under /tmp to grep for follow-ups -- never re-run just to re-read output
-      (use the project's suite-runner skill if it provides one; one
-      that already captures this way satisfies the capture rule). This
+      (invoke a suite-runner skill or script if one is available, at
+      any level, instead of hand-typing the command; one that already
+      captures this way satisfies the capture rule). This
       is the slow step in Full Verification Mode. In Targeted Spec
       Verification Mode (declared in the project's CLAUDE.md or rules
       files), run the targeted-specs skill (bundled in this plugin)
       instead and act on its verdict line; if the final per-to-do
-      checkpoint already ran on a tree unchanged since (apart from
-      plan and doc edits), its verdict stands -- don't repeat the run.
+      checkpoint already ran on a tree unchanged since -- apart from
+      the bookkeeping files this skill maintains, such as the plan file
+      under `.claude/plans/`, which no suite exercises -- its verdict
+      stands; don't repeat the run. Judge that by whether a suite could
+      exercise the file, never by its extension: on a project whose
+      deliverable is prose (a documentation site, a skills or guidance
+      repository), editing a shipped markdown file is a production
+      change and invalidates the verdict like any other.
       The capture rule and both modes are defined in the
       clean-and-green guidance, where a team imports it.
    2. Run the gauntlet skill (bundled in this plugin) via the Skill
@@ -865,9 +872,13 @@ phase or to-do (your judgment on grouping):
 1. Run rubocop (or standardrb) and fix all failures.
 2. If production code changed: run the project's full lint+test suite
    once, capturing complete output to a uniquely-named log under /tmp to grep for follow-ups -- never re-run just to re-read output,
+   judging "production code" by whether a suite or a project check
+   could read the file rather than by its extension, so that on a
+   project whose deliverable is prose a shipped markdown edit counts,
    per the clean-and-green guidance's capture rule, where a team
-   imports it (use the project's suite-runner skill if it provides
-   one; one that already captures this way satisfies the rule; in
+   imports it (invoke a suite-runner skill or script if one is
+   available, at any level, instead of hand-typing the command; one
+   that already captures this way satisfies the rule; in
    Targeted Spec Verification Mode, a run of the targeted-specs skill
    (bundled in this plugin) stands in here -- act on its verdict
    line). If only tests changed: just the affected specs are fine. You may bundle

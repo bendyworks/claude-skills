@@ -206,10 +206,12 @@ For each PR in order:
    that already captures this way satisfies the clean-and-green
    guidance's capture rule, where a team imports it). The dial
    `verify_command` in `dependabot-autonomy.yml` overrides the default
-   command; if unset, use the project's standard "lint + test" entry
-   point (e.g. `bundle exec rake` for Ruby/Rails projects with a
-   default rake task, `npm test && npm run lint` for Node projects, or
-   whatever the project's CLAUDE.md says). Output must be clean.
+   command; if unset, invoke a suite-runner skill or script if one is
+   available, at any level, and otherwise use the project's standard
+   "lint + test" entry point (e.g. `bundle exec rake` for Ruby/Rails
+   projects with a default rake task, `npm test && npm run lint` for
+   Node projects, or whatever the project's CLAUDE.md says). Output
+   must be clean.
    - If linting surfaces new offenses (e.g. from a new cop / rule introduced
      by a linter-plugin bump), fix at source in one attempt. Never silence
      with disable-comments. If not cleanly fixable in one pass, stop and ask.
