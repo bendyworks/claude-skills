@@ -338,9 +338,9 @@ Then fix the `[fix]` bucket without asking:
 
 **Follow-up drafts.** Write each follow-up issue's full title and body into the record file under `## Follow-up drafts`. Filing publishes text under the developer's name, so it is never automatic: it is one question in the batch. Once the batch approves, file each draft and write `filed as <ID>` next to it the moment it is filed, checking for that line before filing any draft, so a resumed run never files one twice.
 
-**The batch.** Every question goes in one message at the end of the run, after the tail and the Phase 4 decision (and after Phase 4 itself, when it runs), so a run nobody is watching finishes everything mechanical before it stops. The message lists, in order: the fixed findings with their commits, the follow-up drafts, the disproved findings with their evidence, and then the questions -- each `[ask]` from Phase 3 and Phase 4, whether to file the drafts, and the Phase 4 question when "When Phase 4 runs" says to ask. With no questions, that message is the close-out.
+**The batch.** Every question goes in one message, which step 4 of the tail sends and nothing else does. It comes after the Phase 4 decision, and after Phase 4 itself when it runs, so a run nobody is watching finishes everything mechanical before it stops. It lists, in order: the fixed findings with their commits, the follow-up drafts, the disproved findings with their evidence, and then the questions -- each `[ask]` from Phase 3 and Phase 4, whether to file the drafts, and the Phase 4 question when "When Phase 4 runs" says to ask. It ends with the close-out that subsection owns.
 
-When the answers come: fix each accepted `[ask]` under the same four rules, file the approved drafts, and tag each declined entry `(declined)`. If anything was fixed, re-run step 1 of the tail -- the suite gate -- on the result. An accepted Phase 4 offer dispatches Phase 4 now, on the final state. Then close out per "When Phase 4 runs".
+When the answers come: fix each accepted `[ask]` under the same four rules, file the approved drafts, and tag each declined entry `(declined)`. If anything was fixed, re-run step 1 of the tail -- the suite gate -- on the result, then check `risky by fixes` again against those fixes: when it fires now and Phase 4 has not run (no trigger fired, the offer was declined, or the developer opted out), ask once more, naming the fix, as the opt-out exception in "When Phase 4 runs" does. An accepted Phase 4 offer, first or repeated, dispatches Phase 4 on the final state. Its findings are sorted and fixed like any others, and tail step 4 then sends one last batch holding only what Phase 4 raised; Phase 4 still runs at most once.
 
 **Opt-out.** When the developer asks to triage the findings themselves ("gauntlet, but let me triage"), append `Phase 3: developer triages` to the record file's header at once. Sort and record as above, then present the sorted list as recommendations and wait for their pick before fixing anything; entries they turn down are tagged `(declined)`. The tail reads the header, never memory -- and the same goes for a Phase 4 opt-out or request given at any point: append it to the header the moment it is given.
 
@@ -350,8 +350,8 @@ After the fix bucket is done -- or immediately, when it is empty -- this tail ru
 
 1. Decide the gate again by "When the suite gate runs" (Phase 0), which owns this run as much as Phase 0's, including what still counts as evidence here. When Phase 3 changed nothing the staleness test counts, the Phase 0 evidence still stands, the gate lands on its branch 2 -- and the Step 4 artifacts still stand too, so skip to step 2. Otherwise re-run the Step 4 patch-coverage check: the fixes added lines, and those should be covered before the branch leaves draft.
 2. Report the PR size in lines changed across files -- insertions plus deletions from `git diff main...HEAD --shortstat`, excluding generated files such as lockfiles, schema dumps, and recorded cassettes -- and whether it is more than 400 lines, the easy-review threshold, or not. This is the number the `large` trigger reads.
-3. Decide whether Phase 4 runs, per "When Phase 4 runs" in Phase 4 below: write the record line, then announce and dispatch, ask, or close out, exactly as that subsection says. It owns the triggers and the closing sentence; do not re-derive them here. An ask goes in the batch.
-4. Send the batch, per "When Phase 3 fixes".
+3. Decide whether Phase 4 runs, per "When Phase 4 runs" in Phase 4 below: write the record line, and when it runs, announce and dispatch it, then sort and fix its findings as "What to do with the findings" says before going on. That subsection owns the triggers; do not re-derive them here.
+4. Send the batch ("When Phase 3 fixes"), ending with the close-out. This is the only step that sends it.
 
 ---
 
@@ -385,7 +385,7 @@ Why fixes are a trigger at all: fixes are code too, and they ship without the re
 
 Writing it before dispatch means a crash mid-Phase-4 still leaves evidence that the decision was made.
 
-**Closing out.** However Phase 4 ends -- declined, opted out, ran and found nothing, or ran and its findings were sorted and fixed -- the gauntlet closes in its final message: the batch, when it holds no questions, or the message after its answers are acted on. Tell the user the gauntlet is complete and the branch is ready for human review. In the same breath name everything still open, and leave those entries unchecked in the record file: a declined finding, a question not yet answered, a draft not yet filed, a must-fix sent to follow-up, and a fix accepted from the batch after Phase 4 ran, which no review pass has seen. Otherwise "ready for review" reads as "nothing known". That sentence lives here; the Phase 3 tail and the findings section point to it.
+**Closing out.** However Phase 4 ends -- declined, opted out, ran and found nothing, or ran and its findings were sorted and fixed -- the gauntlet closes at the end of the batch, and again at the end of any message reporting what the answers led to. Tell the user the gauntlet is complete and the branch is ready for human review. In the same breath name everything still open, and leave those entries unchecked in the record file: a declined finding, a question not yet answered (in a batch that asks any, those questions), a draft not yet filed, a must-fix sent to follow-up, and a fix accepted from the batch that no Phase 4 pass has seen, whether Phase 4 ran before it or never ran. Otherwise "ready for review" reads as "nothing known". That sentence lives here; the Phase 3 tail and the findings section point to it.
 
 **Two things the decision does not change.** Light mode (Phase 0) runs the Phase 1 checks in the main agent, but Phase 4 is always a dispatched agent, and light mode does not alter the triggers: a sub-50-line diff can still carry a migration or a guard rewrite. And the trigger is for the announcement and the record only; the brief below stays as written regardless of why Phase 4 ran ("Dispatch a fresh sub-agent" says why).
 
@@ -426,12 +426,12 @@ If the agent finds something credible:
 
 1. Append the findings to `.claude/gauntlets/<branch-name>-gauntlet.md` under a new "Phase 4 -- find-the-bug" section, so the persisted record stays complete.
 2. Sort them by "When Phase 3 fixes", exactly as Phase 3's findings: a credible bug with an unambiguous fix is fixed without asking, and anything on a judgment ground joins the batch. A bug found here is almost always `must-fix` by nature, and a clear one is not a question.
-3. Fix the fix bucket through the same four rules -- write the failing spec that captures the bug, watch it RED, then fix and confirm GREEN. Then re-run step 1 of the Phase 3 tail, which re-enters "When the suite gate runs" as the tail: Phase 4 fixes are unreviewed fixes too. Phase 4 runs once per gauntlet; its own fixes do not trigger a second pass. Then send the batch, and close out per "When Phase 4 runs".
+3. Fix the fix bucket through the same four rules -- write the failing spec that captures the bug, watch it RED, then fix and confirm GREEN. Then re-run step 1 of the Phase 3 tail, which re-enters "When the suite gate runs" as the tail: Phase 4 fixes are unreviewed fixes too. Phase 4 runs once per gauntlet; its own fixes do not trigger a second pass. Then return to step 4 of the Phase 3 tail, which sends the batch.
 
 If the agent finds nothing:
 
 1. Relay the agent's "where I looked" summary in the batch. This is signal, not noise -- it tells the user the bug-hunt happened and what it covered.
-2. Send the batch, and close out per "When Phase 4 runs".
+2. Return to step 4 of the Phase 3 tail, which sends the batch.
 
 ---
 
