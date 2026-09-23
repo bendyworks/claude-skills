@@ -39,9 +39,10 @@ an `or` of conditions, or a SQL string fragment. The name earns its
 place by making the call site read as the question it answers
 ("records shared with this user"), not by reuse.
 
-**Leave a hash-condition `where` where it is, however many keys it
-has.** `where(owner: user, status: :draft)` already reads as its
-question.
+**Leave a hash-condition `where` on the model's own columns where it
+is, however many keys it has.** `where(owner: user, status: :draft)`
+already reads as its question. A hash condition on a joined table
+(`joins(:grants).where(grants: { user: user })`) is still a join.
 
 - **Put the query with the data and the rule with the rule.** The
   model holds the relation; the policy, service, or job holds who
