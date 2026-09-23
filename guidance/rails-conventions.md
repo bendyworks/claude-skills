@@ -33,10 +33,11 @@ as relationship keys.
 
 **Move a query into a named scope on the model when it is built from
 join keys or SQL rather than domain words, even when it has one
-caller.** The shapes that trigger it, anywhere but the model: a
-subquery on join keys (`where(id: other.select(:some_id))`), a join
-used to filter (`joins` or `left_joins` with a condition on the
-joined table), an `or` of conditions, or a SQL string fragment. The
+caller.** The shapes that trigger it, anywhere outside the queried
+model's class: a subquery on join keys
+(`where(id: other.select(:some_id))`), a join used to filter (`joins`
+or `left_joins` with a condition on the joined table), an `or` of
+conditions, or a SQL string condition (`where("...")`). The
 name earns its place by making the call site read as the question it
 answers ("records shared with this user"), not by reuse. Eager
 loading against N+1 queries (`includes`, `preload`, `eager_load`
@@ -45,7 +46,9 @@ the call site.
 
 **Leave a hash-condition `where` on the model's own columns where it
 is, however many keys it has.** `where(owner: user, status: :draft)`
-already reads as its question. A hash condition on a joined table
+already reads as its question. `where.not` and ranges
+(`where(created_at: 1.week.ago..)`) count as hash conditions; an
+`or` of them is still an `or`. A hash condition on a joined table
 (`joins(:grants).where(grants: { user: user })`) is still a join.
 
 - **Put the query with the data and the rule with the rule.** The
