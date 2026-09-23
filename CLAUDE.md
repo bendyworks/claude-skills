@@ -28,14 +28,17 @@ from them, so a red run there is a bug to fix, not a deploy that failed.
 
 ## Tracker
 
-GitHub Issues is this repo's tracker of record. Plan files, branches, and PRs
-are named after the issue they serve, in `NNN-title-slug` form.
+GitHub Issues is this repo's tracker of record. GitHub issues here are called
+CS-NNN: CS-NNN is issue #NNN.
 
 ## Everything here is public
 
-This repo is public and its history is permanent. No client names, real
-tracker IDs (use the neutral `ABC-NNN` form), personal email addresses, or
-absolute home-directory paths -- in code, prose, commits, or PR descriptions.
+This repo is public and its history is permanent. No client names, other
+projects' tracker IDs (use the neutral `ABC-NNN` form), personal email
+addresses, or absolute home-directory paths -- in code, prose, commits, or PR
+descriptions. This repo's own `CS-NNN` and `#NNN` are fine in commits, PR
+titles, and PR descriptions; shipped skills and guidance still use
+placeholders.
 CONTRIBUTING.md has the full rule and the checks that enforce the mechanical
 half of it.
 
