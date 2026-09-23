@@ -33,6 +33,11 @@ developer's recent debugging session is not. If a future reader has to
 know what was happening in the author's head when they wrote it, the
 comment is wrong.
 
+Before writing a comment that explains *what* code does, try naming
+it instead: a method, a variable, or a named query whose name says
+it. Once the name carries the meaning, delete the comment; what
+survives is the *why* a name cannot hold.
+
 ## Plain language
 
 The same permanence test applies to the words themselves: write for

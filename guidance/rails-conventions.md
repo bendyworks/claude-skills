@@ -29,6 +29,75 @@ the `id` column, paired with standard `belongs_to` and `has_many`
 associations. Never use non-standard keys like email or name fields
 as relationship keys.
 
+## Name the query on the model
+
+**Move a query into a named scope on the model when it is built from
+join keys or SQL rather than domain words, even when it has one
+caller.** The shapes that trigger it, anywhere outside the queried
+model's class: a subquery on join keys
+(`where(id: other.select(:some_id))`), a join used to filter (`joins`
+or `left_joins` with a condition on the joined table), an `or` of
+conditions, or a SQL string condition (`where("...")`). The
+name earns its place by making the call site read as the question it
+answers ("records shared with this user"), not by reuse. Eager
+loading against N+1 queries (`includes`, `preload`, `eager_load`
+with no condition on the joined table) is not a trigger and stays at
+the call site.
+
+**A hash-condition `where` on the model's own columns is not a
+trigger, however many keys it has.**
+`where(owner: user, status: :draft)` already reads close to its
+question, so the rule does not require a scope for it. Naming it is still a good call when the name
+reads better at the call site or the query repeats; reach first for
+the names Rails already generates, an enum's scope (`Record.draft`)
+or an association (`user.records`), before adding one.
+`where.not` and ranges (`where(created_at: 1.week.ago..)`) count as
+hash conditions; an `or` of them is still an `or`. A hash condition
+on a joined table (`joins(:grants).where(grants: { user: user })`)
+is still a join.
+
+- **Put the query with the data and the rule with the rule.** The
+  model holds the relation; the policy, service, or job holds who
+  gets it and when. The scope makes no authorization decision (an
+  admin check stays in the policy), and the policy repeats none of
+  the scope's SQL.
+- **Reaching for a comment to explain what a query selects is the
+  signal to name it.** Name it, then delete the comment. A comment
+  that survives carries something a name cannot: a third-party quirk,
+  a stakeholder constraint.
+- **Keep a framework's documented call shape at the call site.**
+  Pundit's `policy_scope(Record).find(params[:id])` stays, since
+  `verify_policy_scoped` depends on it; what changes is that the
+  query behind it has a name.
+- Pick the form by what the query needs: a `scope` for a relation
+  that answers one question; a class method when a branch could
+  return `nil`, since a scope turns `nil` into `all` and widens the
+  result; a query object or service when the query's subject is
+  several models' rows (a report combining them) or it takes many
+  parameters, per the service-object rule above. Reaching another
+  table to filter one model's rows, as every trigger above does, is
+  still a scope on that model.
+
+```ruby
+# app/models/record.rb
+scope :shared_with, ->(user) { where(id: user.access_grants.select(:record_id)) }
+
+# app/policies/record_policy.rb
+def resolve
+  return scope.none unless user
+  return scope.all if user.admin?
+
+  scope.shared_with(user)
+end
+```
+
+The subquery narrows whatever relation the scope is called on, which
+is what a Pundit scope needs: returning a `has_many :through`
+association such as `user.shared_records` from `resolve` would ignore
+the `scope` the policy was handed, and a `joins(:access_grants)`
+version would return a record once for each of the user's grants on
+it.
+
 ## Enums
 
 - Use integer columns in the database for performance, but never
