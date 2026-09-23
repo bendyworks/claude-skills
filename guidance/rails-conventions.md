@@ -79,8 +79,9 @@ end
 The subquery narrows whatever relation the scope is called on, which
 is what a Pundit scope needs: returning a `has_many :through`
 association such as `user.shared_records` from `resolve` would ignore
-the `scope` the policy was handed, and `joins(:access_grants)` would
-return a record once per grant.
+the `scope` the policy was handed, and a `joins(:access_grants)`
+version would return a record once for each of the user's grants on
+it.
 
 ## Enums
 
