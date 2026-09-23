@@ -44,12 +44,17 @@ loading against N+1 queries (`includes`, `preload`, `eager_load`
 with no condition on the joined table) is not a trigger and stays at
 the call site.
 
-**Leave a hash-condition `where` on the model's own columns where it
-is, however many keys it has.** `where(owner: user, status: :draft)`
-already reads as its question. `where.not` and ranges
-(`where(created_at: 1.week.ago..)`) count as hash conditions; an
-`or` of them is still an `or`. A hash condition on a joined table
-(`joins(:grants).where(grants: { user: user })`) is still a join.
+**A hash-condition `where` on the model's own columns is not a
+trigger, however many keys it has.**
+`where(owner: user, status: :draft)` already reads close to its
+question, so the rule does not require a scope for it. Naming it is still a good call when the name
+reads better at the call site or the query repeats; reach first for
+the names Rails already generates, an enum's scope (`Record.draft`)
+or an association (`user.records`), before adding one.
+`where.not` and ranges (`where(created_at: 1.week.ago..)`) count as
+hash conditions; an `or` of them is still an `or`. A hash condition
+on a joined table (`joins(:grants).where(grants: { user: user })`)
+is still a join.
 
 - **Put the query with the data and the rule with the rule.** The
   model holds the relation; the policy, service, or job holds who
