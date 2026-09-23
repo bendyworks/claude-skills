@@ -64,8 +64,11 @@ already reads as its question. A hash condition on a joined table
 - Pick the form by what the query needs: a `scope` for a relation
   that answers one question; a class method when a branch could
   return `nil`, since a scope turns `nil` into `all` and widens the
-  result; a query object or service when the query spans several
-  models or many parameters, per the service-object rule above.
+  result; a query object or service when the query's subject is
+  several models' rows (a report combining them) or it takes many
+  parameters, per the service-object rule above. Reaching another
+  table to filter one model's rows, as every trigger above does, is
+  still a scope on that model.
 
 ```ruby
 # app/models/record.rb
