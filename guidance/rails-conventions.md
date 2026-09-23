@@ -34,10 +34,14 @@ as relationship keys.
 **Move a query into a named scope on the model when it is built from
 join keys or SQL rather than domain words, even when it has one
 caller.** The shapes that trigger it, anywhere but the model: a
-subquery on join keys (`where(id: other.select(:some_id))`), a join,
-an `or` of conditions, or a SQL string fragment. The name earns its
-place by making the call site read as the question it answers
-("records shared with this user"), not by reuse.
+subquery on join keys (`where(id: other.select(:some_id))`), a join
+used to filter (`joins` or `left_joins` with a condition on the
+joined table), an `or` of conditions, or a SQL string fragment. The
+name earns its place by making the call site read as the question it
+answers ("records shared with this user"), not by reuse. Eager
+loading against N+1 queries (`includes`, `preload`, `eager_load`
+with no condition on the joined table) is not a trigger and stays at
+the call site.
 
 **Leave a hash-condition `where` on the model's own columns where it
 is, however many keys it has.** `where(owner: user, status: :draft)`
