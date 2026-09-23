@@ -659,11 +659,12 @@ Draft a plan with:
       tool. The gauntlet is a multi-front quality pass that *requires*
       clean-and-green as its starting state -- it dispatches parallel
       sub-agents to audit cruft, idioms, RSpec quality, validation
-      bypass, and security, then triages findings into a punch list.
-      Run it after step 1 because it expects specs and lint to already
-      pass; run it before step 3 because any findings the user accepts
-      should be in the PR before it leaves draft for human review. Skip
-      only if the user explicitly opts out for this issue.
+      bypass, and security, then fixes the clear-cut findings and
+      batches the judgment calls into questions. Run it after step 1
+      because it expects specs and lint to already pass; run it before
+      step 3 because its fixes, and any answers to its questions,
+      should be in the PR before it leaves draft for human review.
+      Skip only if the user explicitly opts out for this issue.
    3. Open the draft PR. In a GitHub-tracked project that declares an
       issue key, its title leads with the key (`PRJ-NNN <Title>`) unless
       the title becomes the commit subject; see Declared issue key for
