@@ -320,7 +320,7 @@ When all sub-agents return, the main agent assembles **one** punch list:
 
 Findings that are one gap seen from two places -- a nil the mailer cannot handle, and the missing validation that lets the nil in -- are sorted together: the same bucket, or an entry saying how the fix to one settles the other.
 
-**Size.** Measure the PR the way the tail's step 2 does, when sorting and again after each fix, and state the latest figure in the batch. A fix whose own lines would carry the measured size past 400 goes to `[ask]`. Once the measured size is past 400 -- from the start, or after the fixes so far -- every remaining fix except a bug the branch introduced goes to `[ask]` as one grouped question naming the size, because a PR past 400 lines should almost always be split. Measure rather than estimate: a running total of guesses is a number nobody checked.
+**Size.** Measure the PR the way the tail's step 2 does, when sorting and again after each fix, and state the latest figure in the batch. A bug the branch introduced is always fixed, whatever the size. Any other fix that carries the measured size past 400 is reverted and re-tagged `[ask]`, and once the size is past 400 -- from the start, or after the fixes so far -- every remaining fix of that kind goes to `[ask]` as one grouped question naming the size, because a PR past 400 lines should almost always be split. Measure the fix once it is made rather than estimating it beforehand: a running total of guesses is a number nobody checked.
 
 **Record, then fix.** Before fixing anything, tag each Phase 2 entry in place in the record file, under its severity heading -- the `risky by fixes` trigger reads severity from there. These are the tag forms, and this is their one definition:
 
@@ -331,10 +331,10 @@ Findings that are one gap seen from two places -- a nil the mailer cannot handle
 
 Then fix the `[fix]` bucket without asking:
 
-1. **TDD where applicable.** A behavior fix gets a failing spec first -- write it, watch it fail, then fix and watch it pass. A spec that cannot be made to fail is evidence: re-tag the finding `[disproved: <what the attempt showed>]`, or `[ask]` when the attempt was inconclusive. A pure-refactor fix needs no new spec.
+1. **TDD where applicable.** A behavior fix gets a failing spec first -- write it, watch it fail, then fix and watch it pass. A spec that cannot be made to fail is evidence: remove it, and re-tag the finding `[disproved: <what the attempt showed>]`, or `[ask]` when the attempt was inconclusive. A pure-refactor fix needs no new spec.
 2. **One logical change per commit**, its message about the change itself, never about the gauntlet.
 3. **A fix that outgrows its finding** -- a new production file (the new spec file rule 1 asks for does not count), a changed public interface, far more lines than the finding implied -- is reverted and re-tagged `[ask]` with what it turned out to need.
-4. **Mark it off with its commit** in the form above, so overruling any automatic fix later is one revert. The `(guard rewrite)` tag matters: the tail's `risky by fixes` trigger reads it, and after a compaction it is the only evidence.
+4. **Mark it off with its commit** in the form above as soon as the commit exists, so overruling any automatic fix later is one revert. A resumed run that finds an unchecked `[fix]` entry checks `git log main..HEAD` and the diff for that change before fixing it again. The `(guard rewrite)` tag matters: the tail's `risky by fixes` trigger reads it, and after a compaction it is the only evidence.
 
 **Follow-up drafts.** Write each follow-up issue's full title and body into the record file under `## Follow-up drafts`. Filing publishes text under the developer's name, so it is never automatic: it is one question in the batch. Once the batch approves, file each draft and write `filed as <ID>` next to it the moment it is filed, checking for that line before filing any draft, so a resumed run never files one twice.
 
