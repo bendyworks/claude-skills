@@ -29,6 +29,58 @@ the `id` column, paired with standard `belongs_to` and `has_many`
 associations. Never use non-standard keys like email or name fields
 as relationship keys.
 
+## Name the query on the model
+
+**Move a query into a named scope on the model when it is built from
+join keys or SQL rather than domain words, even when it has one
+caller.** The shapes that trigger it, anywhere but the model: a
+subquery on join keys (`where(id: other.select(:some_id))`), a join,
+an `or` of conditions, or a SQL string fragment. The name earns its
+place by making the call site read as the question it answers
+("records shared with this user"), not by reuse.
+
+**Leave a hash-condition `where` where it is, however many keys it
+has.** `where(owner: user, status: :draft)` already reads as its
+question.
+
+- **Put the query with the data and the rule with the rule.** The
+  model holds the relation; the policy, service, or job holds who
+  gets it and when. The scope makes no authorization decision (an
+  admin check stays in the policy), and the policy repeats none of
+  the scope's SQL.
+- **Reaching for a comment to explain what a query selects is the
+  signal to name it.** Name it, then delete the comment. A comment
+  that survives carries something a name cannot: a third-party quirk,
+  a stakeholder constraint.
+- **Keep a framework's documented call shape at the call site.**
+  Pundit's `policy_scope(Record).find(params[:id])` stays, since
+  `verify_policy_scoped` depends on it; what changes is that the
+  query behind it has a name.
+- Pick the form by what the query needs: a `scope` for a relation
+  that answers one question; a class method when a branch could
+  return `nil`, since a scope turns `nil` into `all` and widens the
+  result; a query object or service when the query spans several
+  models or many parameters, per the service-object rule above.
+
+```ruby
+# app/models/record.rb
+scope :shared_with, ->(user) { where(id: user.access_grants.select(:record_id)) }
+
+# app/policies/record_policy.rb
+def resolve
+  return scope.none unless user
+  return scope.all if user.admin?
+
+  scope.shared_with(user)
+end
+```
+
+The subquery narrows whatever relation the scope is called on, which
+is what a Pundit scope needs: returning a `has_many :through`
+association such as `user.shared_records` from `resolve` would ignore
+the `scope` the policy was handed, and `joins(:access_grants)` would
+return a record once per grant.
+
 ## Enums
 
 - Use integer columns in the database for performance, but never
