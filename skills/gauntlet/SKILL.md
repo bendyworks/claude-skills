@@ -15,13 +15,13 @@ This skill orchestrates that pass in five phases:
 4. **Phase 3** -- sort every finding, fix the clear-cut ones without asking, and batch the rest as questions at the end (see "When Phase 3 fixes")
 5. **Phase 4** -- a fresh-eyes "find the bug" sub-agent on the final state; runs on its own when its triggers fire and is offered otherwise (see "When Phase 4 runs")
 
-The main agent's job is orchestration: dispatch sub-agents in parallel, merge their reports, dedupe, rank by severity, present a single coherent list. Sub-agents do not make code changes. Fixes happen in Phase 3 with full cross-cutting context.
+The main agent's job is orchestration: dispatch sub-agents in parallel, merge their reports, dedupe, rank by severity, and build a single coherent list to act on. Sub-agents do not make code changes. Fixes happen in Phase 3 with full cross-cutting context.
 
 ## Standing pre-approval -- do NOT prompt for component steps
 
 When the user invokes the gauntlet, every component step and nested skill call is **already approved**. Run them all without pausing to ask permission: `/code-review`, `/security-review` (the security agent), every Phase 1 sub-agent dispatch, the suite gate whenever "When the suite gate runs" says to run it, and the Phase 4 "find the bug" pass whenever "When Phase 4 runs" says it runs. Never stop to ask "is it ok to run /code-review?" or "should I dispatch the audit agents?" -- just proceed through the phases.
 
-Fixing is covered too: every finding "When Phase 3 fixes" sorts into its fix bucket is fixed without asking, in Phase 3 and in Phase 4 alike. The run's one built-in stop is the question batch at its end, which carries the judgment calls that subsection names, the Phase 4 offer when "When Phase 4 runs" says to ask rather than run, and whether to file the follow-up drafts. **Filing an issue, or posting anything else to a tracker, is never pre-approved:** it publishes text under the developer's name, so it always waits for the batch. Everything else runs unprompted.
+Fixing is covered too: every finding "When Phase 3 fixes" sorts into its fix bucket is fixed without asking, in Phase 3 and in Phase 4 alike. After Phase 0's precondition checks, the run stops for the developer only where that subsection says: the question batch at the end, or the pick when the developer asked to triage. **Filing an issue, or posting anything else to a tracker, is never pre-approved** (that subsection says why). Everything else runs unprompted.
 
 ## Rules already covered elsewhere -- do NOT restate
 
@@ -50,7 +50,7 @@ Settle preconditions 1, 2, and 4 before entering the gate list, so a ten-minute 
 
 **Non-git version control:** the commands throughout this skill assume git. If the user works in another VCS (e.g. Jujutsu colocated with git), ask them for the change range ("which revisions are the current work?") and translate the `git diff main...HEAD` commands to that tool's equivalents -- the phases themselves don't change. Don't make the user volunteer this; ask when the working-copy state looks unfamiliar.
 
-**Cost expectations:** a full run is deliberately thorough and correspondingly token-hungry -- /code-review plus five parallel audits, plus a Phase 4 agent when its triggers fire, can consume a noticeable slice of a subscription session's budget. Before starting Phase 1, tell the user the planned agent count so they can trim (Step 3), choose light mode, or exclude Phase 4 -- an opt-out given any time before the Phase 3 tail is honored, and this is the natural moment for it. Say too that Phase 3 fixes clear-cut findings without stopping. These choices are the run's only cost levers: once findings exist, cost is never a reason to leave one unfixed (see "When Phase 3 fixes"). Phase 0 can only predict Phase 4: all three triggers are measured at the Phase 3 tail, and two cannot be known earlier (see "When Phase 4 runs"). On a large diff, say explicitly that this will be an expensive pass and that Phase 4 is expected to run on its own.
+**Cost expectations:** a full run is deliberately thorough and correspondingly token-hungry -- /code-review plus five parallel audits, plus a Phase 4 agent when its triggers fire, can consume a noticeable slice of a subscription session's budget. Before starting Phase 1, tell the user the planned agent count so they can trim (Step 3), choose light mode, or exclude Phase 4 -- an opt-out given any time before the Phase 3 tail is honored, and this is the natural moment for it. Say too that Phase 3 fixes clear-cut findings without stopping, and that "let me triage" keeps the pick-first pause instead. These choices are the run's cost levers; "When Phase 3 fixes" says why none applies once findings exist. Phase 0 can only predict Phase 4: all three triggers are measured at the Phase 3 tail, and two cannot be known earlier (see "When Phase 4 runs"). On a large diff, say explicitly that this will be an expensive pass and that Phase 4 is expected to run on its own.
 
 ### When the suite gate runs
 
@@ -194,7 +194,7 @@ Every sub-agent prompt MUST tell the agent to:
    - `path/to/file.rb:88` -- ...
 
    ## Considered but ruled out
-   - One-line note on anything that looked suspicious but checked out, so the main agent doesn't re-investigate.
+   - One-line note on anything that looked suspicious but checked out, so the main agent can cross-check it against the other agents' findings.
    ```
 
 5. Stay in lane. The cruft agent doesn't comment on RSpec patterns; the rspec-quality agent doesn't comment on security; etc.
@@ -287,7 +287,7 @@ The agent-specific briefs below are starting templates. Adjust wording to match 
 > - **Cross-tenant data leaks.** If the change introduces a new query, can a user of one tenant, account, or organization hit it for another's data?
 > - **Authentication bypass.** Any new endpoints that should require login but don't?
 >
-> Read `CLAUDE.md` first. Report only -- do not write fix code. The user wants to see all findings before triaging.
+> Read `CLAUDE.md` first. Report only -- do not write fix code. The main agent sorts and acts on every finding, so report them all.
 
 ---
 
@@ -297,10 +297,10 @@ When all sub-agents return, the main agent assembles **one** punch list:
 
 0. **Fold in the /code-review findings and the Step 4 patch-coverage findings** alongside the sub-agent findings before deduping -- they belong in the same list and the same sorting. Map /code-review's findings onto the severity bands by their stated severity or impact; a finding that carries neither clearly defaults to should-fix.
 1. **Dedupe -- the only thing Phase 2 drops.** Same `file:line` flagged by multiple agents = one entry, listing both reasons. Whether a finding is in scope, or right at all, is Phase 3's call, so every other entry reaches it.
-2. **Sort by severity first, then by file.** `must-fix` block at the top, then `should-fix`, then `nit`.
+2. **Rank by severity first, then by file.** `must-fix` block at the top, then `should-fix`, then `nit`.
 3. **Cross-reference.** When one agent's "considered but ruled out" covers another agent's finding, note both on the entry rather than dropping either: Phase 3 settles the disagreement with evidence (see "When Phase 3 fixes"). (/code-review reports findings only -- it has no "Considered but ruled out" section to cross-reference.)
 4. **Persist.** Add the consolidated list to the record file Step 2 created (`.claude/gauntlets/<branch-name>-gauntlet.md`), below its header, so it survives a `/clear`, context compaction, or session resume. Write it even when the list is empty -- a zero-findings run still reaches the Phase 3 tail, and its Phase 4 decision line lands in this file. The `-gauntlet` suffix is mandatory: plan files under `.claude/plans/` often share the same slug-based basenames, and the harness permission prompt shows only the basename, so the suffix is what lets the user tell a gauntlet write from a plan write at approval time. This is a local working file -- suggest the user gitignore `.claude/gauntlets/` if it isn't already.
-5. **Count, and keep going.** Note the counts ("12 findings: 2 must-fix, 6 should-fix, 4 nit") for the report, and go straight on to Phase 3 in the same turn. The list reaches the user in the batch at the end of the run; a message showing it on its own would end the turn and stall the run here.
+5. **Count, and keep going.** Note the counts ("12 findings: 2 must-fix, 6 should-fix, 4 nit") for the batch, and go straight on to Phase 3 in the same turn. The list reaches the user in the batch at the end of the run; a message showing it on its own would end the turn and stall the run here.
 
 ---
 
@@ -308,7 +308,7 @@ When all sub-agents return, the main agent assembles **one** punch list:
 
 ### When Phase 3 fixes
 
-**The default is fix. A finding leaves the fix bucket only on one of the grounds below; severity, time, and tokens are never grounds.** A nit is fixed like a must-fix: many developers are exacting about idioms and quality, and a nit in lines the branch already touches is cheaper now than it will ever be again. What a run costs is settled in Phase 0, before any finding exists, and is never a reason to leave one unfixed. This subsection is the one home of what happens to a finding; the overview, the standing pre-approval, Phase 2, and Phase 4 point here.
+**The default is fix. A finding leaves the fix bucket only on one of the grounds below; severity, time, and tokens are never grounds.** A nit is fixed like a must-fix: many developers are exacting about idioms and quality, and a nit in lines the branch already touches is cheaper now than it will ever be again. What a run costs is settled in Phase 0, before any finding exists, and is never a reason to leave one unfixed. This subsection is the one home of what happens to a finding; other sections point here.
 
 **Sort.** **Every finding ends in exactly one of four buckets -- none is dropped -- and each is checked against the code before it is sorted.** Read the lines the finding names and the lines its claim rests on: an "unused" method gets a search for its callers, a "bypass" gets the line that bypasses. A finding that looks clear on paper is only clear once that check agrees with it. Then take the finding down this list and put it in the bucket of the first ground that matches, writing the ground next to it. A bucket with its reason is one the developer can overrule in a sentence; a bare one costs a round trip.
 
