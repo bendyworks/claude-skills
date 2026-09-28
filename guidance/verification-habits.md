@@ -38,3 +38,14 @@ full name is exactly how a fabricated one slips through.
 - Before calling a method, check whether it is a class method or an
   instance method, and verify its return value. Handle both success
   and failure cases.
+
+## A planned check closes only by running
+
+When a plan names a specific check -- a browser walkthrough, a console
+query on staging, a manual QA step -- it closes only when the check runs
+and passes, whether the session ran it or the developer says they did. A
+run that fails is a finding to fix, not a closed check. Evidence
+gathered another way is reported beside it, and the check stays listed
+as outstanding until then. A check the developer drops is reported as
+dropped at their direction, never as passed. The browser-checks guidance
+covers a check that needs a signed-in browser.
