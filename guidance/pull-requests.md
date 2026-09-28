@@ -22,6 +22,33 @@ keeping it small before it drifts large.
 Always create PRs in draft mode first. Mark ready for review only once
 lint and tests pass and the PR is genuinely ready for a human.
 
+### A draft is its own review
+
+Where a team requires the developer to approve text posted under their
+name, the draft is where that approval happens. No one is asked to
+review a draft until it is marked ready, so the developer reading its
+title and body on GitHub, where they render, is the approval. Open the
+draft without a separate approval pass beforehand, give the developer
+its link, and do not mark it ready until the developer has read it --
+on such a team this qualifies Who presses Merge below, which otherwise
+has a session mark a pull request ready on its own. When a revision
+lands after the developer's last read, say so at the hand-back, so the
+pull request is never marked ready over text the developer has not
+seen. To revise, fetch the current title and body first (`gh pr view
+--json title,body`): the developer may have edited them on GitHub, and
+`gh pr edit --body-file` replaces the whole body.
+
+A draft is not private. On a public repository anyone can read it the
+moment it opens, and repository watchers and integrations are notified,
+so the checks that come before publishing anything -- the destination's
+visibility, identifiers that must not appear there -- still happen
+before it opens.
+
+This covers only pull requests that open as drafts; in a stacked
+chain, only the ones created as drafts. A pull request opened ready for
+review, a PR comment, and a review reply keep whatever approval the
+team requires.
+
 ## Lead with why
 
 Open every PR description with a short Why paragraph: the
