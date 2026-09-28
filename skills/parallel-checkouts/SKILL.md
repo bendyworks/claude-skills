@@ -49,14 +49,14 @@ mode does not wait for the preparation to merge (see Step 1 of add).
   and in add skip every step marked *services*.
 - **Native services.** The app's Postgres and Redis run directly on
   the host (Homebrew, a system package), shared by every project on
-  the machine. This is the path this skill covers. A SQLite database
-  already lives inside each checkout's directory and needs no edit.
-- **Containerized services.** A Docker Compose file (or a
+  the machine. A SQLite database already lives inside each checkout's
+  directory and needs no edit.
+- **Containerized services.** A Docker Compose file (often under
   `.devcontainer/`) starts the database, Redis, or the app itself.
-  **Stop here and say so plainly:** this skill does not yet cover
-  containerized projects, and applying the native recipe to one is
-  wrong -- per-container ports and Compose project names are the
-  heart of that case, and the native steps set neither. Make no edits.
+  Each checkout gets its own Compose project, so its containers,
+  networks, and volumes are its own, and its published host ports move
+  by offset. The native recipe is wrong here -- it sets neither -- so
+  prepare, add, and remove each have a containerized section below.
 
 Signals: `config/database.yml` with no `host:` or a `localhost` host
 and no compose file means native. A `docker-compose*.yml`,
@@ -81,6 +81,7 @@ For checkout N (N = 2, 3, ...; the primary is checkout 1):
 | `PRJ_CHECKOUT_INDEX` | `0` | `N - 1` |
 | `PRJ_PORT_OFFSET` | `0` | `200 * (N - 1)` |
 | `PRJ_CHECKOUT_ROOT` | (unset) | the checkout's absolute path |
+| `COMPOSE_PROJECT_NAME` *(containerized)* | today's project name | today's name plus `N` |
 
 plus one derived variable per port and per Redis role, below. They are
 exported from the checkout's `.envrc` ([direnv](https://direnv.net/)).
@@ -241,6 +242,93 @@ Each edit keeps today's literal as the fallback:
    identity, lists every default kept, and names the production
    configuration it does not touch.
 
+## Mode: prepare (containerized)
+
+The deliverable is again one pull request in the project, plus the
+primary's own identity on this machine. Unlike the native path, the
+primary gets an identity too (offset 0, today's project name): the
+stack scripts refuse a checkout whose `.devcontainer/.env` names no
+project, and naming it explicitly is what lets them tell two checkouts
+apart. Every tracked change still falls back to today's value, so a
+teammate who sets nothing sees no difference in a bare
+`docker compose` call.
+
+### Step 1 -- Check whether it is already prepared
+
+`bin/compose-project` present, and the compose file's `name:` reading
+`COMPOSE_PROJECT_NAME`, means prepared: offer the add mode instead.
+
+### Step 2 -- Inventory what two copies would share
+
+- **The compose files and the project name.** Every compose file the
+  project's scripts or README use, and today's project name: the
+  top-level `name:`, or else the compose file's directory name, which
+  is Compose's default.
+- **Published host ports** -- every `ports:` entry. The host side
+  moves by offset; the container side never does.
+- **Host networking.** A service with `network_mode: host` publishes
+  nothing, so every port it listens on or connects to is a host port,
+  and each needs the native path's treatment in the app's own config
+  (database, Redis, and test server ports reading prefixed variables),
+  with the compose service given `.devcontainer/.env` as an `env_file`
+  so the app sees them.
+- **Things that escape the project name:** a `container_name:` key
+  (fixed names collide across checkouts; remove it), and any network or
+  volume marked `external: true` (shared by every checkout; say so and
+  ask whether that sharing is intended).
+- **Hardcoded container names** -- search the README, docs, scripts,
+  `bin/`, and data migrations for `docker exec`, `<project>-<service>-1`,
+  and `<project>_<service>_1`. Each becomes `bin/dexec` (or
+  `DEXEC_SERVICE=<service> bin/dexec`).
+- **Writers of `.devcontainer/.env`** -- an `initialize.sh` or a README
+  step that writes it. The identity block below shares the file with
+  them and keeps their lines.
+- **Specs that stub the variables you are about to wrap**, as in the
+  native path.
+
+### Step 3 -- Choose the prefix and confirm the plan
+
+As in the native path: show the inventory, the prefix, and the edits,
+then continue.
+
+### Step 4 -- Make the edits
+
+- **The project name:** `name: ${COMPOSE_PROJECT_NAME:-<today's name>}`
+  at the top of each compose file, so a bare `docker compose` in a
+  shell with no identity still resolves today's project.
+- **Host ports:** `"${PRJ_APP_PORT:-3000}:3000"` for each published
+  port, one variable per port, named for what listens there. The same
+  200-port offset applies, so the published ports must fall within 200
+  of the lowest, as in the native path.
+- **The stack scripts:** copy `compose-project`, `dexec`, `docker-up`,
+  `docker-down`, `docker-rebuild`, and `check-parallel-dev` from this
+  skill's `templates/` into the project's `bin/`, replacing `PRJ` with
+  the prefix and keeping them executable. If the compose file is not
+  `.devcontainer/docker-compose.yml`, adapt `compose_project_dir` (and
+  the compose file name beside it) in `bin/compose-project`; the other
+  scripts follow it. If the app service is not named `app`, say so in
+  the doc: `DEXEC_SERVICE` picks the service.
+- **Hardcoded container names:** replace each with `bin/dexec`.
+- **Ignore files:** `.devcontainer/.env` and
+  `.devcontainer/docker-compose.override.yml` are per-machine; make sure
+  `.gitignore` covers both.
+- **The doc:** write `docs/parallel-checkouts.md` from
+  `templates/parallel-checkouts-containerized.md`: the variables, the
+  `.envrc` block with the copy into `.devcontainer/.env`, and how to
+  add a checkout. Link it from the README's development section.
+
+### Step 5 -- Give the primary its identity, verify, then ship
+
+1. Add the identity block to the primary's `.envrc` with suffix empty,
+   offset 0, and `COMPOSE_PROJECT_NAME` set to today's name, followed
+   by the mirror block (add mode Step 3 shows both), then
+   `direnv allow`. The `.env` file's other lines must survive; confirm
+   by name, never by printing values.
+2. `cd <primary> && direnv exec . bin/check-parallel-dev` must pass.
+3. With the stack up (`bin/docker-up`), run the project's full suite
+   through `bin/dexec`: it must pass as on the default branch.
+4. Open the pull request, as in the native path.
+
 ## Mode: add checkout N
 
 Run from the primary checkout. Pick N as the lowest number from 2 up
@@ -322,7 +410,36 @@ export PRJ_CABLE_REDIS_URL="redis://localhost:6379/$((1 + 2 * PRJ_CHECKOUT_INDEX
 
 (Here the roles default to 0 and 1, so the stride is 2.)
 
-*(services)* Then record the suffix where the guard looks for it, in
+*(containerized)* The block names the Compose project and the published
+ports, then copies every identity variable into `.devcontainer/.env`,
+where Compose and the stack scripts read it, keeping the file's other
+lines (its secrets, and whatever an initializer wrote):
+
+```bash
+# Parallel-checkout identity. See docs/parallel-checkouts.md.
+export COMPOSE_PROJECT_NAME=app2
+export PRJ_CHECKOUT_SUFFIX=2
+export PRJ_CHECKOUT_INDEX=1
+export PRJ_PORT_OFFSET=$((200 * PRJ_CHECKOUT_INDEX))
+export PRJ_CHECKOUT_ROOT="$PWD"
+export PRJ_APP_PORT=$((3000 + PRJ_PORT_OFFSET))
+export PRJ_DB_PORT=$((5432 + PRJ_PORT_OFFSET))
+
+# Copy the identity into .devcontainer/.env on every load; other lines are kept.
+identity='^(export[[:space:]]+)?(COMPOSE_PROJECT_NAME|PRJ_CHECKOUT_[A-Z0-9_]*|PRJ_PORT_OFFSET|PRJ_[A-Z0-9_]*_PORT)='
+{
+  grep -Ev "$identity" .devcontainer/.env 2>/dev/null || true
+  env | grep -E "$identity" | sort
+} > .devcontainer/.env.direnv-tmp && mv .devcontainer/.env.direnv-tmp .devcontainer/.env
+```
+
+The copy writes exactly the variables the stack scripts compare, so the
+two cannot disagree; writing the file by hand instead invites a
+checkout whose `.envrc` and `.env` name different stacks. A containerized
+checkout needs no marker file: the stack scripts check the identity
+themselves.
+
+*(services, native)* Then record the suffix where the guard looks for it, in
 the new clone's git directory, where `git clean` cannot reach it and
 every worktree of the clone finds it:
 `printf '2\n' > "$(git -C <new> rev-parse --path-format=absolute --git-common-dir)/parallel-checkout"`.
@@ -349,7 +466,7 @@ decision.
   the Redis config is the user's call, since every project shares it.
   With no Redis server running at all, say so and move on.
 
-### Step 5 -- Databases and dependencies *(services)*
+### Step 5 -- Databases and dependencies *(services, native)*
 
 Nothing here runs until the new checkout proves it resolves its own
 database names. A clone on a branch without the preparation has no
@@ -405,6 +522,35 @@ cd <new> && direnv exec . bin/rails db:create db:schema:load RAILS_ENV=test
 `createdb -T` fails while the source has open connections; stop the
 primary's dev server first.
 
+### Step 5 -- Its own stack *(containerized)*
+
+Nothing starts until the new checkout proves it resolves its own
+project: `cd <new> && direnv exec . bin/check-parallel-dev` must name
+`<project>N` and pass every check it can run with the stack down. A
+clone on a branch without the preparation has no stack scripts, and a
+bare `docker compose` there resolves the primary's project, so install
+the same `post-checkout` hook as the native path, testing for
+`bin/compose-project` rather than the guard initializer, and never type
+a bare `docker compose` in the new checkout.
+
+Then build and start it, and bootstrap inside its containers the way
+the project's README does, every command through `bin/dexec`:
+
+```bash
+cd <new> && direnv exec . bin/docker-rebuild
+cd <new> && direnv exec . bin/dexec bundle install
+cd <new> && direnv exec . bin/dexec bin/rails db:create db:schema:load
+```
+
+To start from the primary's development data, pipe a dump between the
+two database containers (`DEXEC_SERVICE` picks the service, and
+`bin/dexec` forwards piped input):
+
+```bash
+(cd <primary> && direnv exec . env DEXEC_SERVICE=db bin/dexec pg_dump -U postgres <database>) |
+  (cd <new> && direnv exec . env DEXEC_SERVICE=db bin/dexec psql -U postgres <database>)
+```
+
 ### Step 6 -- Share Claude Code state with the primary
 
 Two checkouts of one project should share what Claude Code has learned
@@ -456,7 +602,10 @@ work the same plan from both at once), and one `settings.local.json`
    example counts. A failure that appears only when the two overlap
    is a collision the inventory missed: find the shared resource, add
    it to the doc and the tracked config, and rerun.
-2. Prove the guard *(services)*, matching the guard's own words rather
+   *(containerized)* Run each suite through `bin/dexec`, and first
+   confirm `bin/check-parallel-dev` passes every check, including
+   reaching the app container, in both checkouts.
+2. Prove the guard *(services, native)*, matching the guard's own words rather
    than any failure, since an app can fail to boot for unrelated
    reasons:
    - `cd <new> && direnv exec . bin/rails runner -e test 'puts 1'`
@@ -493,7 +642,14 @@ removes the checkout rather than only the link.
    Anything unexpected stops the removal and goes back to the user.
 2. **Stop its processes:** a dev server, a Sidekiq worker, anything
    bound to its ports.
-3. *(services)* Resolve its database names the way add Step 5 does
+3. *(containerized)* Resolve its Compose project through its own
+   stack scripts
+   (`cd <checkout> && direnv exec . bash -c '. bin/compose-project && echo "$COMPOSE_PROJECT_NAME"'`),
+   require the name to end in N and differ from the primary's, then
+   `cd <checkout> && direnv exec . bin/docker-down --volumes`, which
+   removes that project's containers, networks, and volumes and nothing
+   else. Never a bare `docker compose down` there.
+   *(services, native)* Resolve its database names the way add Step 5 does
    and require both to end in its suffix, then drop exactly those:
    `dropdb <name>` for each. Parallel test workers leave more
    (`<name>-0`, `<name>-1` from Rails' `parallelize`; `<name>1`,
@@ -525,6 +681,10 @@ removes the checkout rather than only the link.
   Merge the default branch into a branch before checking it out in
   checkout N, and do not bisect across the preparation there. The
   `post-checkout` hook from add Step 5 warns when this happens.
+- **A containerized checkout's worktrees must live inside it.** The app
+  container bind-mounts the checkout's directory, so a worktree under
+  `.claude/worktrees/` is visible inside the container and one created
+  elsewhere is not.
 - **Worktrees share their checkout's identity.** A worktree nested in
   a checkout picks up its `.envrc`; one created elsewhere needs
   `direnv exec <checkout>`. Two full suites from two worktrees of one
