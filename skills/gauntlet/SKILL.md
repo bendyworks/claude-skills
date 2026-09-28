@@ -429,12 +429,12 @@ If the agent finds something credible:
 
 1. Append the findings to `.claude/gauntlets/<branch-name>-gauntlet.md` under a new "Phase 4 -- find-the-bug" section, so the persisted record stays complete.
 2. Sort them by "When Phase 3 fixes", exactly as Phase 3's findings: a credible bug with an unambiguous fix is fixed without asking, and anything on a judgment ground joins the batch. A bug found here is almost always `must-fix` by nature, and a clear one is not a question.
-3. Fix the fix bucket through the same four rules -- write the failing spec that captures the bug, watch it RED, then fix and confirm GREEN. Then re-run step 1 of the Phase 3 tail, which re-enters "When the suite gate runs" as the tail: Phase 4 fixes are unreviewed fixes too. Phase 4 runs once per gauntlet; its own fixes do not trigger a second pass. Then return to the Phase 3 tail as the paragraph after both lists says.
+3. Fix the fix bucket through the same four rules -- write the failing spec that captures the bug, watch it RED, then fix and confirm GREEN. Then re-run step 1 of the Phase 3 tail, which re-enters "When the suite gate runs" as the tail: Phase 4 fixes are unreviewed fixes too. Phase 4 runs once per gauntlet; its own fixes do not trigger a second pass.
 
 If the agent finds nothing:
 
-1. Relay the agent's "where I looked" summary in the batch. This is signal, not noise -- it tells the user the bug-hunt happened and what it covered.
-2. Return to the Phase 3 tail as the paragraph after both lists says.
+1. Append the agent's "where I looked" summary to `.claude/gauntlets/<branch-name>-gauntlet.md` under a "Phase 4 -- find-the-bug" section, so a resumed run can tell the pass returned.
+2. Relay the same summary in the batch. This is signal, not noise -- it tells the user the bug-hunt happened and what it covered.
 
 Either way, return to step 4 of the Phase 3 tail, which runs Phase 5 -- or to step 5 when the record file already has a `Phase 5 decision:` line, as it does for any Phase 4 that runs after the batch, whether accepted from it, asked again after the answers, or directly requested.
 
@@ -486,7 +486,7 @@ Prose findings have fixed buckets, because correcting prose rewrites history or 
 - **A wrong pull request description is `[ask]`**, with the corrected text in the batch: the description is text under the developer's name.
 - **A wrong follow-up draft is corrected in place** in the record file, since it has not been filed, under developer triage too: the correction publishes nothing, and filing still waits for the developer. Say in the batch what changed.
 
-**A scoped bug hunt for the riskiest Phase 5 fixes.** A Phase 5 fix to a must-fix finding, or one tagged `(guard rewrite)`, gets the Phase 4 sub-agent brief, dispatched fresh, with its scope narrowed to that fix's commit (`git show <sha>`). It runs without asking, like a fired Phase 4 trigger. Before dispatching, append `Phase 5 bug hunt: ran (<short sha>)`. Its findings go in the Phase 5 section, in a subsection named for that commit and written when the hunt returns, and are sorted and fixed the same way; its own fixes get the suite gate and nothing more. When the hunt returns after the batch was sent, as it does under developer triage, where Phase 5's fixes wait for the pick, its findings go in one last short batch, as a late Phase 4's do.
+**A scoped bug hunt for the riskiest Phase 5 fixes.** A Phase 5 fix to a must-fix finding, or one tagged `(guard rewrite)`, gets the Phase 4 sub-agent brief, dispatched fresh, with its scope narrowed to that fix's commit (`git show <sha>`). It runs without asking, like a fired Phase 4 trigger. Before dispatching, append `Phase 5 bug hunt: ran (<short sha>)`. Its findings go in the Phase 5 section, in a subsection named for that commit and written when the hunt returns, even when it found nothing, and are sorted and fixed the same way; its own fixes get the suite gate and nothing more. When the hunt returns after the batch was sent, as it does under developer triage, where Phase 5's fixes wait for the pick, its findings go in one last short batch, as a late Phase 4's do.
 
 **Developer triage.** Under `Phase 3: developer triages`, Phase 5's findings are sorted and recorded, then presented in the batch for the developer's pick; none is fixed first.
 
