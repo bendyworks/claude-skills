@@ -54,12 +54,13 @@ for the rest.
 
 ## Outstanding until it runs
 
-**Until the check has run, the completion report says in so many words
-that it is not done**, with what it needs, however much else passed, and
-its box in the plan stays unticked. That holds for an unattended run's
-summary, and for a session with no browser tooling at all. Only the
-developer can drop the check, and a dropped check is reported as dropped
-at their direction, never as passed.
+**Until the check has run and passed, the completion report says in so
+many words that it is not done**, with what it needs, however much else
+passed, and its box in the plan stays unticked. That holds for an
+unattended run's summary, and for a session with no browser tooling at
+all. Only the developer can drop the check, and a dropped check is
+reported as dropped at their direction, never as passed. A run that
+fails is reported as a failure to fix, not a closed check.
 
 ## Scope
 
