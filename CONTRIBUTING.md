@@ -149,6 +149,21 @@ comment explains the naming that keeps it outside CI's
 refuses to be overridden, so no suite can dispatch around its own
 guard.
 
+A skill can also ship **templates**: files it copies into the project
+it is working on rather than running itself (see
+`skills/parallel-checkouts/templates/`). They live in the skill's own
+`templates/` directory, never in `bin/`, because `bin/` is what
+installers get on their PATH, and a template means nothing outside
+the project it was copied into. A template is written for that
+project's runtime, not this repository's: the parallel-checkouts
+stack scripts are bash 3.2 (macOS's `/bin/bash`), because the project
+receiving them may have no Ruby on the host, and its teammates run
+them without this plugin installed. Each carries a
+`<skill> template v<N> (bendyworks/claude-skills)` comment on its
+first line (after any shebang), so a later session can tell a copied
+file from its template. Test a template the same way as a CLI: copy
+it into a throwaway directory under `test/` and run it there.
+
 A CLI whose work IS the shelling out (see `bin/stale-branches`) splits
 the same way, one level further in: the pure module holds the
 decisions that are a function of gathered facts, a command class is
