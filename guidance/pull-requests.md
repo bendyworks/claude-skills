@@ -26,19 +26,24 @@ lint and tests pass and the PR is genuinely ready for a human.
 
 **Where a team requires the developer to approve text posted under
 their name, the draft is where that approval happens, and the session
-does not mark it ready until the developer has read it.** Open the
-draft without a separate approval pass beforehand, request no reviewers
-on it, and give the developer its link. With no reviewer requested, no
-one is asked to read the draft until it is marked ready, so the
-developer reading its title and body on GitHub, where they render, is
-the approval. On such a team this qualifies Who presses Merge below,
-which otherwise has a session mark a pull request ready on its own.
-When a revision
-lands after the developer's last read, say so at the hand-back, so the
-pull request is never marked ready over text the developer has not
-seen. To revise, fetch the current title and body first (`gh pr view
---json title,body`): the developer may have edited them on GitHub, and
-`gh pr edit --body-file` replaces the whole body.
+does not mark it ready until the developer has said they have read its
+current title and body.** Open the draft without a separate approval
+pass beforehand, request no reviewers on it, and give the developer its
+link. With no reviewer requested, no one is asked to read the draft
+until it is marked ready, so the developer reading its title and body
+on GitHub, where they render, is the approval. If a reviewer is
+requested anyway (an auto-assign setting, a workflow), tell the
+developer, since someone may now read text they have not approved.
+Silence is not a read, and neither is an approval given for something
+else. On such a team this qualifies Who presses Merge below, which
+otherwise has a session mark a pull request ready on its own.
+
+A revision to the title or body cancels the developer's earlier read:
+say what changed at the hand-back, and hold the draft until the
+developer has read the current text. To revise, fetch the current title
+and body first (`gh pr view --json title,body`): the developer may have
+edited them on GitHub, and `gh pr edit --body-file` replaces the whole
+body.
 
 A draft is not private. On a public repository anyone can read it the
 moment it opens, and repository watchers and integrations are notified,
@@ -108,9 +113,10 @@ automated one:
 Merging into the default branch -- or into any shared branch a team
 merges into -- is a human action by default. A session takes the pull
 request as far as it can alone: green, current with the default
-branch, and marked ready for review (on a team whose drafts are the
-developer's review, only once the developer has read it; see A draft is
-its own review above). Then it hands off and says what
+branch, and marked ready for review (where a team requires the
+developer to approve text posted under their name, only once the
+developer has read the current title and body; see A draft is its own
+review above). Then it hands off and says what
 the PR is waiting on; finishing that preparation is the deliverable.
 
 Arming auto-merge is merging with a delay. `gh pr merge --auto` still
