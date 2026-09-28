@@ -162,6 +162,23 @@ same reason as the scaffolding; `test/fixtures/repo_builder.rb`
 documents the three properties that keep a build inside the directory
 it created.
 
+A skill can also ship **templates**: files it copies into the project
+it is working on rather than running itself (see
+`skills/parallel-checkouts/templates/`). They live in the skill's own
+`templates/` directory, never in `bin/`, because `bin/` is what
+installers get on their PATH, and a template means nothing outside
+the project it was copied into. A template is written for that
+project's runtime, not this repository's: the parallel-checkouts
+stack scripts are bash 3.2 (macOS's `/bin/bash`), because the project
+receiving them may have no Ruby on the host, and its teammates run
+them without this plugin installed. Each script template carries a
+`<skill> template v<N> (bendyworks/claude-skills)` comment on its
+first line (after any shebang), so a later session can tell a copied
+file from its template. Test a template from a file under `test/`,
+the way the receiving project uses it: a script copied into a
+throwaway directory and run there, or code a framework loads
+evaluated against a stand-in for that framework.
+
 Coverage measurement is opt-in and test-only; the stdlib-only posture
 above is about the CLIs' runtime and is unaffected. Requiring
 `test/cli_test_case.rb` first is the convention every test file

@@ -1,0 +1,81 @@
+#!/usr/bin/env bash
+# parallel-checkouts template v1 (bendyworks/claude-skills)
+#
+# Run a command in this checkout's app container. Compose finds the
+# container by its project and service labels, so no container name is
+# built here: the same command reaches each checkout's own containers, and
+# a personal override file that renames a container changes nothing.
+# Whether this shell agrees with the checkout is bin/compose-project's
+# business. See docs/parallel-checkouts.md.
+#
+# A TTY is allocated only when stdin and stdout are both terminals, so one
+# invocation serves an interactive shell and a scripted or piped call
+# alike. `docker compose exec` decides from stdout alone and then refuses
+# piped stdin at a terminal ("the input device is not a TTY"), so -T is
+# added here whenever either side is not a terminal. Stdin is forwarded
+# either way, and the command's exit status passes through.
+#
+# Usage: bin/dexec [flags] <command...>
+#   bin/dexec bundle exec rspec spec/models/user_spec.rb
+#   bin/dexec bash
+#   cat dump.sql | DEXEC_SERVICE=db bin/dexec psql -U postgres
+#
+# Any of `docker compose exec`'s flags (-e, -w, -u, --index, --privileged,
+# ...) are collected here and passed ahead of the service, since Compose
+# treats everything after the service name as the command. The terminal
+# flags (-i, -t, -it, --interactive, --tty) are accepted and ignored, since
+# the terminal is decided as above; -T forces no terminal. A `--` ends the
+# flags, for a command whose name begins with a dash.
+set -eu
+
+root="$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)"
+. "$root/bin/compose-project" || exit 1
+
+if [ $# -eq 0 ]; then
+  echo "Usage: bin/dexec [docker compose exec flags] <command...>   (DEXEC_SERVICE=<service> targets another container)" >&2
+  exit 64
+fi
+
+service="${DEXEC_SERVICE:-app}"
+
+flags=()
+no_tty=""
+[ -t 0 ] && [ -t 1 ] || no_tty=1
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --)
+      shift
+      break
+      ;;
+    -i|-t|-it|-ti|--interactive|--tty)
+      shift
+      ;;
+    -T|--no-TTY|--no-tty|-Ti|-iT|-Tt|-tT)
+      no_tty=1
+      shift
+      ;;
+    -e|--env|-w|--workdir|-u|--user|--index)
+      if [ $# -lt 2 ]; then
+        echo "bin/dexec: $1 requires a value" >&2
+        exit 64
+      fi
+      flags+=("$1" "$2")
+      shift 2
+      ;;
+    -*)
+      flags+=("$1")
+      shift
+      ;;
+    *)
+      break
+      ;;
+  esac
+done
+
+if [ $# -eq 0 ]; then
+  echo "bin/dexec: no command given after the flags" >&2
+  exit 64
+fi
+
+[ -n "$no_tty" ] && flags+=(-T)
+compose exec ${flags[@]+"${flags[@]}"} "$service" "$@"
