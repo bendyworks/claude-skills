@@ -66,7 +66,10 @@ but the first prose paragraph is the Why. This is the same why-first
 principle commit titles follow in the commit-messages guidance:
 motivation first, mechanism second. For a change that remedies
 something, the strongest Why names the concrete cost of leaving
-things as they were.
+things as they were. Label that old behavior's side: "before this
+change, any signed-in user could open any repository", never "can ...
+today", which reads after the merge as a hole still open. The
+writing-about-change guidance covers tense in the rest of the body.
 
 ## Write descriptions for the reader
 

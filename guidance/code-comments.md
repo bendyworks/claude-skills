@@ -21,7 +21,9 @@ This means:
   Test names and descriptions should describe the behavior under test
   in timeless terms.
 - No "we just changed X, so this now has to..." comments. State what
-  the code does and why, not what it used to do.
+  the code does and why, not what it used to do. A comment describes
+  no change, so it takes no side of one: "now" and "previously"
+  belong in the commit.
 - No "TODO: clean up after launch" comments without a tracker issue
   reference; if it needs cleaning, file the issue and reference it,
   otherwise the TODO rots forever.
