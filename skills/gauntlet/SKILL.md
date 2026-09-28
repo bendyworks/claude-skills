@@ -1,27 +1,28 @@
 ---
 name: gauntlet
-description: Multi-front quality pass on a feature branch whose business requirements are already met -- specs pass, lint passes, the user-facing feature works. Runs `/code-review` first, then dispatches parallel sub-agents to audit cruft, idioms, test quality, validation-bypass risk, and security, then consolidates findings into one punch list, fixes every clear-cut finding without stopping, and batches the judgment calls into one set of questions at the end. Tuned for Ruby on Rails projects (RSpec, RuboCop, Pundit); runs elsewhere with reduced audit depth. Use when the user says "run the gauntlet", "gauntlet this branch", "gauntlet this PR", "challenge the branch", "stress test this branch", "is this ready to merge?", "audit this branch", or invokes the gauntlet skill.
+description: Multi-front quality pass on a feature branch whose business requirements are already met -- specs pass, lint passes, the user-facing feature works. Runs `/code-review` first, then dispatches parallel sub-agents to audit cruft, idioms, test quality, validation-bypass risk, and security, then consolidates findings into one punch list, fixes every clear-cut finding without stopping, re-audits the code and commit messages its own fixes changed, and batches the judgment calls into one set of questions at the end. Tuned for Ruby on Rails projects (RSpec, RuboCop, Pundit); runs elsewhere with reduced audit depth. Use when the user says "run the gauntlet", "gauntlet this branch", "gauntlet this PR", "challenge the branch", "stress test this branch", "is this ready to merge?", "audit this branch", or invokes the gauntlet skill.
 ---
 
 # Run the gauntlet
 
 The user has finished a story to the satisfaction of clients and end-users. Specs pass. Lint passes. The feature works. *Now* they want to improve the code itself -- catch cruft, sharpen idioms, surface false-positive tests, plug validation holes, look for accidental authorization gaps -- before the PR leaves draft.
 
-This skill orchestrates that pass in five phases:
+This skill orchestrates that pass in six phases:
 
 1. **Phase 0** -- pre-flight and scope
 2. **Phase 1** -- finding sources: `/code-review`, then parallel sub-agent audits (report-only)
 3. **Phase 2** -- consolidate findings into one ranked punch list
 4. **Phase 3** -- sort every finding, fix the clear-cut ones without asking, and batch the rest as questions at the end (see "When Phase 3 fixes")
 5. **Phase 4** -- a fresh-eyes "find the bug" sub-agent on the final state; runs on its own when its triggers fire and is offered otherwise (see "When Phase 4 runs")
+6. **Phase 5** -- fresh sub-agents re-audit the code the fixes changed, and check commit bodies, the pull request description, and follow-up drafts against the final code (see "When Phase 5 runs")
 
-The main agent's job is orchestration: dispatch sub-agents in parallel, merge their reports, dedupe, rank by severity, and build a single coherent list to act on. Sub-agents do not make code changes. Fixes happen in Phase 3 with full cross-cutting context.
+The main agent's job is orchestration: dispatch sub-agents in parallel, merge their reports, dedupe, rank by severity, and build a single coherent list to act on. Sub-agents do not make code changes. Fixes happen in the main agent, from Phase 3 on, with full cross-cutting context.
 
 ## Standing pre-approval -- do NOT prompt for component steps
 
-When the user invokes the gauntlet, every component step and nested skill call is **already approved**. Run them all without pausing to ask permission: `/code-review`, `/security-review` (the security agent), every Phase 1 sub-agent dispatch, the suite gate whenever "When the suite gate runs" says to run it, and the Phase 4 "find the bug" pass whenever "When Phase 4 runs" says it runs. Never stop to ask "is it ok to run /code-review?" or "should I dispatch the audit agents?" -- just proceed through the phases.
+When the user invokes the gauntlet, every component step and nested skill call is **already approved**. Run them all without pausing to ask permission: `/code-review`, `/security-review` (the security agent), every Phase 1 sub-agent dispatch, the suite gate whenever "When the suite gate runs" says to run it, the Phase 4 "find the bug" pass whenever "When Phase 4 runs" says it runs, and Phase 5's lanes and scoped bug hunts. Never stop to ask "is it ok to run /code-review?" or "should I dispatch the audit agents?" -- just proceed through the phases.
 
-Fixing is covered too: every finding "When Phase 3 fixes" sorts into its fix bucket is fixed without asking, in Phase 3 and in Phase 4 alike. After Phase 0's precondition checks, the run stops for the developer only where that subsection says: the question batch at the end, or the pick when the developer asked to triage. **Filing an issue, or posting anything else to a tracker, is never pre-approved** (that subsection says why). Everything else runs unprompted.
+Fixing is covered too: every finding "When Phase 3 fixes" sorts into its fix bucket is fixed without asking, in Phases 3, 4, and 5 alike. After Phase 0's precondition checks, the run stops for the developer only where that subsection says: the question batch at the end, or the pick when the developer asked to triage. **Filing an issue, or posting anything else to a tracker, is never pre-approved** (that subsection says why). Everything else runs unprompted.
 
 ## Rules already covered elsewhere -- do NOT restate
 
@@ -50,15 +51,15 @@ Settle preconditions 1, 2, and 4 before entering the gate list, so a ten-minute 
 
 **Non-git version control:** the commands throughout this skill assume git. If the user works in another VCS (e.g. Jujutsu colocated with git), ask them for the change range ("which revisions are the current work?") and translate the `git diff main...HEAD` commands to that tool's equivalents -- the phases themselves don't change. Don't make the user volunteer this; ask when the working-copy state looks unfamiliar.
 
-**Cost expectations:** a full run is deliberately thorough and correspondingly token-hungry -- /code-review plus five parallel audits, plus a Phase 4 agent when its triggers fire, can consume a noticeable slice of a subscription session's budget. Before starting Phase 1, tell the user the planned agent count so they can trim (Step 3), choose light mode, or exclude Phase 4 -- an opt-out given any time before the Phase 3 tail is honored, and this is the natural moment for it. Say too that Phase 3 fixes clear-cut findings without stopping, and that "let me triage" keeps the pick-first pause instead. These choices are the run's cost levers; "When Phase 3 fixes" says why none applies once findings exist. Phase 0 can only predict Phase 4: all three triggers are measured at the Phase 3 tail, and two cannot be known earlier (see "When Phase 4 runs"). On a large diff, say explicitly that this will be an expensive pass and that Phase 4 is expected to run on its own.
+**Cost expectations:** a full run is deliberately thorough and correspondingly token-hungry -- /code-review plus five parallel audits, plus a Phase 4 agent when its triggers fire, can consume a noticeable slice of a subscription session's budget. Before starting Phase 1, tell the user the planned agent count so they can trim (Step 3), choose light mode, or exclude Phase 4 -- an opt-out given any time before the Phase 3 tail is honored, and this is the natural moment for it. Say too that Phase 3 fixes clear-cut findings without stopping, and that "let me triage" keeps the pick-first pause instead. These choices are the run's cost levers; "When Phase 3 fixes" says why none applies once findings exist. Phase 0 can only predict Phase 4: all three triggers are measured at the Phase 3 tail, and two cannot be known earlier (see "When Phase 4 runs"). On a large diff, say explicitly that this will be an expensive pass and that Phase 4 is expected to run on its own. Say too that Phase 5 always runs: fresh agents re-audit whatever the fixes changed, sized to those changes and dispatched even in light mode, and a prose check reads the commit bodies; "skip phase 5" opts out of its code audits only.
 
 ### When the suite gate runs
 
-The gauntlet decides the project's lint+test gate at three points: Phase 0 Step 1, to establish the branch is green before auditing it; the Phase 3 tail, to establish the fixes did not break it; and again after any Phase 4 fix, which re-enters as the tail. **All three are decided here, by this one list.** Step 1's precondition 3, the standing pre-approval, and the Phase 3 tail defer to it rather than restating any of it. Step 4's patch coverage is not a fourth gate run: it reads the facts this list records, and runs a coverage suite of its own only when they say no usable one exists.
+The gauntlet decides the project's lint+test gate at three points: Phase 0 Step 1, to establish the branch is green before auditing it; the Phase 3 tail, to establish the fixes did not break it; and again after any Phase 4 or Phase 5 fix, which re-enters as the tail. **All three are decided here, by this one list.** Step 1's precondition 3, the standing pre-approval, and the Phase 3 tail defer to it rather than restating any of it. Step 4's patch coverage is not a fourth gate run: it reads the facts this list records, and runs a coverage suite of its own only when they say no usable one exists.
 
 **Evidence, and when it goes stale.** Evidence is either a gate result -- a run that reported pass or fail -- or a statement the developer volunteered, in this session and about this branch, that specs and lint pass. The skill's own premise that specs and lint pass is not that statement: it describes when to reach for the gauntlet, not a claim about the tree in front of you, so invoking the gauntlet is never itself the evidence. Both kinds are evidence about *the tree as it stood when they were obtained*, and both go stale by the same test, whichever branch is reading them.
 
-A piece of evidence holds until any file in the working tree is added, changed, or deleted -- tracked or not, staged or not, matching what the targeted-specs skill counts toward scope. Files the project ignores never count: a gate run writes coverage artifacts, logs, and scratch output as it goes, and counting those would make every result stale the instant it was produced. Three things are not changes for this purpose: committing content that has already been tested; an experiment's edit (Phase 3's sort, step 2) that was restored to exactly its prior content before anything else ran; and writing the bookkeeping files this skill and the plan-issue skill maintain (the record file under `.claude/gauntlets/`, a plan file under `.claude/plans/`), which no suite exercises. Judge that by whether a suite or a project check could read the file, never by its extension -- in a repository whose deliverable is prose, a shipped markdown file is production code.
+A piece of evidence holds until any file in the working tree is added, changed, or deleted -- tracked or not, staged or not, matching what the targeted-specs skill counts toward scope. Files the project ignores never count: a gate run writes coverage artifacts, logs, and scratch output as it goes, and counting those would make every result stale the instant it was produced. Four things are not changes for this purpose: committing content that has already been tested; a history rewrite that changed only commit messages, proven by an empty `git diff <old> <new>`; an experiment's edit (Phase 3's sort, step 2) that was restored to exactly its prior content before anything else ran; and writing the bookkeeping files this skill and the plan-issue skill maintain (the record file under `.claude/gauntlets/`, a plan file under `.claude/plans/`), which no suite exercises. Judge that by whether a suite or a project check could read the file, never by its extension -- in a repository whose deliverable is prose, a shipped markdown file is production code.
 
 Evidence from another session, or from a sibling worktree, is not evidence here until it has been re-checked against the current tree by that same test.
 
@@ -74,7 +75,7 @@ Evidence from another session, or from a sibling worktree, is not evidence here 
     Suite gate: unestablished, continuing at the user's direction (declined the run)
     Suite gate: could not complete (<what the runner reported>)
 
-**What ending means depends on which of the three call sites entered the list.** At Phase 0 Step 1 it is literal: nothing has happened yet, so the gauntlet ends and the developer starts it again once the branch is green or a gate exists. **At the Phase 3 tail, and at the re-entry after a Phase 4 fix, branch 1 and branch 4 end the gate, never the run.** The tail still owes this gauntlet a Phase 4 decision, and a run that reaches Phase 1 and ends without one is a bug by the rule in "When Phase 4 runs". So there: announce as written, record the gate's state in the record file's header, skip the patch-coverage re-check that would have nothing to read, and continue to the tail's remaining steps. Say plainly in the closing message that the post-fix gate did not pass or did not run, so "ready for human review" cannot be read as "verified green".
+**What ending means depends on which of the three call sites entered the list.** At Phase 0 Step 1 it is literal: nothing has happened yet, so the gauntlet ends and the developer starts it again once the branch is green or a gate exists. **At the Phase 3 tail, and at the re-entry after a Phase 4 or Phase 5 fix, branch 1 and branch 4 end the gate, never the run.** The tail still owes this gauntlet a Phase 4 decision and a Phase 5 decision, and a run that reaches Phase 1 and ends without either is a bug by the rules in "When Phase 4 runs" and "When Phase 5 runs". So there: announce as written, record the gate's state in the record file's header, skip the patch-coverage re-check that would have nothing to read, and continue to the tail's remaining steps. Say plainly in the closing message that the post-fix gate did not pass or did not run, so "ready for human review" cannot be read as "verified green".
 
 Then work the list top to bottom and act on the first branch that matches.
 
@@ -164,7 +165,7 @@ The Phase 3 tail decides whether a further coverage run happens at all, per "Whe
 
 ### Light mode for small PRs
 
-If the diff is under ~50 lines across fewer than ~5 files, sub-agent dispatch overhead probably isn't worth it. Tell the user, then run the same checks (including `/code-review`) **sequentially in the main agent** without spawning sub-agents. Keep the same Phase 2 / Phase 3 structure (consolidate, then sort and fix, then batch the questions). Light mode does not change the Phase 4 decision; see "When Phase 4 runs".
+If the diff is under ~50 lines across fewer than ~5 files, sub-agent dispatch overhead probably isn't worth it. Tell the user, then run the same checks (including `/code-review`) **sequentially in the main agent** without spawning sub-agents. Keep the same Phase 2 / Phase 3 structure (consolidate, then sort and fix, then batch the questions). Light mode does not change the Phase 4 decision (see "When Phase 4 runs"), and Phase 5 still dispatches its lanes as sub-agents.
 
 ---
 
@@ -300,7 +301,8 @@ When all sub-agents return, the main agent assembles **one** punch list:
 2. **Rank by severity first, then by file.** `must-fix` block at the top, then `should-fix`, then `nit`.
 3. **Cross-reference.** When one agent's "considered but ruled out" covers another agent's finding, note both on the entry rather than dropping either: Phase 3 settles the disagreement with evidence (see "When Phase 3 fixes"). (/code-review reports findings only -- it has no "Considered but ruled out" section to cross-reference.)
 4. **Persist.** Add the consolidated list to the record file Step 2 created (`.claude/gauntlets/<branch-name>-gauntlet.md`), below its header, so it survives a `/clear`, context compaction, or session resume. Write it even when the list is empty -- a zero-findings run still reaches the Phase 3 tail, and its Phase 4 decision line lands in this file. The `-gauntlet` suffix is mandatory: plan files under `.claude/plans/` often share the same slug-based basenames, and the harness permission prompt shows only the basename, so the suffix is what lets the user tell a gauntlet write from a plan write at approval time. This is a local working file -- suggest the user gitignore `.claude/gauntlets/` if it isn't already.
-5. **Count, and keep going.** Note the counts ("12 findings: 2 must-fix, 6 should-fix, 4 nit") for the batch, and go straight on to Phase 3 in the same turn. The list reaches the user in the batch at the end of the run; a message showing it on its own would end the turn and stall the run here.
+5. **Record the baseline.** Append `Baseline: <sha>` to the record file's header, with the full SHA from `git rev-parse HEAD`, before any fix lands. Phase 5 diffs against it. A resumed run that finds a `Baseline:` line keeps it: by then fixes may have landed, and a new baseline would hide them.
+6. **Count, and keep going.** Note the counts ("12 findings: 2 must-fix, 6 should-fix, 4 nit") for the batch, and go straight on to Phase 3 in the same turn. The list reaches the user in the batch at the end of the run; a message showing it on its own would end the turn and stall the run here.
 
 ---
 
@@ -314,13 +316,13 @@ When all sub-agents return, the main agent assembles **one** punch list:
 
 1. **Disproved -> `[disproved: <evidence>]`.** The code or a test shows the finding is wrong. State the evidence (`called at app/jobs/x.rb:19`). "Looks pre-existing" and "seems minor" are not disproof, and neither is another audit's "considered but ruled out" note: a finding one audit reports and another ruled out is step 2's case.
 2. **Audits disagree -> test, then sort again.** When one audit's finding contradicts another's "considered but ruled out", or two findings contradict each other, never pick the more confident report. Settle it with evidence: read the line both depend on, or run a cheap experiment -- usually a mutation, breaking the thing on purpose to see whether a spec fails. Restore every mutated file to exactly its prior content and confirm `git status` and `git diff` match what they showed before the experiment ("When the suite gate runs" says why that keeps its evidence standing). Step 2 has no bucket of its own: evidence against the finding makes it `[disproved: <evidence>]`, evidence for it sends it on to step 3, and evidence that settles nothing makes it `[ask]`.
-3. **Outside the branch -> `[follow-up]`.** The finding sits in a file that is not in Step 2's `--name-only` list and the branch did not introduce it, or it is a refactor of code that predates the branch and would outgrow it. That list is frozen when Step 2 captures it: a fix that edits another file does not bring that file's findings in. Nits in untouched files go into **one** grouped draft, never a draft each. A bug the branch introduced is never follow-up, wherever it shows -- a PR owns the bugs it introduces.
+3. **Outside the branch -> `[follow-up]`.** The finding sits in a file that is not in Step 2's `--name-only` list and the branch did not introduce it, or it is a refactor of code that predates the branch and would outgrow it. That list is frozen when Step 2 captures it: a fix that edits another file does not bring that file's findings in. Phase 5 is the exception: the lines a fix wrote are in its scope wherever they are. Nits in untouched files go into **one** grouped draft, never a draft each. A bug the branch introduced is never follow-up, wherever it shows -- a PR owns the bugs it introduces.
 4. **A judgment the developer owns -> `[ask]`.** Only these: **a design or architecture tradeoff**; **a behavior change a user or stakeholder would notice** beyond what the branch set out to do, such as a changed URL or a different email -- fixing a bug so the branch does what it evidently set out to do is not one; **a new validation or constraint on an existing column**, which rows already in the database may fail; **a performance change** that needs measuring first; **a fix the size rule below sends here**; **an experiment in step 2 that settled nothing**.
 5. **Everything else -> `[fix]`.**
 
 Findings that are one gap seen from two places -- a nil the mailer cannot handle, and the missing validation that lets the nil in -- are sorted together: the same bucket, or an entry saying how the fix to one settles the other.
 
-**Size.** Measure the PR the way the tail's step 2 does, when sorting and again after each fix, and state the latest figure in the batch. A bug the branch introduced is always fixed, whatever the size. Any other fix that carries the measured size past 400 is reverted and re-tagged `[ask]`, and once the size is past 400 -- from the start, or after the fixes so far -- every remaining fix of that kind goes to `[ask]` as one grouped question naming the size, because a PR past 400 lines should almost always be split. Measure the fix once it is made rather than estimating it beforehand: a running total of guesses is a number nobody checked.
+**Size.** Measure the PR the way the tail's step 2 does, when sorting and again after each fix, and state the latest figure in the batch. A bug the branch introduced is always fixed, whatever the size, and reverting or amending a fix this run made is always allowed. Any other fix that carries the measured size past 400 is reverted and re-tagged `[ask]`, and once the size is past 400 -- from the start, or after the fixes so far -- every remaining fix of that kind goes to `[ask]` as one grouped question naming the size, because a PR past 400 lines should almost always be split. Measure the fix once it is made rather than estimating it beforehand: a running total of guesses is a number nobody checked.
 
 **Record, then fix.** Before fixing anything, tag each Phase 2 entry in place in the record file, under its severity heading -- the `risky by fixes` trigger reads severity from there. These are the tag forms, and this is their one definition:
 
@@ -338,11 +340,11 @@ Then fix the `[fix]` bucket without asking:
 
 **Follow-up drafts.** Write each follow-up issue's full title and body into the record file under `## Follow-up drafts`. Filing publishes text under the developer's name, so it is never automatic: it is one question in the batch. Once the batch approves, file each draft and write `filed as <ID>` next to it the moment it is filed, checking for that line before filing any draft, so a resumed run never files one twice.
 
-**The batch.** Every question goes in one message, which step 4 of the tail sends and nothing else does. It comes after the Phase 4 decision, and after Phase 4 itself when it runs, so a run nobody is watching finishes everything mechanical before it stops. It lists, in order: the fixed findings with their commits, the follow-up drafts, the disproved findings with their evidence, and then the questions -- each `[ask]` from Phase 3 and Phase 4, whether to file the drafts, and the Phase 4 question when "When Phase 4 runs" says to ask. It ends with the close-out that subsection owns. Once it is sent, append `Batch sent` to the record file; a resumed run that finds a `Phase 4 decision: asked` line with no `Phase 4 answer:` line and no `Batch sent` sends the batch rather than waiting on a question nobody saw.
+**The batch.** Every question goes in one message, which step 5 of the tail sends and nothing else does. It comes after the Phase 4 decision, after Phase 4 itself when it runs, and after Phase 5, so a run nobody is watching finishes everything mechanical before it stops. It lists, in order: the fixed findings with their commits, the follow-up drafts, the disproved findings with their evidence, Phase 5's decision line with the lanes it ran and any follow-up draft it corrected, and then the questions -- each `[ask]` from Phases 3, 4, and 5, whether to file the drafts, and the Phase 4 question when "When Phase 4 runs" says to ask. It ends with the close-out that subsection owns. Once it is sent, append `Batch sent` to the record file; a resumed run that finds a `Phase 4 decision: asked` line with no `Phase 4 answer:` line and no `Batch sent` sends the batch rather than waiting on a question nobody saw -- after running Phase 5, when the record file has no `Phase 5 decision:` line.
 
-When the answers come: fix each accepted `[ask]` under the same four rules, file the approved drafts, and tag each declined entry `(declined)`. If anything was fixed, re-run step 1 of the tail -- the suite gate -- on the result, then check all three Phase 4 triggers again against the tree as it now stands. When one fires and Phase 4 has not run (no trigger fired, the offer was declined, or the developer opted out), append `Phase 4 decision: asked (after answers: <triggers>)` and ask once more in a short message naming the fix, as the opt-out exception in "When Phase 4 runs" does; this is the one question sent outside the batch. An accepted Phase 4 offer, first or repeated, dispatches Phase 4 on the final state. Its findings are sorted and fixed like any others, and tail step 4 then sends one last batch holding only what Phase 4 raised; Phase 4 still runs at most once.
+When the answers come: fix each accepted `[ask]` under the same four rules, file the approved drafts, and tag each declined entry `(declined)`. If anything was fixed, re-run step 1 of the tail -- the suite gate -- on the result, then check all three Phase 4 triggers again against the tree as it now stands. When one fires and Phase 4 has not run (no trigger fired, the offer was declined, or the developer opted out), append `Phase 4 decision: asked (after answers: <triggers>)` and ask once more in a short message naming the fix, as the opt-out exception in "When Phase 4 runs" does; this is the one question sent outside the batch. An accepted Phase 4 offer, first or repeated, dispatches Phase 4 on the final state. Its findings are sorted and fixed like any others, and tail step 5 then sends one last batch holding only what Phase 4 raised; Phase 4 still runs at most once. Phase 5 does not run again for fixes made from the answers.
 
-**Developer triage.** When the developer asks to pick the fixes themselves ("gauntlet, but let me triage"), the record file's header carries `Phase 3: developer triages`: Step 2 writes it when the request came at invocation, and a later request is appended the moment it is given. Phase 3 reads the header, never memory. Sort and record as above, then present the sorted list as recommendations and wait for the pick before fixing anything. The pick answers the `[ask]` entries and the filing question too: picked entries are re-tagged `[fix]`, entries turned down gain `(declined)`, and the batch at the end carries only what Phase 4 raises. With no findings there is nothing to pick, so the run goes straight to the tail. A request that arrives after some fixes have landed stops further fixing; the pick then lists those fixes with their commits, for the developer to keep or revert.
+**Developer triage.** When the developer asks to pick the fixes themselves ("gauntlet, but let me triage"), the record file's header carries `Phase 3: developer triages`: Step 2 writes it when the request came at invocation, and a later request is appended the moment it is given. Phase 3 reads the header, never memory. Sort and record as above, then present the sorted list as recommendations and wait for the pick before fixing anything. Phase 5's findings reach the same pick through the batch (see Phase 5). The pick answers the `[ask]` entries and the filing question too: picked entries are re-tagged `[fix]`, entries turned down gain `(declined)`, and the batch at the end carries only what Phase 4 raises. With no findings there is nothing to pick, so the run goes straight to the tail. A request that arrives after some fixes have landed stops further fixing; the pick then lists those fixes with their commits, for the developer to keep or revert.
 
 ### The Phase 3 tail
 
@@ -351,7 +353,8 @@ After the fix bucket is done -- or immediately, when it is empty -- this tail ru
 1. Decide the gate again by "When the suite gate runs" (Phase 0), which owns this run as much as Phase 0's, including what still counts as evidence here. When Phase 3 changed nothing the staleness test counts, the Phase 0 evidence still stands, the gate lands on its branch 2 -- and the Step 4 artifacts still stand too, so skip to step 2. Otherwise re-run the Step 4 patch-coverage check: the fixes added lines, and those should be covered before the branch leaves draft. Each uncovered added line it finds is a finding, sorted and fixed under "When Phase 3 fixes" like any other. **When the gate goes red after this run's own fixes, those fixes are the suspects, and the PR owns them:** find the fix that broke it, repair it or revert it and re-tag it `[ask]`, and decide the gate again before going on. Only a red that no fix of this run explains ends the gate the way that subsection describes.
 2. Report the PR size in lines changed across files -- insertions plus deletions from `git diff main...HEAD --shortstat`, excluding generated files such as lockfiles, schema dumps, and recorded cassettes -- and whether it is more than 400 lines, the easy-review threshold, or not. This is the number the `large` trigger reads.
 3. Decide whether Phase 4 runs, per "When Phase 4 runs" in Phase 4 below: write the record line, and when it runs, announce and dispatch it, then sort and fix its findings as "What to do with the findings" says before going on. That subsection owns the triggers; do not re-derive them here.
-4. Send the batch ("When Phase 3 fixes"), ending with the close-out. This is the only step that sends it.
+4. Run Phase 5 ("Phase 5 -- Re-audit what the fixes changed"): write its decision line, dispatch its lanes, and sort and fix their findings before going on. That section owns when its code audits skip; do not re-derive it here.
+5. Send the batch ("When Phase 3 fixes"), ending with the close-out. This is the only step that sends it.
 
 ---
 
@@ -385,9 +388,9 @@ Why fixes are a trigger at all: fixes are code too, and they ship without the re
 
 Writing it before dispatch means a crash mid-Phase-4 still leaves evidence that the decision was made.
 
-**Closing out.** However Phase 4 ends -- declined, opted out, ran and found nothing, or ran and its findings were sorted and fixed -- the gauntlet closes at the end of the batch, and again at the end of any message reporting what the answers led to. Tell the user the gauntlet is complete and the branch is ready for human review. In the same breath name everything still open, and leave those entries unchecked in the record file: a declined finding, a question not yet answered (in a batch that asks any, those questions), a draft not yet filed, a must-fix sent to follow-up, and a fix accepted from the batch that no Phase 4 pass has seen, whether Phase 4 ran before it or never ran. Otherwise "ready for review" reads as "nothing known". That sentence lives here; the Phase 3 tail and the findings section point to it.
+**Closing out.** However Phase 4 ends -- declined, opted out, ran and found nothing, or ran and its findings were sorted and fixed -- the gauntlet closes at the end of the batch, and again at the end of any message reporting what the answers led to. Tell the user the gauntlet is complete and the branch is ready for human review. In the same breath name everything still open, and leave those entries unchecked in the record file: a declined finding, a question not yet answered (in a batch that asks any, those questions), a draft not yet filed, a must-fix sent to follow-up, and a fix accepted from the batch that no Phase 4 or Phase 5 pass has seen, whether those phases ran before it or never ran. Otherwise "ready for review" reads as "nothing known". That sentence lives here; the Phase 3 tail and the findings section point to it.
 
-**Two things the decision does not change.** Light mode (Phase 0) runs the Phase 1 checks in the main agent, but Phase 4 is always a dispatched agent, and light mode does not alter the triggers: a sub-50-line diff can still carry a migration or a guard rewrite. And the trigger is for the announcement and the record only; the brief below stays as written regardless of why Phase 4 ran ("Dispatch a fresh sub-agent" says why).
+**Two things the decision does not change.** Light mode (Phase 0) runs the Phase 1 checks in the main agent, but Phase 4 is always a dispatched agent, as are Phase 5's lanes, and light mode does not alter the triggers: a sub-50-line diff can still carry a migration or a guard rewrite. And the trigger is for the announcement and the record only; the brief below stays as written regardless of why Phase 4 ran ("Dispatch a fresh sub-agent" says why).
 
 ### Why this pass is different
 
@@ -426,12 +429,76 @@ If the agent finds something credible:
 
 1. Append the findings to `.claude/gauntlets/<branch-name>-gauntlet.md` under a new "Phase 4 -- find-the-bug" section, so the persisted record stays complete.
 2. Sort them by "When Phase 3 fixes", exactly as Phase 3's findings: a credible bug with an unambiguous fix is fixed without asking, and anything on a judgment ground joins the batch. A bug found here is almost always `must-fix` by nature, and a clear one is not a question.
-3. Fix the fix bucket through the same four rules -- write the failing spec that captures the bug, watch it RED, then fix and confirm GREEN. Then re-run step 1 of the Phase 3 tail, which re-enters "When the suite gate runs" as the tail: Phase 4 fixes are unreviewed fixes too. Phase 4 runs once per gauntlet; its own fixes do not trigger a second pass. Then return to step 4 of the Phase 3 tail, which sends the batch.
+3. Fix the fix bucket through the same four rules -- write the failing spec that captures the bug, watch it RED, then fix and confirm GREEN. Then re-run step 1 of the Phase 3 tail, which re-enters "When the suite gate runs" as the tail: Phase 4 fixes are unreviewed fixes too. Phase 4 runs once per gauntlet; its own fixes do not trigger a second pass. Then return to step 4 of the Phase 3 tail, which runs Phase 5.
 
 If the agent finds nothing:
 
 1. Relay the agent's "where I looked" summary in the batch. This is signal, not noise -- it tells the user the bug-hunt happened and what it covered.
-2. Return to step 4 of the Phase 3 tail, which sends the batch.
+2. Return to step 4 of the Phase 3 tail, which runs Phase 5.
+
+---
+
+## Phase 5 -- Re-audit what the fixes changed
+
+Phases 3 and 4 write code, and that code ships with only the mechanical gates behind it: lint, the suite, and patch coverage. Phase 1 audited the branch before any fix existed, and Phase 4 hunts bugs, not quality. So a fix can restate a factory's defaults, bypass a validation, or leave a commit body describing code that no longer exists, and every gate still passes. Phase 5 gives the fixes the review the original change got, and checks the branch's prose against the final code.
+
+### When Phase 5 runs
+
+**Every gauntlet run that reaches Phase 1 writes a Phase 5 decision line** at step 4 of the Phase 3 tail, after Phase 4 and its fixes, before the batch. Phase 5 is never offered as a question. Its code audits skip in only two cases, and the prose lane runs in every case:
+
+- **The fix diff is empty.** No fix of this run changed a file.
+- **The developer opted out up front** ("gauntlet but skip phase 5"), which is recorded in the record file's header the way a Phase 4 opt-out is. It skips the code audits only.
+
+Phase 5 runs once. Its own fixes get the suite gate and, where the next subsection says, a scoped bug hunt, but never a second Phase 5. Fixes made from the batch's answers are not re-audited; the close-out names them.
+
+### Scope: the fix diff
+
+The fix diff is `git diff <baseline> HEAD`, where the baseline is the `Baseline:` SHA Phase 2 wrote to the record file's header before any fix landed. It holds everything Phases 3 and 4 changed and nothing Phase 1 already reviewed. It compares trees, so a reworded commit message does not disturb it.
+
+**Every line in the fix diff is in scope for Phase 5, whatever file it is in.** Phase 3's frozen file list does not apply here: a fix that added a factory trait in a file outside Step 2's list brought that trait into this branch, and a finding on it is sorted like any other, never sent to `[follow-up]` for its location. `git diff main...HEAD` is context for the lanes, not their scope.
+
+### Lanes
+
+Apply Phase 0 Step 3's trimming table to the fix diff's file list, and add the `prose` lane, which is never skipped. The fix diff scopes the code lanes only: the `prose` lane reads every commit on the branch, `git log main..HEAD`, because a stale claim can sit in a commit Phase 1 already saw. A fix that changed only specs gets `cruft`, `rspec-quality`, and `prose`; one that changed a controller also gets `idioms`, `data-validation`, and `security`. A lane runs whenever the fixes changed something in its territory, style findings included.
+
+**Each lane is a fresh sub-agent, even in light mode**, dispatched in a single message: the session that wrote the fixes is the least independent reviewer of them. Give each code lane its Phase 1 brief with this substitution, stated in the prompt: "Your scope is the fix diff, `git diff <baseline> HEAD`, not the branch diff. Where the brief says `main...HEAD` or 'lines this branch adds', read the fix diff. Use `git diff main...HEAD` only as context." The `security` lane skips `/security-review`, which reviews the whole branch and so repeats Phase 1; it runs only the brief's branch-specific checks over the fix diff. `/code-review` does not run again. Do not pass Phase 1's findings or the record file's findings to any lane.
+
+### Agent: prose
+
+> Check the branch's prose against the code as it now stands. Report only -- do not edit, reword, or post anything.
+>
+> - **Commit bodies.** For every commit in `git log main..HEAD`, compare each claim in its body with the code: a stated status code, a named method, a described behavior. For every SHA a body cites, confirm `git rev-parse --verify <sha>^{commit}` succeeds and `git merge-base --is-ancestor <sha> HEAD` exits 0; a SHA that fails either no longer names this branch's history.
+> - **The pull request description**, when one exists and you can read it: the same comparison.
+> - **The follow-up drafts** under `## Follow-up drafts` in `<record file>`: does each still hold against the final findings, including the Phase 4 section? A later phase can overturn an earlier phase's suggestion.
+>
+> For each finding, name the commit SHA, the description, or the draft title. Use the standard findings format.
+
+### Sorting and fixing Phase 5's findings
+
+Record the findings in the record file under a `## Phase 5 -- re-audit` section, one subsection per lane, and write each lane's subsection when its agent returns, even when it found nothing. Sort and fix them under "When Phase 3 fixes", exactly as Phase 3's, then re-run step 1 of the Phase 3 tail, the suite gate. Phase 4's triggers never read this section.
+
+Prose findings have fixed buckets, because correcting prose rewrites history or publishes text:
+
+- **A wrong body on the tip commit, when that commit is unpushed, is `[fix]`**: amend its message, confirm `git diff <old> <new>` is empty, and update the record file's short SHA for that fix. Do it before committing any other Phase 5 fix, while the commit is still the tip, and confirm `git rev-parse HEAD` names that commit before amending: `--amend` rewrites whatever commit is at HEAD. If another commit has already landed on top, the body is `[ask]` like any older one. A commit is pushed when, after a `git fetch`, `git branch -r --contains <sha>` names any branch; a fetch that fails counts as pushed.
+- **A wrong body on any other commit, or on a pushed tip, is `[ask]`.** Rewording it rewrites every later commit, which changes the SHAs the record file logs and any body that cites them.
+- **A wrong pull request description is `[ask]`**, with the corrected text in the batch: the description is text under the developer's name.
+- **A wrong follow-up draft is corrected in place** in the record file, since it has not been filed, under developer triage too: the correction publishes nothing, and filing still waits for the developer. Say in the batch what changed.
+
+**A scoped bug hunt for the riskiest Phase 5 fixes.** A Phase 5 fix to a must-fix finding, or one tagged `(guard rewrite)`, gets the Phase 4 sub-agent brief, dispatched fresh, with its scope narrowed to that fix's commit (`git show <sha>`). It runs without asking, like a fired Phase 4 trigger. Before dispatching, append `Phase 5 bug hunt: ran (<short sha>)`. Its findings go in the Phase 5 section and are sorted and fixed the same way; its own fixes get the suite gate and nothing more.
+
+**Developer triage.** Under `Phase 3: developer triages`, Phase 5's findings are sorted and recorded, then presented in the batch for the developer's pick; none is fixed first.
+
+### The record line
+
+Before dispatching, append one line to the record file, in one of these forms:
+
+- `Phase 5 decision: ran (<lanes>)`, naming every lane dispatched, e.g. `ran (cruft, rspec-quality, prose)`
+- `Phase 5 decision: code audits skipped (empty fix diff); prose checked`
+- `Phase 5 decision: code audits opted out; prose checked`
+
+**Resuming.** A resumed run that finds no `Phase 5 decision:` line runs Phase 5 before it sends the batch. One that finds the line re-dispatches only the lanes named in it that have no subsection in the Phase 5 section yet.
+
+When Phase 5 is done, return to step 5 of the Phase 3 tail, which sends the batch.
 
 ---
 
