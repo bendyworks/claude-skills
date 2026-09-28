@@ -460,6 +460,14 @@ class ParallelCheckoutStackTest < Minitest::Test
     assert_refused(run_script('docker-rebuild'), 'the initializer', 'changed COMPOSE_PROJECT_NAME from stack2 to stack9')
   end
 
+  def test_docker_rebuild_announces_the_override_file_once
+    File.write(File.join(@root, '.devcontainer', 'docker-compose.override.yml'), "services: {}\n")
+    write_initializer("echo ran > #{record('initializer')}")
+    _out, err, status = run_script('docker-rebuild')
+    assert status.success?, err
+    assert_equal 1, err.scan('docker-compose.override.yml').size, err
+  end
+
   def test_docker_rebuild_stops_when_the_initializer_fails
     write_initializer('exit 5')
     _out, _err, status = run_script('docker-rebuild')

@@ -33,6 +33,7 @@ if [ -f "$initializer" ]; then
   else
     unset COMPOSE_PROJECT_NAME
   fi
+  compose_project_quiet=1
   . "$root/bin/compose-project" || exit 1
   if [ "$COMPOSE_PROJECT_NAME" != "$name_before" ]; then
     echo "docker-rebuild: the initializer ($initializer) changed COMPOSE_PROJECT_NAME from $name_before to $COMPOSE_PROJECT_NAME; a checkout's identity comes from its .envrc, so fix the initializer rather than rebuild under a new name" >&2
