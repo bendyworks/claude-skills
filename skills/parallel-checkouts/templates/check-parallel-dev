@@ -85,8 +85,12 @@ else
   skip "no PRJ_*_PORT in $env_file to disagree about"
 fi
 
-refuses "refuses an identity variable this checkout does not set" \
-  "PRJ_PARALLEL_CHECK_PORT=1, but" "PRJ_PARALLEL_CHECK_PORT=1"
+if grep -q '^[[:space:]]*\(export[[:space:]][[:space:]]*\)\{0,1\}PRJ_PARALLEL_CHECK_PORT[[:space:]]*=' "$env_file"; then
+  skip "PRJ_PARALLEL_CHECK_PORT is this project's own variable, so it cannot probe an unset one"
+else
+  refuses "refuses an identity variable this checkout does not set" \
+    "PRJ_PARALLEL_CHECK_PORT=1, but" "PRJ_PARALLEL_CHECK_PORT=1"
+fi
 
 # --- Checks of the compose file (the docker CLI, no daemon) -----------------
 if config_errors="$(compose config -q 2>&1)"; then
@@ -102,6 +106,15 @@ if config_errors="$(compose config -q 2>&1)"; then
     bad "Compose reads the project name '$compose_name' from $env_file, not '$COMPOSE_PROJECT_NAME'" \
       "the two parsers disagree about the file; regenerate it with a direnv load"
   fi
+
+  case "
+$(compose config --services 2>/dev/null)
+" in
+    *"
+$service
+"*) ;;
+    *) bad "the compose file defines no service named '$service'" "set DEXEC_SERVICE to the app's service name" ;;
+  esac
 else
   bad "this checkout's compose project does not load" "$config_errors"
 fi
@@ -111,7 +124,7 @@ if docker info >/dev/null 2>&1; then
   if ! containers="$(compose ps -q "$service" 2>&1)"; then
     bad "Compose could not list this checkout's $service container" "$containers"
   elif [ -n "$containers" ]; then
-    if "$root/bin/dexec" true; then
+    if "$root/bin/dexec" true </dev/null; then
       ok "bin/dexec reaches this checkout's $service container"
     else
       bad "bin/dexec could not reach this checkout's $service container"

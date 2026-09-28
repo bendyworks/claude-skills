@@ -30,6 +30,7 @@ class ParallelCheckoutCheckerTest < Minitest::Test
       info) exit "${FAKE_INFO_EXIT:-1}" ;;
     esac
     case "$*" in
+      *" config --services"*) printf '%s\n' app db; exit 0 ;;
       *" config -q"*)
         [ "${FAKE_CONFIG_EXIT:-0}" = 0 ] || echo "fake compose: interpolation failed" >&2
         exit "${FAKE_CONFIG_EXIT:-0}" ;;
@@ -39,7 +40,7 @@ class ParallelCheckoutCheckerTest < Minitest::Test
         [ -n "${FAKE_CONFIG_QUOTE:-}" ] && name="\"$name\""
         printf 'name: %s\nservices: {}\n' "$name"; exit 0 ;;
       *" ps "*) printf '%s' "${FAKE_PS_OUTPUT:-}"; exit "${FAKE_PS_EXIT:-0}" ;;
-      *" exec "*) exit "${FAKE_EXEC_EXIT:-0}" ;;
+      *" exec "*) cat >/dev/null; exit "${FAKE_EXEC_EXIT:-0}" ;;
     esac
     exit 0
   SH
@@ -77,12 +78,12 @@ class ParallelCheckoutCheckerTest < Minitest::Test
     File.exist?(path) ? File.read(path) : ''
   end
 
-  def check(env = {})
+  def check(env = {}, stdin = '')
     keep = %w[HOME PATH LANG TMPDIR].to_h { |key| [key, ENV.fetch(key, nil)] }
     keep['PATH'] = "#{@fakebin}:#{keep['PATH']}"
     keep['FAKE_DOCKER_LOG'] = File.join(@scratch, 'docker.log')
     Open3.capture3(keep.merge(env), File.join(@root, 'bin', 'check-parallel-dev'),
-                   chdir: @scratch, unsetenv_others: true)
+                   stdin_data: stdin, chdir: @scratch, unsetenv_others: true)
   end
 
   # [passed, failed, skipped] from the checker's last line.
@@ -115,6 +116,35 @@ class ParallelCheckoutCheckerTest < Minitest::Test
     assert_equal [7, 0, 0], summary(out)
     assert_equal 1, execs.size
     assert_match(/ exec -T app true$/, execs.first)
+  end
+
+  def test_leaves_the_callers_stdin_for_the_caller
+    script = File.join(@scratch, 'loop.sh')
+    File.write(script, <<~SH)
+      while read -r line; do
+        #{File.join(@root, 'bin', 'check-parallel-dev')} >/dev/null 2>&1
+        echo "got $line"
+      done
+    SH
+    keep = %w[HOME PATH LANG TMPDIR].to_h { |key| [key, ENV.fetch(key, nil)] }
+    keep['PATH'] = "#{@fakebin}:#{keep['PATH']}"
+    env = keep.merge('FAKE_DOCKER_LOG' => File.join(@scratch, 'docker.log'), 'FAKE_INFO_EXIT' => '0',
+                     'FAKE_PS_OUTPUT' => "abc123\n")
+    out, _err, _status = Open3.capture3(env, 'bash', script, stdin_data: "one\ntwo\nthree\n", unsetenv_others: true)
+    assert_equal "got one\ngot two\ngot three\n", out
+  end
+
+  def test_fails_when_dexec_service_names_a_service_the_compose_file_lacks
+    out, _err, status = check('DEXEC_SERVICE' => 'nosuch')
+    refute status.success?
+    assert_includes out, "FAIL  the compose file defines no service named 'nosuch'"
+  end
+
+  def test_skips_the_unset_variable_check_when_the_project_uses_its_probe_name
+    File.write(File.join(@root, '.devcontainer', '.env'), "#{IDENTITY}#{PREFIX}PARALLEL_CHECK_PORT=1\n")
+    out, err, status = check
+    assert status.success?, out + err
+    assert_includes out, "skip  #{PREFIX}PARALLEL_CHECK_PORT"
   end
 
   def test_fails_when_dexec_cannot_reach_the_running_container

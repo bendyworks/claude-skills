@@ -454,6 +454,12 @@ class ParallelCheckoutStackTest < Minitest::Test
     assert_equal ['compose', '-f', compose_file, 'up', '--force-recreate', '--build', '-d', 'app'], docker_args
   end
 
+  def test_docker_rebuild_refuses_an_initializer_that_renames_the_project
+    write_initializer("sed 's/^COMPOSE_PROJECT_NAME=.*/COMPOSE_PROJECT_NAME=stack9/' .devcontainer/.env > .devcontainer/.env.new && " \
+                      'mv .devcontainer/.env.new .devcontainer/.env')
+    assert_refused(run_script('docker-rebuild'), 'the initializer', 'changed COMPOSE_PROJECT_NAME from stack2 to stack9')
+  end
+
   def test_docker_rebuild_stops_when_the_initializer_fails
     write_initializer('exit 5')
     _out, _err, status = run_script('docker-rebuild')
