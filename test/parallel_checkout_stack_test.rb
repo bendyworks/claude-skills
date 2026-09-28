@@ -3,8 +3,9 @@
 
 # Tests for the parallel-checkouts skill's containerized stack templates:
 # bin/compose-project (the sourced resolver that refuses a shell whose
-# identity disagrees with its checkout's) and bin/dexec (runs a command
-# in the checkout's app container). Each test copies the templates into
+# identity disagrees with its checkout's), bin/dexec (runs a command in
+# the checkout's app container), and the bin/docker-up, bin/docker-down,
+# and bin/docker-rebuild lifecycle wrappers. Each test copies the templates into
 # a throwaway project, replaces the PRJ placeholder prefix the way the
 # skill does, and runs them against a fake `docker` on PATH that records
 # its arguments, its stdin, whether stdin was a terminal, and the project
@@ -22,7 +23,7 @@ require 'pty'
 
 class ParallelCheckoutStackTest < Minitest::Test
   TEMPLATES = File.expand_path('../skills/parallel-checkouts/templates', __dir__)
-  SCRIPT_TEMPLATES = %w[compose-project dexec].freeze
+  SCRIPT_TEMPLATES = %w[compose-project dexec docker-up docker-down docker-rebuild].freeze
   PREFIX = 'ZZSTACK_'
   SYSTEM_BASH = '/bin/bash'
   BASH3 = File.executable?(SYSTEM_BASH) && `#{SYSTEM_BASH} -c 'echo $BASH_VERSINFO'`.strip == '3'
@@ -402,5 +403,49 @@ class ParallelCheckoutStackTest < Minitest::Test
     err = assert_refused(result, 'COMPOSE_PROJECT_NAME=stack')
     assert_equal 1, result.last.exitstatus
     refute_includes err, 'command not found'
+  end
+
+  # --- lifecycle wrappers ---------------------------------------------------
+
+  def test_docker_up_starts_this_checkouts_stack_detached_from_any_directory
+    assert_ran(run_script('docker-up', 'app'))
+    assert_equal ['compose', '-f', compose_file, 'up', '-d', 'app'], docker_args
+    assert_equal 'stack2', recorded('project')
+  end
+
+  def test_docker_down_stops_this_checkouts_stack
+    assert_ran(run_script('docker-down', '--volumes'))
+    assert_equal ['compose', '-f', compose_file, 'down', '--volumes'], docker_args
+  end
+
+  def test_docker_rebuild_runs_the_projects_initializer_first
+    initializer = File.join(@root, '.devcontainer', 'initialize.sh')
+    File.write(initializer, "#!/bin/sh\necho ran > #{record('initializer')}\n")
+    File.chmod(0o755, initializer)
+    assert_ran(run_script('docker-rebuild'))
+    assert_equal "ran\n", recorded('initializer')
+    assert_equal ['compose', '-f', compose_file, 'up', '--force-recreate', '--build', '-d'], docker_args
+  end
+
+  def test_docker_rebuild_needs_no_initializer
+    assert_ran(run_script('docker-rebuild', 'app'))
+    assert_equal ['compose', '-f', compose_file, 'up', '--force-recreate', '--build', '-d', 'app'], docker_args
+  end
+
+  def test_docker_rebuild_stops_when_the_initializer_fails
+    initializer = File.join(@root, '.devcontainer', 'initialize.sh')
+    File.write(initializer, "#!/bin/sh\nexit 5\n")
+    File.chmod(0o755, initializer)
+    _out, _err, status = run_script('docker-rebuild')
+    refute status.success?
+    assert_nil docker_args
+  end
+
+  def test_the_lifecycle_wrappers_refuse_a_shell_that_disagrees_with_the_checkout
+    %w[docker-up docker-down docker-rebuild].each do |script|
+      result = run_script(script, env: { 'COMPOSE_PROJECT_NAME' => 'stack' })
+      assert_refused(result, 'COMPOSE_PROJECT_NAME=stack')
+      assert_equal 1, result.last.exitstatus, script
+    end
   end
 end

@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+# parallel-checkouts template v1 (bendyworks/claude-skills)
+#
+# Rebuild this checkout's images and recreate its containers. Safe from any
+# directory, for the reasons bin/docker-up gives. When the project has a
+# .devcontainer/initialize.sh (which writes machine-specific lines into
+# .devcontainer/.env), it runs first, and a failure there stops the
+# rebuild. Extra arguments go to `docker compose up`. See
+# docs/parallel-checkouts.md.
+set -eu
+
+root="$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)"
+. "$root/bin/compose-project" || exit 1
+
+if [ -x "$root/.devcontainer/initialize.sh" ]; then
+  "$root/.devcontainer/initialize.sh"
+fi
+
+compose up --force-recreate --build -d "$@"
