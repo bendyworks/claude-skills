@@ -125,6 +125,14 @@ and whether it is read in development, test, or production:
   gets the same treatment as Redis: a per-checkout name or number
   inside the one server, defaulting to today's.
 
+- **Specs that stub the variables you are about to wrap.** A spec
+  that stubs `ENV['REDIS_URL']` to test production behavior passes in
+  the primary and fails in checkout N, whose `.envrc` sets the new
+  per-role variable that now takes precedence. Grep `spec/` (or
+  `test/`) for each variable Step 4 wraps, and have those specs stub
+  the per-checkout variable as absent too. The simultaneous run in
+  add mode is what catches any this search misses.
+
 Only what a test or dev run actually touches matters. Redis that the
 suite stubs out entirely still needs isolating for the dev server, but
 say which of the two it affects.
@@ -251,7 +259,9 @@ clone; it is pushed, since its pull request is open.
 ### Step 3 -- Write the identity *(services)*
 
 The new `.envrc` is the primary's `.envrc` with its identity block
-replaced (or appended, when the primary has none yet). Never overwrite
+replaced (or appended, when the primary has none yet), and with any
+line that labels the checkout for a human (a terminal background
+color, a prompt tag) changed so the two terminals look different. Never overwrite
 an existing `.envrc` in the new checkout without merging: keep every
 line outside the identity block. The block, for a project prefixed
 `PRJ`:
@@ -288,7 +298,9 @@ if the harness refuses (allowing an `.envrc` is a trust decision).
 - The highest Redis database number is below the server's count:
   `redis-cli -p <port> CONFIG GET databases` (16 by default; without
   `redis-cli`, `bin/rails runner 'p Redis.new(url: "redis://localhost:<port>").config(:get, "databases")'`
-  from the primary asks the same question). If it
+  from the primary asks the same question; with no Redis server
+  running at all, say so and move on, since nothing can collide yet).
+  If it
   does not fit, stop and say so: raising `databases` in the Redis
   config is the user's call, since it is shared by every project.
 
@@ -327,6 +339,10 @@ about it, and nothing that belongs to one session:
   a directory mixing both is walked, linking its untracked entries.
   List candidates with
   `git -C <primary> ls-files --others --directory -- .claude`.
+  Then add each linked path to the new checkout's
+  `.git/info/exclude`, with no trailing slash: a symlink is not a
+  directory, so the primary's `.claude/plans/`-style ignore patterns do
+  not match it, and the links would otherwise show as untracked.
 - **Never link** Claude Code's per-session runtime state:
   `.claude/worktrees/`, `scheduled_tasks.*`, `checkpoints/`,
   `mailbox/`, `agent-registry.json`, `first-run`,
