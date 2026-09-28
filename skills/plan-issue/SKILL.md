@@ -871,11 +871,11 @@ toggleable view of progress (Ctrl-T) alongside the markdown plan file.
   the project provides a change-highlights-style skill, add a further own
   task for the before/after summary and its communication to the
   stakeholder, ordered before the finish-tail items as in the ship tail.
-- The markdown plan file remains the source of truth for the *why* and
-  the approach. The Task tracker is the live view of *what is happening
-  now*, so it updates per to-do, never per group -- this applies to
-  every task in the list, including finish-tail tasks and ones added
-  partway through the work:
+- **The task list updates per to-do, never per group.** The markdown
+  plan file remains the source of truth for the *why* and the approach;
+  the Task tracker is the live view of *what is happening now*. This
+  applies to every task in the list, including finish-tail tasks and
+  ones added partway through the work:
   - Mark a to-do's task `in_progress` via `TaskUpdate` when work on it
     starts, before any other tool call for it.
   - Keep exactly one task in progress at a time, unless the work
@@ -979,10 +979,10 @@ Skip this step only for planning-only exercises with no tracker issue.
 
 ### Step 6 -- Show the to-do list and start
 
-Surface the plan's to-do list and start working through it. Before
-starting each to-do, mark its task in progress, and mark it completed
-once it is verified (record Step 4 owns that cadence). After each
-phase or to-do (your judgment on grouping):
+Surface the plan's to-do list and start working through it, one to-do
+at a time. **Before starting each to-do, mark its task in progress;
+mark it completed once it is verified** (record Step 4 owns that
+cadence). After each phase or to-do (your judgment on grouping):
 
 1. Run rubocop (or standardrb) and fix all failures.
 2. If production code changed: run the project's full lint+test suite
