@@ -4,21 +4,19 @@
 > conflicts with the project's own CLAUDE.md, rules files, or a team
 > agreement, the project wins.
 
-A plan that names a browser check -- confirm the page renders, walk the
-real user flow, check the deployed change in the app -- is closed only
-by the session performing that check in a browser. When nothing is set
-up for it, the session sets up what it can and asks for the rest. It
-never substitutes other evidence and calls the check done.
+When a plan names a browser check -- confirm the page renders, walk the
+real user flow, check the deployed change in the app -- and no signed-in
+browser is ready for it, set up what can be set up and ask the developer
+for the rest.
 
 ## A signed-in browser is something to ask for
 
-- Where browser tooling is available, never say an authenticated app
-  is out of reach. A session cannot sign in to staging, production, or
-  a third-party service itself, and should not try, but the developer
-  can sign in within seconds, so ask.
-- No tab handed over means nobody has asked yet, not that no browser
-  session exists. An empty tab list starts the request; it does not
-  end the check.
+- Where browser tooling is available, never say an authenticated app is
+  out of reach. A session cannot sign in to staging, production, or a
+  third-party service itself, and should not try, but the developer can
+  sign in within seconds, so ask. No tab handed over means nobody has
+  asked yet: an empty tab list starts the request, it does not end the
+  check.
 - A request spec, a script, or a signed-out visit that exercises the
   same code path is evidence to report beside the check, never in its
   place. The role is usually the point of the check: a page that loads
@@ -38,13 +36,11 @@ never substitutes other evidence and calls the check done.
    every tab in that browser, and the control often sits behind a menu
    and a confirmation.
 3. **Name the role in the ask:** "sign in as a non-admin so I can
-   confirm the refusal", not "please log in". A tab signed in as the
-   wrong role costs a second round trip.
+   confirm the refusal", not "please log in".
 4. **Point the developer at that tab by its title and URL.** Bring it to
    the front where the tooling can, and give its title and URL in every
-   ask, whichever page it is parked on. A tab number means nothing to
-   the developer, who should never hunt for the tab among other open
-   ones.
+   ask, whichever page it is parked on, never only an ID the tooling
+   assigned.
 5. **Wait for the signed-in tab, then run the check.** The ask is for a
    session the check can use, not for the developer to perform the check
    by hand. In an unattended run nobody can answer, so leave the tab set
@@ -63,7 +59,6 @@ at their direction, never as passed.
 
 This covers staging, production, and third-party services. In a local
 development environment a team may let sessions create their own test
-users; the project's own rules govern there. Staging and production
-hold separate data, so frame the check as a scenario ("a non-admin
-opening the reports page"), never by production record IDs; the
-environments guidance covers that.
+users; the project's own rules govern there. Frame the check as a
+scenario ("a non-admin opening the reports page"), never by production
+record IDs; the environments guidance covers why.

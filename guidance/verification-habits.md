@@ -46,5 +46,5 @@ query on staging, a manual QA step -- only performing that check closes
 it, unless the developer drops it. Evidence gathered another way is
 reported beside it, and the check stays listed as outstanding until it
 runs. A check the developer drops is reported as dropped at their
-direction, never as passed. The browser-checks guidance covers the most
-common case, a check that needs a signed-in browser.
+direction, never as passed. The browser-checks guidance covers a check
+that needs a signed-in browser.
