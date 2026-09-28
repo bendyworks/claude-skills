@@ -42,15 +42,19 @@ for the rest.
    that browser, and the control often sits behind a menu and a
    confirmation.
 3. **Name the role in the ask:** "sign in as a non-admin so I can
-   confirm the refusal", not "please log in".
+   confirm the refusal", not "please log in". A check that needs more
+   than one role names them all, in order, in the first ask.
 4. **Point the developer at that tab by its title and URL.** Bring it to
    the front where the tooling can, and give its title and URL in every
    ask, whichever page it is parked on, never only an ID the tooling
    assigned.
 5. **Wait for the signed-in tab, then run the check.** The ask is for a
    session the check can use, not for the developer to perform the check
-   by hand. In an unattended run nobody can answer, so leave the tab set
-   up and put the ask in the summary rather than waiting.
+   by hand. Work that does not depend on the check carries on meanwhile.
+   In an unattended run nobody can answer, so leave the tab set up and
+   put the ask in the summary rather than waiting. Once the check has
+   run, say which role the tab is left signed in as, so the developer
+   can sign back in as themselves.
 
 ## Outstanding until it runs
 
