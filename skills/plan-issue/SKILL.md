@@ -1003,8 +1003,9 @@ cadence). After each phase or to-do (your judgment on grouping):
    (`type(scope): Title Case Outcome Description`), unless the
    project's conventions say otherwise.
 4. Update the plan markdown: change `- [ ]` to `- [x]` for completed
-   items, add any newly-discovered work. On a GitHub-tracked repo, also sync the issue-body checklist now
-   (record Step 4 owns the cadence):
+   items, add any newly-discovered work. On a GitHub-tracked repo,
+   also sync the issue-body checklist now (record Step 4 owns the
+   cadence):
    `gh-issue-sync checklist NNN --plan .claude/plans/<slug>.md`.
 5. Show the user the updated to-do list, with each task's number shown
    next to it (the user refers to tasks by number), unless there's a
