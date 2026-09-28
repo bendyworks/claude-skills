@@ -1,0 +1,44 @@
+#!/usr/bin/env bash
+# parallel-checkouts template v1 (bendyworks/claude-skills)
+#
+# Rebuild this checkout's images and recreate its containers. It finds its
+# checkout from its own location, so it is safe to run from any directory
+# (but not through a symlink placed elsewhere, which fails closed), and
+# bin/compose-project refuses a shell carrying another checkout's identity.
+# Extra arguments go to `docker compose up`. See docs/parallel-checkouts.md.
+#
+# A project whose devcontainer has an initialize.sh beside its env file (it
+# writes machine-specific lines into that file) gets it run first, from the
+# checkout's root the way the devcontainer tooling runs it, and a failure
+# there stops the rebuild. The identity is checked before the initializer
+# runs, so no project code runs for a shell claiming another checkout, and
+# again after, against the caller's shell, so a line it rewrote is checked
+# too; an initializer that renames the project is refused. The env file must
+# already exist: a direnv load writes it.
+set -eu
+
+root="$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)"
+caller_name_set="${COMPOSE_PROJECT_NAME+set}"
+caller_name="${COMPOSE_PROJECT_NAME-}"
+. "$root/bin/compose-project" || exit 1
+
+initializer="$(dirname -- "$compose_project_env_file")/initialize.sh"
+if [ -f "$initializer" ]; then
+  name_before="$COMPOSE_PROJECT_NAME"
+  (cd -- "$root" && bash "$initializer")
+  # Check the rewritten file against the caller's own shell, not against
+  # the name the first check exported.
+  if [ -n "$caller_name_set" ]; then
+    export COMPOSE_PROJECT_NAME="$caller_name"
+  else
+    unset COMPOSE_PROJECT_NAME
+  fi
+  compose_project_quiet=1
+  . "$root/bin/compose-project" || exit 1
+  if [ "$COMPOSE_PROJECT_NAME" != "$name_before" ]; then
+    echo "docker-rebuild: the initializer ($initializer) changed COMPOSE_PROJECT_NAME from $name_before to $COMPOSE_PROJECT_NAME; a checkout's identity comes from its .envrc, so fix the initializer rather than rebuild under a new name" >&2
+    exit 1
+  fi
+fi
+
+compose up --force-recreate --build -d "$@"
