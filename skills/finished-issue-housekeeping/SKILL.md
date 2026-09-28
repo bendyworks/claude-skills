@@ -21,7 +21,7 @@ This skill runs the cleanup steps below in order. It is invoked either:
 
 ## Step 1 -- Confirm preconditions
 
-**Before anything else, when the conversation's task list holds this plan's run-housekeeping task, mark it `in_progress` via `TaskUpdate`.** The pass is that task's work, so it stays in progress until Step 10 completes it. A standalone run in a fresh session often has no such task, so skip this when `TaskList` shows none. Once the checks below pass, mark the plan's confirm-shipped task `completed` if the task list holds one and it is not already. **Whenever the pass stops short of Step 10, return both finish-tail tasks to `pending`**, so the task list never shows a stopped pass as running, or a confirm-shipped gate as done while its plan-file box is still unchecked.
+**Before anything else, when the conversation's task list holds this plan's run-housekeeping task, mark it `in_progress` via `TaskUpdate`** -- a resumed pass does the same before its first remaining step. The pass is that task's work, so it stays in progress until Step 10 completes it, including while the pass waits on an answer it will resume from. A standalone run in a fresh session often has no such task, so skip this when `TaskList` shows none. Once the checks below pass, mark the plan's confirm-shipped task `completed` if the task list holds one and it is not already. **When the pass stops short of Step 10, return the run-housekeeping task to `pending`.** Return the confirm-shipped task to `pending` too only when the stop comes before Step 2 flips the finish-tail boxes -- a failed check below, or Step 2's STOP; after the flip it stays completed, matching the plan file.
 
 **First, establish whether the project is in Deploy-on-Merge Mode**, because check 2 below depends on the answer. The mode holds only when the project's checked-in CLAUDE.md or a rules file declares it -- an explicit statement that merging to the default branch is the production deploy, naming the mode or saying so unambiguously. Three rules make that judgment safe:
 
@@ -457,4 +457,4 @@ Report concisely what was done, one line per item:
 - Task list: N completed tasks cleared.
 - Permission-prompt sweep: N additions in `<settings file>`, left uncommitted (or "nothing approved" / "skipped -- built-in unavailable").
 
-Then mark the run-housekeeping task completed and delete it (Step 8), and end with "Housekeeping complete."
+Then mark the run-housekeeping task completed and delete it (deferred from Step 8), and end with "Housekeeping complete."

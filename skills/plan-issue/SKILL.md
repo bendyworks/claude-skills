@@ -865,7 +865,8 @@ toggleable view of progress (Ctrl-T) alongside the markdown plan file.
   Step 1 marks the confirm-shipped task in progress and completes it
   when its checks pass; the housekeeping pass marks the
   run-housekeeping task in progress when it starts, completes it last,
-  and returns both to pending if it stops short. When the change is stakeholder-visible (a report,
+  and returns it to pending if it stops short (confirm-shipped too, when
+  the stop comes before its plan-file box is ticked). When the change is stakeholder-visible (a report,
   receipt, statement, mailer, or screen a client stakeholder relies on) and
   the project provides a change-highlights-style skill, add a further own
   task for the before/after summary and its communication to the
@@ -881,9 +882,11 @@ toggleable view of progress (Ctrl-T) alongside the markdown plan file.
     genuinely runs in parallel; then mark each parallel one.
   - Mark it `completed` the moment its deliverable is verified, not at
     the next commit, suite run, or checkpoint.
-  - Setting a to-do aside (a question held for the user, a blocker)
-    returns its task to `pending`. A hand-off to-do is complete once
-    it is handed off; it does not stay in progress while it waits.
+  - Setting a to-do aside to work on something else (a question held
+    for the user, a blocker) returns its task to `pending`; waiting on
+    an answer the to-do resumes from does not. A hand-off to-do is
+    complete once it is handed off; it does not stay in progress while
+    it waits.
 
   Lint, suite runs, commits, and the plan-file and checklist checkboxes
   may still be grouped (Step 6); only the task list is live. When new
