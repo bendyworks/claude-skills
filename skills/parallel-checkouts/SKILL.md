@@ -140,10 +140,10 @@ and whether it is read in development, test, or production:
   `Capybara.server_port`, webpack or Vite dev servers, anything else
   bound to a fixed port. A port chosen at random (Capybara's default,
   a WebDriver started by Selenium Manager) needs nothing. Every pinned
-  port moves by the same 200-per-checkout offset, so the pinned ports
-  must all fall within 200 of the lowest one, or checkout N's app port
-  lands on checkout M's other port (3000 and 4000 collide at checkout
-  6). When they do not, say so and ask which to move.
+  port moves by the same 200-per-checkout offset, so no two pinned
+  ports may differ by a multiple of 200, or checkout N's app port lands
+  on checkout M's other port (3000 and 4000 collide at checkout 6).
+  When two do, say so and ask which to move.
 - **Other shared servers** -- Elasticsearch or OpenSearch indexes,
   S3-compatible buckets in a local MinIO, a shared mail catcher. Each
   gets the same treatment as Redis: a per-checkout name or number
@@ -298,8 +298,8 @@ then continue.
   shell with no identity still resolves today's project.
 - **Host ports:** `"${PRJ_APP_PORT:-3000}:3000"` for each published
   port, one variable per port, named for what listens there. The same
-  200-port offset applies, so the published ports must fall within 200
-  of the lowest, as in the native path.
+  200-port offset applies, so no two published ports may differ by a
+  multiple of 200, as in the native path.
 - **The stack scripts:** copy `compose-project`, `dexec`, `docker-up`,
   `docker-down`, `docker-rebuild`, and `check-parallel-dev` from this
   skill's `templates/` into the project's `bin/`, replacing `PRJ` with
