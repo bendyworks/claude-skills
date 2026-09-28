@@ -93,6 +93,11 @@ descriptions are just two words.
   same thing" states a fact, while "keeping both invites drift" names
   the cost that justifies the commit. For a change that adds
   something new, the user-visible outcome is motivation enough.
+- The commit is the reader's "after": behavior it contains takes
+  present tense ("the report now pages at 100 rows"), and the
+  behavior it replaces carries a label ("before this change, it
+  loaded every row"), never a calendar word like "today". The
+  writing-about-change guidance covers the rest.
 - Reviewer pointers ("start with file X", "the key test to scrutinize
   is Y") and out-of-scope notes ("filed as ABC-123", "deferred to the
   next PR") belong in the PR description instead. Commits live in

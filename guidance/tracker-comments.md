@@ -24,3 +24,8 @@ action:
 The failure mode this prevents: a comment says a change "is happening
 today", the plan slips, and weeks later a teammate follows the
 comment's instructions hunting for something that never existed.
+
+A comment about work that has already shipped labels the old behavior
+against a named change or an absolute date ("before #123 merged, the
+export dropped blank rows"), never a relative day. The
+writing-about-change guidance covers tense on both sides of a change.
