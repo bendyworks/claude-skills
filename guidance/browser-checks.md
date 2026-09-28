@@ -26,15 +26,19 @@ for the rest.
 ## Set the tab up, then ask
 
 1. **Create the tab** rather than waiting for one to appear.
-2. **Navigate it to the app's sign-in screen.** If the app redirects
-   away or shows a signed-in user, the browser already holds a session.
-   When that session is the role the check needs, skip the ask and run
-   the check. When it is the wrong role, park the tab on a page that
-   shows the sign-out control and ask the developer to sign out, then
-   sign in as the role the check needs. Offer to click sign-out rather
-   than doing it unasked: signing out ends the developer's session on
-   every tab in that browser, and the control often sits behind a menu
-   and a confirmation.
+2. **Navigate it to the app's sign-in screen and judge by where it
+   lands.** A login form, even one on another domain such as a single
+   sign-on provider, means the browser holds no session: leave the tab
+   there. A page showing a signed-in user (a name, an avatar, a sign-out
+   control) means it does. When that session is the role the check
+   needs, skip the ask and run the check. When it is the wrong role,
+   park the tab on a page that shows the sign-out control and ask the
+   developer to sign out, then sign in as the role the check needs; with
+   single sign-on, signing out of the app can leave the provider signed
+   in as the same user. Offer to click sign-out rather than doing it
+   unasked: signing out ends the developer's session on every tab in
+   that browser, and the control often sits behind a menu and a
+   confirmation.
 3. **Name the role in the ask:** "sign in as a non-admin so I can
    confirm the refusal", not "please log in".
 4. **Point the developer at that tab by its title and URL.** Bring it to
