@@ -24,7 +24,7 @@ would otherwise share reads them, falling back to the old value when unset:
 | Development database | `config/database.yml` | `PRJ_CHECKOUT_SUFFIX` | `<app>_development` |
 | Test database | `config/database.yml` | `PRJ_CHECKOUT_SUFFIX` | `<app>_test` |
 | <Redis role> | `<file>` | `PRJ_<ROLE>_REDIS_URL`, then `REDIS_URL` | `redis://localhost:6379/<n>` |
-| Dev server port | `config/puma.rb` | `PORT` | `3000` |
+| Dev server port | `config/puma.rb`, `Procfile.dev` | `PORT`, `PRJ_APP_PORT` | `3000` |
 | <Pinned test server port> | `<file>` | `PRJ_CAPYBARA_PORT` | `<port>` |
 
 Postgres and Redis stay one shared server each; a checkout is isolated
@@ -49,7 +49,8 @@ export PRJ_CHECKOUT_SUFFIX=<N>
 export PRJ_CHECKOUT_INDEX=<N - 1>
 export PRJ_PORT_OFFSET=$((200 * PRJ_CHECKOUT_INDEX))
 export PRJ_CHECKOUT_ROOT="$PWD"
-export PORT=$((3000 + PRJ_PORT_OFFSET))
+export PRJ_APP_PORT=$((3000 + PRJ_PORT_OFFSET))
+export PORT=$PRJ_APP_PORT
 <one line per remaining row of the table above>
 ```
 

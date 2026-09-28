@@ -111,7 +111,10 @@ and whether it is read in development, test, or production:
   literal `redis://` URL in `config/`, `app/`, and `lib/`. Note each
   **role** (jobs, Action Cable, cache, rate limiting, ...) and its
   default database number. Two roles that read the same variable with
-  different default database numbers are two roles, not one.
+  different default database numbers are two roles, not one. A role
+  only production uses (an Action Cable adapter that is `async` in
+  development and `test` in test) is left alone, and does not count
+  toward the number of roles below.
 - **Ports the app opens** -- the dev server (`PORT` in
   `config/puma.rb`, `Procfile.dev`, `bin/dev`), a pinned
   `Capybara.server_port`, webpack or Vite dev servers, anything else
@@ -160,12 +163,16 @@ Each edit keeps today's literal as the fallback:
   database. YAML files that read ERB (`config/cable.yml`) take the
   same nested fetch.
 
-- **Ports:** where the app already reads a conventional variable
-  (`PORT` for Puma), change nothing tracked -- the `.envrc` sets it.
-  Where a port is a literal, read a prefixed variable instead:
-  `Capybara.server_port = Integer(ENV.fetch("PRJ_CAPYBARA_PORT") { 3001 })`.
+- **Ports:** where a port is a literal, read a prefixed variable
+  instead: `Capybara.server_port = Integer(ENV.fetch("PRJ_CAPYBARA_PORT") { 3001 })`.
   If the literal already comes from an unprefixed variable, keep that
-  variable name and let the `.envrc` set it.
+  variable name and let the `.envrc` set it. `PORT` is the exception
+  to reaching for an existing variable: foreman and its kin assign
+  `PORT` to every process they start (5000 and up), so a
+  `Procfile.dev` line `rails server -p 3000` must become
+  `rails server -p ${PRJ_APP_PORT:-3000}`, never `-p ${PORT:-3000}`,
+  or the primary's dev server moves to foreman's port. Puma's own
+  `ENV.fetch('PORT')` stays as it is; the `.envrc` sets both.
 
 - **The guard:** copy `templates/parallel_checkout_guard.rb` (in this
   skill's directory) to `config/initializers/parallel_checkout_guard.rb`,
@@ -223,9 +230,11 @@ clone; it is pushed, since its pull request is open.
   untracked in the new checkout, one `git add -A` from a commit.
 - **Ignored configuration the app needs to boot:** list the primary's
   ignored files outside bulky directories --
-  `git -C <primary> ls-files --others --ignored --exclude-standard`,
+  `git -C <primary> ls-files --others --ignored --exclude-standard --directory`,
   skipping `tmp/`, `log/`, `node_modules/`, `coverage/`,
-  `vendor/bundle/`, `public/assets/`, `public/packs*/`, `storage/`.
+  `vendor/bundle/`, `public/assets/`, `public/packs*/`, `storage/`,
+  editor and OS state (`.DS_Store`, `.ruby-lsp/`, `.idea/`), and
+  `.claude/` and `.envrc`, which the next steps handle.
   Copy the ones the app reads (`config/master.key`,
   `config/credentials/*.key`, `.env`, a local tool-versions file),
   and show the user the list of what was copied. Never copy these
@@ -245,7 +254,8 @@ export PRJ_CHECKOUT_SUFFIX=2
 export PRJ_CHECKOUT_INDEX=1
 export PRJ_PORT_OFFSET=$((200 * PRJ_CHECKOUT_INDEX))
 export PRJ_CHECKOUT_ROOT="$PWD"
-export PORT=$((3000 + PRJ_PORT_OFFSET))
+export PRJ_APP_PORT=$((3000 + PRJ_PORT_OFFSET))
+export PORT=$PRJ_APP_PORT
 export PRJ_CAPYBARA_PORT=$((3001 + PRJ_PORT_OFFSET))
 export PRJ_JOBS_REDIS_URL="redis://localhost:6379/$((0 + 2 * PRJ_CHECKOUT_INDEX))"
 export PRJ_CABLE_REDIS_URL="redis://localhost:6379/$((1 + 2 * PRJ_CHECKOUT_INDEX))"
