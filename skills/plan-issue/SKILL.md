@@ -861,19 +861,38 @@ toggleable view of progress (Ctrl-T) alongside the markdown plan file.
   the whole arc and each completes on its own. Outside Deploy-on-Merge
   Mode the confirm-shipped item is one too. Mirror whatever tail the plan
   carries; do not add a task the plan omits. The finish-tail tasks stay
-  pending until the user triggers the finish phase; the housekeeping pass
-  completes whichever of them the plan carries, mirroring its plan-file
-  flips via `TaskUpdate` before its task-cleanup step deletes them. When the change is stakeholder-visible (a report,
+  pending until the user triggers the finish phase. The finish phase's
+  Step 1 marks the confirm-shipped task in progress and completes it
+  when its checks pass; the housekeeping pass marks the
+  run-housekeeping task in progress when it starts, completes it last,
+  and returns it to pending if it stops short (confirm-shipped too, when
+  the stop comes before its plan-file box is ticked). When the change is stakeholder-visible (a report,
   receipt, statement, mailer, or screen a client stakeholder relies on) and
   the project provides a change-highlights-style skill, add a further own
   task for the before/after summary and its communication to the
   stakeholder, ordered before the finish-tail items as in the ship tail.
-- The markdown plan file remains the source of truth for the *why* and
-  the approach. The Task tracker is a fast-access view of the *what's
-  next*. Keep them in sync: when a to-do is checked off in the markdown,
-  mark the corresponding task complete via `TaskUpdate`; when new work
-  is discovered, append it to both (and, on GitHub-tracked repos, to
-  the issue-body checklist at its next sync -- next bullet).
+- **The task list updates per to-do, never per group.** The markdown
+  plan file remains the source of truth for the *why* and the approach;
+  the Task tracker is the live view of *what is happening now*. This
+  applies to every task in the list, including finish-tail tasks and
+  ones added partway through the work:
+  - Mark a to-do's task `in_progress` via `TaskUpdate` when work on it
+    starts, before any other tool call for it.
+  - Keep exactly one task in progress at a time, unless the work
+    genuinely runs in parallel; then mark each parallel one.
+  - Mark it `completed` the moment its deliverable is verified, not at
+    the next commit, suite run, or checkpoint.
+  - Setting a to-do aside to work on something else (a question held
+    for the user, a blocker) returns its task to `pending`; waiting on
+    an answer the to-do resumes from does not. A hand-off to-do is
+    complete once it is handed off; it does not stay in progress while
+    it waits.
+
+  Lint, suite runs, commits, and the plan-file and checklist checkboxes
+  may still be grouped (Step 6); only the task list is live. When new
+  work is discovered, append it to the plan file and the task list
+  (and, on GitHub-tracked repos, to the issue-body checklist at its
+  next sync -- next bullet). This bullet owns the task-list cadence.
 - **GitHub-tracked repos get a third surface: the issue-body
   checklist.** Mirror the plan's numbered to-dos into the issue body
   with the bundled helper:
@@ -962,8 +981,10 @@ Skip this step only for planning-only exercises with no tracker issue.
 
 ### Step 6 -- Show the to-do list and start
 
-Surface the plan's to-do list and start working through it. After each
-phase or to-do (your judgment on grouping):
+Surface the plan's to-do list and start working through it, one to-do
+at a time. **Before starting each to-do, mark its task in progress;
+mark it completed once it is verified** (record Step 4 owns that
+cadence). After each phase or to-do (your judgment on grouping):
 
 1. Run rubocop (or standardrb) and fix all failures.
 2. If production code changed: run the project's full lint+test suite
@@ -985,10 +1006,9 @@ phase or to-do (your judgment on grouping):
    (`type(scope): Title Case Outcome Description`), unless the
    project's conventions say otherwise.
 4. Update the plan markdown: change `- [ ]` to `- [x]` for completed
-   items, add any newly-discovered work. Mirror the change in the
-   Task tracker via `TaskUpdate` so the Ctrl-T view stays accurate.
-   On a GitHub-tracked repo, also sync the issue-body checklist now
-   (record Step 4 owns the cadence):
+   items, add any newly-discovered work. On a GitHub-tracked repo,
+   also sync the issue-body checklist now (record Step 4 owns the
+   cadence):
    `gh-issue-sync checklist NNN --plan .claude/plans/<slug>.md`.
 5. Show the user the updated to-do list, with each task's number shown
    next to it (the user refers to tasks by number), unless there's a
@@ -1019,6 +1039,10 @@ Deploy-on-Merge Mode there is a second gap to wait out first, between
 
 ### Step 1 -- Confirm preconditions
 
+When the task list holds this plan's confirm-shipped task, mark it in
+progress before anything else in this step, and completed once all
+three checks below pass (record Step 4 owns the task-list cadence).
+
 **First establish whether the project is in Deploy-on-Merge Mode**, by
 reading its checked-in CLAUDE.md and rules files now -- check 2 depends
 on the answer, and this phase is a standalone entry point, so nothing
@@ -1039,10 +1063,10 @@ but catching a "no" here lets you exit early before invoking it):
    - When in doubt, ask the user to confirm rather than guess.
 3. **The user explicitly confirms** the plan is wrapped up.
 
-If any of these is "no", **stop**. The branch may still be needed --
-for a hotfix on top of the same code, for cherry-picking, for a
-follow-up PR that branches from it. Don't proceed with cleanup on
-assumption.
+If any of these is "no", **stop**, and return the confirm-shipped task
+to pending. The branch may still be needed -- for a hotfix on top of
+the same code, for cherry-picking, for a follow-up PR that branches
+from it. Don't proceed with cleanup on assumption.
 
 ### Step 2 -- Invoke the finished-issue-housekeeping skill
 
