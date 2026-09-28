@@ -864,9 +864,8 @@ toggleable view of progress (Ctrl-T) alongside the markdown plan file.
   pending until the user triggers the finish phase. The finish phase's
   Step 1 marks the confirm-shipped task in progress and completes it
   when its checks pass; the housekeeping pass marks the
-  run-housekeeping task in progress when it starts, and completes
-  whichever finish-tail tasks the plan carries, mirroring its plan-file
-  flips via `TaskUpdate` before its task-cleanup step deletes them. When the change is stakeholder-visible (a report,
+  run-housekeeping task in progress when it starts, completes it last,
+  and returns both to pending if it stops short. When the change is stakeholder-visible (a report,
   receipt, statement, mailer, or screen a client stakeholder relies on) and
   the project provides a change-highlights-style skill, add a further own
   task for the before/after summary and its communication to the
