@@ -30,13 +30,15 @@ for the rest.
    lands.** A login form, even one on another domain such as a single
    sign-on provider, means the browser holds no session: leave the tab
    there. A page showing a signed-in user (a name, an avatar, a sign-out
-   control) means it does. When that session is the role the check
-   needs, skip the ask and run the check. When it is the wrong role,
-   park the tab on a page that shows the sign-out control and ask the
-   developer to sign out, then sign in as the role the check needs; with
-   single sign-on, signing out of the app can leave the provider signed
-   in as the same user. Offer to click sign-out rather than doing it
-   unasked: signing out ends the developer's session on every tab in
+   control) means it does. When that session is the role the check needs
+   and the check only reads, skip the ask and run it; a check that
+   changes data confirms the account with the developer first, since the
+   signed-in account is often the developer's own. When it is the wrong
+   role, park the tab on a page that shows the sign-out control and ask
+   the developer to sign out, then sign in as the role the check needs;
+   with single sign-on, signing out of the app can leave the provider
+   signed in as the same user. Offer to click sign-out rather than doing
+   it unasked: signing out ends the developer's session on every tab in
    that browser, and the control often sits behind a menu and a
    confirmation.
 3. **Name the role in the ask:** "sign in as a non-admin so I can
