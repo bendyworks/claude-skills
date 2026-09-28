@@ -208,6 +208,10 @@ class ParallelCheckoutStackTest < Minitest::Test
     assert_ran(run_script('probe', 'ps', env: { 'COMPOSE_PROJECT_NAME' => 'stack2' }))
   end
 
+  def test_ignores_an_exported_variable_that_only_starts_like_compose_env_files
+    assert_ran(run_script('probe', 'ps', env: { 'COMPOSE_ENV_FILES_NOTE' => 'x' }))
+  end
+
   def test_refuses_when_compose_is_pointed_at_another_env_file
     assert_refused(run_script('probe', 'ps', env: { 'COMPOSE_ENV_FILES' => '/elsewhere/.env' }),
                    'COMPOSE_ENV_FILES')
@@ -242,7 +246,22 @@ class ParallelCheckoutStackTest < Minitest::Test
 
   def test_compares_an_export_line_separated_by_a_tab
     write_identity("COMPOSE_PROJECT_NAME=stack2\nexport\t#{PREFIX}APP_PORT=3200\n")
-    assert_refused(run_script('probe', 'ps', env: { "#{PREFIX}APP_PORT" => '1' }), "#{PREFIX}APP_PORT=1")
+    assert_refused(run_script('probe', 'ps', env: { "#{PREFIX}APP_PORT" => '1' }), "#{PREFIX}APP_PORT=1", '(3200)')
+  end
+
+  def test_refuses_an_identity_line_in_the_colon_form_with_an_equals_sign_after_it
+    write_identity("COMPOSE_PROJECT_NAME=stack2\nCOMPOSE_PROJECT_NAME: stack3 # note a=b\n")
+    assert_refused(run_script('probe', 'ps'), 'COMPOSE_PROJECT_NAME', 'KEY=value')
+  end
+
+  def test_refuses_a_bare_identity_key_that_defers_to_the_environment
+    write_identity("COMPOSE_PROJECT_NAME=stack2\n#{PREFIX}APP_PORT\n")
+    assert_refused(run_script('probe', 'ps'), "#{PREFIX}APP_PORT", 'with no value')
+  end
+
+  def test_reads_an_unquoted_value_with_a_windows_line_ending
+    write_identity("COMPOSE_PROJECT_NAME=stack2\r\n#{PREFIX}APP_PORT=3200\r\n")
+    assert_ran(run_script('probe', 'ps', env: { 'COMPOSE_PROJECT_NAME' => 'stack2', "#{PREFIX}APP_PORT" => '3200' }))
   end
 
   def test_refuses_an_identity_line_in_the_colon_form
@@ -252,7 +271,7 @@ class ParallelCheckoutStackTest < Minitest::Test
 
   def test_reads_a_last_line_with_no_trailing_newline
     write_identity("COMPOSE_PROJECT_NAME=stack2\n#{PREFIX}DB_PORT=5632")
-    assert_refused(run_script('probe', 'ps', env: { "#{PREFIX}DB_PORT" => '1' }), "#{PREFIX}DB_PORT=1")
+    assert_refused(run_script('probe', 'ps', env: { "#{PREFIX}DB_PORT" => '1' }), "#{PREFIX}DB_PORT=1", '(5632)')
   end
 
   def test_compares_the_last_assignment_of_a_repeated_variable
@@ -331,7 +350,7 @@ class ParallelCheckoutStackTest < Minitest::Test
   end
 
   def test_dexec_accepts_and_ignores_the_terminal_flags
-    assert_ran(run_script('dexec', '-it', '-i', '-t', '-Ti', '--interactive', '--tty', 'bash'))
+    assert_ran(run_script('dexec', '-it', '-i', '-t', '-Ti', '--no-tty', '--interactive', '--tty', 'bash'))
     assert_equal %w[exec -T app bash], exec_args
   end
 

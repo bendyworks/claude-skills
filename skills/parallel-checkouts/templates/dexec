@@ -50,7 +50,7 @@ while [ $# -gt 0 ]; do
     -i|-t|-it|-ti|--interactive|--tty)
       shift
       ;;
-    -T|--no-TTY|-Ti|-iT|-Tt|-tT)
+    -T|--no-TTY|--no-tty|-Ti|-iT|-Tt|-tT)
       no_tty=1
       shift
       ;;

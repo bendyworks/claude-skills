@@ -35,7 +35,8 @@
 # `KEY: value` form are not implemented, and each fails closed, as a
 # refusal rather than a wrong answer. Nothing the file says is evaluated:
 # a key must be a shell variable name, and values are stored with
-# `printf -v`.
+# `printf -v`. A bare `KEY` line, which Compose fills from the environment,
+# is refused for an identity variable.
 #
 # Callers source it as `. bin/compose-project || exit 1`, which suppresses
 # `set -e` inside it, so every failure path here is an explicit
@@ -134,7 +135,11 @@ compose_project_has_key() {
   return 1
 }
 
-if [ -n "${COMPOSE_ENV_FILES+set}" ] && [ -n "$(compgen -e COMPOSE_ENV_FILES)" ]; then
+case "$(declare -p COMPOSE_ENV_FILES 2>/dev/null)" in
+  "declare -x"*) compose_project_env_override=1 ;;
+  *) compose_project_env_override="" ;;
+esac
+if [ -n "$compose_project_env_override" ]; then
   echo "${0##*/}: COMPOSE_ENV_FILES is set in this shell, so Compose would read another env file than the $compose_project_env_file this checks; unset it -- see docs/parallel-checkouts.md" >&2
   return 1
 fi
@@ -149,19 +154,21 @@ fi
 compose_project_keys=()
 while IFS= read -r compose_project_line || [ -n "$compose_project_line" ]; do
   compose_project_line="$(compose_project_strip_line "$compose_project_line")"
-  case "$compose_project_line" in
-    *=*) compose_project_key="${compose_project_line%%=*}" ;;
-    *)
-      compose_project_key="${compose_project_line%%:*}"
-      compose_project_key="${compose_project_key%"${compose_project_key##*[![:space:]]}"}"
-      if compose_project_is_identity "$compose_project_key"; then
-        echo "${0##*/}: $compose_project_env_file sets $compose_project_key in the KEY: value form, which this check does not read; write it as KEY=value -- regenerate the file with a direnv load, per docs/parallel-checkouts.md" >&2
-        return 1
-      fi
-      continue
+  # Compose ends a key at the first `=` or `:`, whichever comes first.
+  compose_project_key="${compose_project_line%%[=:]*}"
+  compose_project_sep="${compose_project_line:${#compose_project_key}:1}"
+  compose_project_key="${compose_project_key%"${compose_project_key##*[![:space:]]}"}"
+  compose_project_is_identity "$compose_project_key" || continue
+  case "$compose_project_sep" in
+    ':')
+      echo "${0##*/}: $compose_project_env_file sets $compose_project_key in the KEY: value form, which this check does not read; write it as KEY=value -- regenerate the file with a direnv load, per docs/parallel-checkouts.md" >&2
+      return 1
+      ;;
+    '')
+      echo "${0##*/}: $compose_project_env_file names $compose_project_key with no value, which Compose takes from the environment; write it as KEY=value -- regenerate the file with a direnv load, per docs/parallel-checkouts.md" >&2
+      return 1
       ;;
   esac
-  compose_project_is_identity "$compose_project_key" || continue
 
   if ! compose_project_is_name "$compose_project_key"; then
     echo "${0##*/}: $compose_project_env_file has an identity line whose name is not a shell variable name; refusing to interpret it -- regenerate the file with a direnv load, per docs/parallel-checkouts.md" >&2
@@ -221,6 +228,7 @@ for compose_project_key in ${compose_project_keys[@]+"${compose_project_keys[@]}
   unset "compose_project_value_$compose_project_key"
 done
 unset compose_project_root compose_project_dir compose_project_env_file compose_project_keys \
+  compose_project_sep compose_project_env_override \
   compose_project_line compose_project_key compose_project_name compose_project_have \
   compose_project_shown compose_project_want compose_project_want_var
 unset -f compose_project_is_identity compose_project_is_name compose_project_clean_value \
