@@ -221,6 +221,13 @@ class ParallelCheckoutCheckerTest < Minitest::Test
     assert_includes out + err, "this checkout's own shell"
   end
 
+  def test_says_there_is_nothing_to_check_in_a_checkout_without_an_identity
+    File.write(File.join(@root, '.devcontainer', '.env'), "SECRET_TOKEN=keep-me\n")
+    out, err, status = check
+    assert_equal 1, status.exitstatus
+    assert_includes out + err, 'has no parallel-checkout identity'
+  end
+
   def test_refusal_checks_never_reach_docker
     check
     assert_empty execs

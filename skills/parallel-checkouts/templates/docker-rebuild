@@ -13,8 +13,7 @@
 # there stops the rebuild. The identity is checked before the initializer
 # runs, so no project code runs for a shell claiming another checkout, and
 # again after, against the caller's shell, so a line it rewrote is checked
-# too; an initializer that renames the project is refused. The env file must
-# already exist: a direnv load writes it.
+# too; an initializer that renames the project is refused.
 set -eu
 
 root="$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)"
@@ -24,7 +23,7 @@ caller_name="${COMPOSE_PROJECT_NAME-}"
 
 initializer="$(dirname -- "$compose_project_env_file")/initialize.sh"
 if [ -f "$initializer" ]; then
-  name_before="$COMPOSE_PROJECT_NAME"
+  name_before="${COMPOSE_PROJECT_NAME-}"
   (cd -- "$root" && bash "$initializer")
   # Check the rewritten file against the caller's own shell, not against
   # the name the first check exported.
@@ -35,8 +34,8 @@ if [ -f "$initializer" ]; then
   fi
   compose_project_quiet=1
   . "$root/bin/compose-project" || exit 1
-  if [ "$COMPOSE_PROJECT_NAME" != "$name_before" ]; then
-    echo "docker-rebuild: the initializer ($initializer) changed COMPOSE_PROJECT_NAME from $name_before to $COMPOSE_PROJECT_NAME; a checkout's identity comes from its .envrc, so fix the initializer rather than rebuild under a new name" >&2
+  if [ "${COMPOSE_PROJECT_NAME-}" != "$name_before" ]; then
+    echo "docker-rebuild: the initializer ($initializer) changed COMPOSE_PROJECT_NAME from ${name_before:-(none)} to ${COMPOSE_PROJECT_NAME:-(none)}; a checkout's identity comes from its .envrc, so fix the initializer rather than rebuild under a new name" >&2
     exit 1
   fi
 fi

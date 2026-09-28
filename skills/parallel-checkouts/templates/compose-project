@@ -18,14 +18,23 @@
 #
 # So this file compares the checkout's identity with the environment and
 # refuses on any disagreement, rather than guessing which checkout was
-# meant. The identity is COMPOSE_PROJECT_NAME, PRJ_CHECKOUT_*,
-# PRJ_PORT_OFFSET, and PRJ_*_PORT: names the skill generates and values
-# that are safe to print. Other PRJ_* variables are the project's own,
-# possibly secrets, and are never read. An exported identity variable the
-# file does not set is refused too, since Compose would use it. The one
-# thing this file decides is COMPOSE_PROJECT_NAME: having verified it, it
-# exports it, so child processes and an override file's `name:` cannot
-# redirect a command.
+# meant. The identity is COMPOSE_PROJECT_NAME, PRJ_CHECKOUT_SUFFIX,
+# PRJ_CHECKOUT_INDEX, PRJ_CHECKOUT_ROOT, PRJ_PORT_OFFSET, and PRJ_*_PORT:
+# names the skill generates and values that are safe to print. Other PRJ_*
+# variables are the project's own, possibly secrets, and are never read.
+# An exported identity variable the file does not set is refused too,
+# since Compose would use it. The one thing this file decides is
+# COMPOSE_PROJECT_NAME: having verified it, it exports it, so child
+# processes and an override file's `name:` cannot redirect a command. The
+# .envrc block in docs/parallel-checkouts.md writes exactly these names
+# into the env file; the two lists must match.
+#
+# A checkout with no identity at all -- none in the env file, none in the
+# shell -- is a teammate's original checkout that never set one up, and
+# runs with the compose file's own default name. A checkout the skill
+# added carries a parallel-checkout marker in its git directory, and is
+# refused instead: without its identity it would reach the original
+# checkout's stack.
 #
 # It reads the file the way Compose's dotenv parser does for the shapes a
 # generated identity file holds: an optional `export` prefix, CRLF endings,
@@ -61,7 +70,7 @@ compose_project_files=(-f "$compose_project_dir/docker-compose.yml")
 
 compose_project_is_identity() {
   case "$1" in
-    COMPOSE_PROJECT_NAME|PRJ_CHECKOUT_*|PRJ_PORT_OFFSET|PRJ_*_PORT) return 0 ;;
+    COMPOSE_PROJECT_NAME|PRJ_CHECKOUT_SUFFIX|PRJ_CHECKOUT_INDEX|PRJ_CHECKOUT_ROOT|PRJ_PORT_OFFSET|PRJ_*_PORT) return 0 ;;
   esac
   return 1
 }
@@ -144,11 +153,6 @@ if [ -n "$compose_project_env_override" ]; then
   return 1
 fi
 
-if [ ! -f "$compose_project_env_file" ]; then
-  echo "${0##*/}: $compose_project_env_file is missing, so this checkout has no identity; set it up per docs/parallel-checkouts.md (a direnv load writes it)" >&2
-  return 1
-fi
-
 # Collect the file's identity; the last assignment of a variable wins, as
 # in Compose.
 compose_project_keys=()
@@ -177,7 +181,7 @@ while IFS= read -r compose_project_line || [ -n "$compose_project_line" ]; do
 
   printf -v "compose_project_value_$compose_project_key" '%s' "$(compose_project_clean_value "${compose_project_line#*=}")"
   compose_project_has_key "$compose_project_key" || compose_project_keys+=("$compose_project_key")
-done < "$compose_project_env_file"
+done < <(cat -- "$compose_project_env_file" 2>/dev/null)
 
 # Compare with what the shell exports; an unexported shell variable never
 # reaches Compose. Set-but-empty counts as disagreement: Compose asks
@@ -205,11 +209,50 @@ $(compgen -e)
 COMPOSE_PROJECT_EXPORTED
 
 compose_project_has_key COMPOSE_PROJECT_NAME && compose_project_name="$compose_project_value_COMPOSE_PROJECT_NAME"
-if [ -z "$compose_project_name" ]; then
-  echo "${0##*/}: $compose_project_env_file names no COMPOSE_PROJECT_NAME, so this checkout has no identity; set it up per docs/parallel-checkouts.md" >&2
+# Find the checkout's git common directory without running git, which an
+# exported GIT_DIR, a missing binary, or an old version would each point
+# elsewhere: walk up to .git, and in a linked worktree follow its gitdir
+# and commondir files.
+compose_project_walk="$compose_project_root"
+while [ ! -e "$compose_project_walk/.git" ] && [ "$compose_project_walk" != / ]; do
+  compose_project_walk="$(dirname -- "$compose_project_walk")"
+done
+compose_project_common=""
+compose_project_linked=""
+if [ -d "$compose_project_walk/.git" ]; then
+  compose_project_common="$compose_project_walk/.git"
+elif [ -f "$compose_project_walk/.git" ]; then
+  compose_project_linked=1
+  IFS= read -r compose_project_line < "$compose_project_walk/.git" || true
+  compose_project_line="${compose_project_line%$'\r'}"
+  compose_project_line="${compose_project_line#gitdir:}"
+  compose_project_line="${compose_project_line#"${compose_project_line%%[![:space:]]*}"}"
+  case "$compose_project_line" in
+    /*) ;;
+    *) compose_project_line="$compose_project_walk/$compose_project_line" ;;
+  esac
+  compose_project_common="$compose_project_line"
+  if [ -f "$compose_project_line/commondir" ]; then
+    IFS= read -r compose_project_common < "$compose_project_line/commondir" || true
+    case "$compose_project_common" in
+      /*) ;;
+      *) compose_project_common="$compose_project_line/$compose_project_common" ;;
+    esac
+  fi
+fi
+compose_project_marker="$compose_project_common/parallel-checkout"
+if [ -n "$compose_project_name" ]; then
+  export COMPOSE_PROJECT_NAME="$compose_project_name"
+elif [ ${#compose_project_keys[@]} -gt 0 ]; then
+  echo "${0##*/}: $compose_project_env_file sets part of an identity but names no COMPOSE_PROJECT_NAME; regenerate it with a direnv load, per docs/parallel-checkouts.md" >&2
+  return 1
+elif [ -n "$compose_project_common" ] && [ -f "$compose_project_marker" ]; then
+  echo "${0##*/}: this is parallel checkout $(cat -- "$compose_project_marker") but has no identity in this shell or in $compose_project_env_file, so it would reach the original checkout's stack; load its .envrc (direnv allow) -- see docs/parallel-checkouts.md" >&2
+  return 1
+elif [ -n "$compose_project_linked" ]; then
+  echo "${0##*/}: this is a git worktree with no identity, and its compose file would recreate the checkout's own containers with this worktree's code mounted; run stack commands from the checkout itself -- see docs/parallel-checkouts.md" >&2
   return 1
 fi
-export COMPOSE_PROJECT_NAME="$compose_project_name"
 
 # An explicit -f disables Compose's own loading of an override file, so a
 # personal docker-compose.override.yml beside the compose file is named
@@ -233,7 +276,8 @@ for compose_project_key in ${compose_project_keys[@]+"${compose_project_keys[@]}
   unset "compose_project_value_$compose_project_key"
 done
 unset compose_project_root compose_project_dir compose_project_keys compose_project_quiet \
-  compose_project_sep compose_project_env_override \
+  compose_project_sep compose_project_env_override compose_project_marker \
+  compose_project_walk compose_project_common compose_project_linked \
   compose_project_line compose_project_key compose_project_name compose_project_have \
   compose_project_shown compose_project_want compose_project_want_var
 unset -f compose_project_is_identity compose_project_is_name compose_project_clean_value \
