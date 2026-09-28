@@ -20,11 +20,12 @@ action:
   still the current one."
 - Convert relative time ("today", "next week") to absolute dates;
   relative words are meaningless to a reader arriving weeks later.
-- In a comment about work that has shipped, label the old behavior
-  against the change instead ("before this change, the export
-  dropped blank rows"). The writing-about-change guidance covers
-  tense on both sides of a change.
 
 The failure mode this prevents: a comment says a change "is happening
 today", the plan slips, and weeks later a teammate follows the
 comment's instructions hunting for something that never existed.
+
+A comment about work that has already shipped labels the old behavior
+against the change rather than a date ("before this change, the export
+dropped blank rows"). The writing-about-change guidance covers tense on
+both sides of a change.

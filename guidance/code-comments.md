@@ -23,7 +23,7 @@ This means:
 - No "we just changed X, so this now has to..." comments. State what
   the code does and why, not what it used to do. A comment describes
   no change, so it takes no side of one: "now" and "previously"
-  belong in the commit.
+  belong in the commit message or PR description.
 - No "TODO: clean up after launch" comments without a tracker issue
   reference; if it needs cleaning, file the issue and reference it,
   otherwise the TODO rots forever.
