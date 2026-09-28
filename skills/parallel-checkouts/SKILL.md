@@ -83,7 +83,7 @@ For checkout N (N = 2, 3, ...; the primary is checkout 1):
 | `PRJ_CHECKOUT_SUFFIX` | (empty) | `N` |
 | `PRJ_CHECKOUT_INDEX` | `0` | `N - 1` |
 | `PRJ_PORT_OFFSET` | `0` | `200 * (N - 1)` |
-| `PRJ_CHECKOUT_ROOT` | (unset) | the checkout's absolute path |
+| `PRJ_CHECKOUT_ROOT` | (unset; set in a containerized primary) | the checkout's absolute path |
 | `COMPOSE_PROJECT_NAME` *(containerized)* | today's project name | today's name plus `N` |
 
 A containerized primary sets the whole block for itself (suffix empty,
@@ -290,7 +290,10 @@ means a completion pass: report what is missing and finish it.
   the native path's port treatment (`port: <%= ENV.fetch("PRJ_DB_PORT", 5432) %>`,
   the Redis URL's port likewise), database names need no suffix since
   each checkout has its own server, and the native guard initializer
-  goes in too.
+  goes in too. The app's own pinned ports (its dev server, a pinned
+  test server) are `PRJ_*_PORT` names as well, so they belong in the
+  `.envrc` block's `identity_names`: the stack scripts compare every
+  one.
 - **Host networking.** A service with `network_mode: host` publishes
   nothing: every port it listens on or connects to is a host port. A
   database or Redis service there moves its own listen port
@@ -482,12 +485,16 @@ export PRJ_DB_PORT=$((5432 + PRJ_PORT_OFFSET))
 
 # Copy the identity into .devcontainer/.env on every load, keeping every other line.
 identity_names="COMPOSE_PROJECT_NAME PRJ_CHECKOUT_SUFFIX PRJ_CHECKOUT_INDEX PRJ_CHECKOUT_ROOT PRJ_PORT_OFFSET PRJ_APP_PORT PRJ_DB_PORT"
-identity_lines="^[[:space:]]*(export[[:space:]]+)?(${identity_names// /|})[[:space:]]*([=:]|\$)"
+set -- $identity_names
+identity_lines="^[[:space:]]*(export[[:space:]]+)?($(IFS='|'; echo "$*"))[[:space:]]*([=:]|\$)"
 rm -f .devcontainer/.env.direnv-tmp
 (
   umask 077
   {
-    grep -Ev "$identity_lines" .devcontainer/.env 2>/dev/null || true
+    if [ -e .devcontainer/.env ]; then
+      grep -Ev "$identity_lines" .devcontainer/.env
+      [ $? -le 1 ] || exit 1 # 1 means no other lines; 2 is an error, so keep the file untouched
+    fi
     for name in $identity_names; do printf '%s=%s\n' "$name" "${!name}"; done
   } > .devcontainer/.env.direnv-tmp
 ) && mv .devcontainer/.env.direnv-tmp .devcontainer/.env
@@ -755,9 +762,10 @@ removes the checkout rather than only the link.
    followed by N (or the project-specific name prepare chose). Then
    list what its volumes resolve to
    (`cd <checkout> && direnv exec . bash -c '. bin/compose-project && compose config --format json'`,
-   the `name` of each entry under `volumes`) and require every one to
-   start with that project name and an underscore: a volume with a
-   fixed `name:` is shared, and removing it deletes the primary's
+   the `name` of each entry under `volumes`, skipping those marked
+   `external`, which `down --volumes` never removes) and require every
+   one to start with that project name and an underscore: a volume with
+   a fixed `name:` is shared, and removing it deletes the primary's
    data. Only then
    `cd <checkout> && direnv exec . bin/docker-down --volumes --rmi local --remove-orphans`,
    which removes that project's containers, networks, volumes, and
@@ -801,7 +809,7 @@ removes the checkout rather than only the link.
 - **A containerized checkout's worktrees edit, the checkout runs.** Its
   containers bind-mount the checkout's own directory, so `bin/dexec`
   runs the checkout's code, not a worktree's, and the stack scripts
-  refuse inside a worktree, which has no `.devcontainer/.env`. Use
+  refuse inside a worktree that has no identity of its own. Use
   worktrees there for editing and reviewing; run commands from the
   checkout.
 - **Worktrees share their checkout's identity.** A worktree nested in

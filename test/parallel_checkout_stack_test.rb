@@ -244,6 +244,42 @@ class ParallelCheckoutStackTest < Minitest::Test
     assert_refused(run_script('probe', 'ps'), 'parallel checkout 2', 'no identity')
   end
 
+  def test_finds_the_marker_even_when_the_shell_points_git_elsewhere
+    mark_as_parallel_checkout
+    File.delete(env_file)
+    elsewhere = File.join(@scratch, 'elsewhere.git')
+    Open3.capture3('git', 'init', '-q', '--bare', elsewhere)
+    assert_refused(run_script('probe', 'ps', env: { 'GIT_DIR' => elsewhere }), 'parallel checkout 2')
+  end
+
+  def test_finds_the_marker_without_git_on_the_path
+    mark_as_parallel_checkout
+    File.delete(env_file)
+    FileUtils.mkdir_p(File.join(@scratch, 'bare-bin'))
+    %w[bash dirname cat].each do |tool|
+      path = ENV.fetch('PATH').split(':').map { |dir| File.join(dir, tool) }.find { |candidate| File.executable?(candidate) }
+      File.symlink(path, File.join(@scratch, 'bare-bin', tool))
+    end
+    env = { 'PATH' => "#{@fakebin}:#{File.join(@scratch, 'bare-bin')}" }
+    assert_refused(run_script('probe', 'ps', env: env), 'parallel checkout 2')
+  end
+
+  def test_refuses_a_worktree_that_has_no_identity
+    _out, err, status = Open3.capture3('git', 'init', '-q', @root)
+    raise err unless status.success?
+
+    Open3.capture3({ 'GIT_AUTHOR_NAME' => 't', 'GIT_AUTHOR_EMAIL' => 't@example.com', 'GIT_COMMITTER_NAME' => 't',
+                     'GIT_COMMITTER_EMAIL' => 't@example.com' }, 'git', '-C', @root, 'commit', '-q', '--allow-empty', '-m', 'init')
+    worktree = File.join(@scratch, 'wt')
+    Open3.capture3('git', '-C', @root, 'worktree', 'add', '-q', '--detach', worktree)
+    FileUtils.mkdir_p(File.join(worktree, 'bin'))
+    FileUtils.cp(Dir[File.join(@root, 'bin', '*')], File.join(worktree, 'bin'))
+    FileUtils.mkdir_p(File.join(worktree, '.devcontainer'))
+    FileUtils.cp(compose_file, File.join(worktree, '.devcontainer'))
+    result = Open3.capture3(base_env({}), File.join(worktree, 'bin', 'probe'), 'ps', chdir: @scratch, unsetenv_others: true)
+    assert_refused(result, 'worktree')
+  end
+
   def test_refuses_a_shell_identity_when_the_file_has_none
     write_identity("SECRET_TOKEN=keep-me\n")
     assert_refused(run_script('probe', 'ps', env: { "#{PREFIX}APP_PORT" => '3200' }), "#{PREFIX}APP_PORT=3200",
@@ -492,6 +528,13 @@ class ParallelCheckoutStackTest < Minitest::Test
     write_initializer("sed 's/^COMPOSE_PROJECT_NAME=.*/COMPOSE_PROJECT_NAME=stack9/' .devcontainer/.env > .devcontainer/.env.new && " \
                       'mv .devcontainer/.env.new .devcontainer/.env')
     assert_refused(run_script('docker-rebuild'), 'the initializer', 'changed COMPOSE_PROJECT_NAME from stack2 to stack9')
+  end
+
+  def test_docker_rebuild_runs_the_initializer_in_a_checkout_with_no_identity
+    write_identity("SECRET_TOKEN=keep-me\n")
+    write_initializer("echo ran > #{record('initializer')}")
+    assert_ran(run_script('docker-rebuild'))
+    assert_equal "ran\n", recorded('initializer')
   end
 
   def test_docker_rebuild_announces_the_override_file_once

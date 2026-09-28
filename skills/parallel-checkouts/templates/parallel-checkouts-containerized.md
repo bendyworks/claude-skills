@@ -61,12 +61,16 @@ export PRJ_CHECKOUT_ROOT="$PWD"
 
 # Copy the identity into .devcontainer/.env on every load, keeping every other line.
 identity_names="COMPOSE_PROJECT_NAME PRJ_CHECKOUT_SUFFIX PRJ_CHECKOUT_INDEX PRJ_CHECKOUT_ROOT PRJ_PORT_OFFSET <the port variables above>"
-identity_lines="^[[:space:]]*(export[[:space:]]+)?(${identity_names// /|})[[:space:]]*([=:]|\$)"
+set -- $identity_names
+identity_lines="^[[:space:]]*(export[[:space:]]+)?($(IFS='|'; echo "$*"))[[:space:]]*([=:]|\$)"
 rm -f .devcontainer/.env.direnv-tmp
 (
   umask 077
   {
-    grep -Ev "$identity_lines" .devcontainer/.env 2>/dev/null || true
+    if [ -e .devcontainer/.env ]; then
+      grep -Ev "$identity_lines" .devcontainer/.env
+      [ $? -le 1 ] || exit 1 # 1 means no other lines; 2 is an error, so keep the file untouched
+    fi
     for name in $identity_names; do printf '%s=%s\n' "$name" "${!name}"; done
   } > .devcontainer/.env.direnv-tmp
 ) && mv .devcontainer/.env.direnv-tmp .devcontainer/.env
@@ -83,7 +87,7 @@ those: the stack scripts compare exactly that set.
    lines.
 2. Copy the original `.envrc`, give it the identity block above for N,
    record the suffix
-   (`printf 'N\n' > "$(git rev-parse --path-format=absolute --git-common-dir)/parallel-checkout"`),
+   (`printf 'N\n' > "$(git -C <new> rev-parse --path-format=absolute --git-common-dir)/parallel-checkout"`),
    and `direnv allow`.
 3. Check no port in the block is taken
    (`lsof -nP -iTCP:<port> -sTCP:LISTEN` prints nothing).
