@@ -19,8 +19,6 @@ never substitutes other evidence and calls the check done.
 - No tab handed over means nobody has asked yet, not that no browser
   session exists. An empty tab list starts the request; it does not
   end the check.
-- Where no browser tooling is available, report the check as
-  outstanding and say what it needs.
 - A request spec, a script, or a signed-out visit that exercises the
   same code path is evidence to report beside the check, never in its
   place. The role is usually the point of the check: a page that loads
@@ -47,17 +45,17 @@ never substitutes other evidence and calls the check done.
    ask, whichever page it is parked on. A tab number means nothing to
    the developer, who should never hunt for the tab among other open
    ones.
-5. **Wait for the signed-in tab, then run the check.** The ask is for
-   a session the check can use, not for the developer to perform the
-   check by hand.
+5. **Wait for the signed-in tab, then run the check.** The ask is for a
+   session the check can use, not for the developer to perform the check
+   by hand. In an unattended run nobody can answer, so leave the tab set
+   up and put the ask in the summary rather than waiting.
 
 ## Outstanding until it runs
 
 **Until the check has run, the completion report says in so many words
 that it is not done**, with what it needs, however much else passed, and
-its box in the plan stays unticked. In an unattended run the summary
-names it as outstanding, so it survives into the hand-off instead of
-dissolving into the list of things that passed.
+its box in the plan stays unticked. That holds for an unattended run's
+summary, and for a session with no browser tooling at all.
 
 ## Scope
 
