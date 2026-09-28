@@ -218,9 +218,43 @@ class ParallelCheckoutStackTest < Minitest::Test
                    'COMPOSE_ENV_FILES')
   end
 
-  def test_refuses_a_checkout_with_no_identity_file
+  def mark_as_parallel_checkout(suffix = '2')
+    _out, err, status = Open3.capture3('git', 'init', '-q', @root)
+    raise err unless status.success?
+
+    File.write(File.join(@root, '.git', 'parallel-checkout'), "#{suffix}\n")
+  end
+
+  def test_uses_the_compose_files_own_name_when_no_checkout_has_an_identity
+    write_identity("SECRET_TOKEN=keep-me\n")
+    assert_ran(run_script('probe', 'ps'))
+    assert_equal ['compose', '-f', compose_file, 'ps'], docker_args
+    assert_equal '(unset)', recorded('project')
+  end
+
+  def test_uses_the_compose_files_own_name_when_there_is_no_env_file
     File.delete(env_file)
-    assert_refused(run_script('probe', 'ps'), env_file, 'is missing')
+    assert_ran(run_script('probe', 'ps'))
+    assert_equal '(unset)', recorded('project')
+  end
+
+  def test_refuses_a_parallel_checkout_whose_identity_is_missing
+    mark_as_parallel_checkout
+    File.delete(env_file)
+    assert_refused(run_script('probe', 'ps'), 'parallel checkout 2', 'no identity')
+  end
+
+  def test_refuses_a_shell_identity_when_the_file_has_none
+    write_identity("SECRET_TOKEN=keep-me\n")
+    assert_refused(run_script('probe', 'ps', env: { "#{PREFIX}APP_PORT" => '3200' }), "#{PREFIX}APP_PORT=3200",
+                   'does not set it')
+  end
+
+  def test_leaves_a_project_variable_that_only_looks_like_the_identity_alone
+    write_identity("#{IDENTITY}#{PREFIX}CHECKOUT_SECRET=file-secret\n")
+    _out, err, status = run_script('probe', 'ps', env: { "#{PREFIX}CHECKOUT_SECRET" => 'shell-secret' })
+    assert status.success?, err
+    refute_includes err, 'secret'
   end
 
   def test_refuses_an_identity_file_that_names_no_project

@@ -33,6 +33,10 @@ if ! . "$root/bin/compose-project"; then
   exit 1
 fi
 env_file="$compose_project_env_file"
+if [ -z "${COMPOSE_PROJECT_NAME:-}" ]; then
+  echo "check-parallel-dev: this checkout has no parallel-checkout identity, so there is nothing to check; see docs/parallel-checkouts.md" >&2
+  exit 1
+fi
 
 passed=0
 failed=0
