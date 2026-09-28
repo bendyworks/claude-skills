@@ -33,11 +33,17 @@ keeps its default database number and adds the checkout index times the
 number of roles (<number of roles> here), so checkout blocks never overlap.
 
 `config/initializers/parallel_checkout_guard.rb` refuses to boot development
-or test when `PRJ_CHECKOUT_ROOT` names a different directory than the code
-being run: a shell still carrying one checkout's identity would otherwise
-point another checkout's code at the first checkout's databases. From a
-shell outside a checkout, use `direnv exec <checkout> <command>`, which loads
-that checkout's environment without changing directory, with absolute paths.
+or test when the shell's identity does not belong to the code being run:
+when `PRJ_CHECKOUT_ROOT` names a different directory (a shell still carrying
+one checkout's identity), or when the checkout's untracked `.parallel-checkout`
+file names a suffix the shell does not carry (a second checkout run with no
+identity loaded). Either would point one checkout's code at another
+checkout's databases. The original checkout has no `.parallel-checkout` file
+and sets nothing, so it always boots.
+
+From a shell outside a checkout, use `direnv exec <checkout> <command>`, which
+loads that checkout's environment without changing directory, with absolute
+paths.
 
 ## The `.envrc` identity block
 
@@ -54,20 +60,15 @@ export PORT=$PRJ_APP_PORT
 <one line per remaining row of the table above>
 ```
 
-## Checkout registry
-
-| Checkout | Suffix | Index | Port offset |
-| --- | --- | --- | --- |
-| `~/<path>/<app>` | (none) | 0 | 0 |
-
 ## Adding a checkout
 
 1. Clone into a sibling directory named `<app>N` from `origin`.
 2. Copy the ignored files the app needs to boot from the original checkout
    (`config/master.key`, `.env`, ...), and the lines of its
    `.git/info/exclude`.
-3. Copy the original `.envrc`, add the identity block above, and
-   `direnv allow`.
+3. Copy the original `.envrc`, add the identity block above, write the
+   suffix to `.parallel-checkout` (`printf 'N\n' > .parallel-checkout`), add
+   `.parallel-checkout` to `.git/info/exclude`, and `direnv allow`.
 4. Check the block is free: no listener on any of its ports
    (`lsof -nP -iTCP:<port> -sTCP:LISTEN`), and its highest Redis database
    number below the server's count (`redis-cli CONFIG GET databases`).
@@ -75,7 +76,6 @@ export PORT=$PRJ_APP_PORT
    development and test.
 6. Start the full suite here and in another checkout at the same moment;
    both must pass with identical example counts.
-7. Add a row to the registry.
 
 ## Caveats
 

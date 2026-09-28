@@ -33,7 +33,7 @@ gets, so preparing a project never changes how the primary behaves.
   per project, from its primary checkout.
 - **add** -- the project is prepared (or needs no preparation; see
   below) and the user wants checkout N. Machine-local: nothing is
-  committed except a registry row.
+  committed.
 - **remove** -- tear down checkout N. Machine-local and destructive.
 
 If the user asks for a new checkout of an unprepared project, run
@@ -176,18 +176,24 @@ Each edit keeps today's literal as the fallback:
 
 - **The guard:** copy `templates/parallel_checkout_guard.rb` (in this
   skill's directory) to `config/initializers/parallel_checkout_guard.rb`,
-  replacing `PRJ` with the prefix. It raises at boot in development
-  and test when `PRJ_CHECKOUT_ROOT` is set and names a different
-  directory than `Rails.root` -- the case of a shell that still
-  carries one checkout's identity running another checkout's code,
-  which would otherwise aim it at the first checkout's databases. It
-  does nothing when the variable is unset, and nothing in production.
+  replacing `PRJ` with the prefix, then run the project's linter
+  autocorrect on it (quote style, `Rails.env.local?`). It raises at
+  boot in development and test in two cases, both of which would
+  otherwise aim one checkout's code at another checkout's databases:
+  `PRJ_CHECKOUT_ROOT` names a different directory than `Rails.root` (a
+  shell still carrying one checkout's identity), or the checkout
+  carries a `.parallel-checkout` file whose suffix the shell does not
+  (a checkout other than the primary run with no identity loaded).
+  The primary has no such file and sets nothing, so it always boots,
+  and production is never checked.
 
 - **The doc:** write `docs/parallel-checkouts.md` from
   `templates/parallel-checkouts.md`, filling in the prefix, the
-  variables and their defaults, the Redis roles, the `.envrc` block,
-  and a registry table with the primary's row. Link it from the
-  README's development section.
+  variables and their defaults, the Redis roles, and the `.envrc`
+  block. Link it from the README's development section. There is no
+  registry of checkouts to maintain: checkout N's ports and Redis
+  numbers follow from N alone, and the directory names say which
+  checkouts exist.
 
 ### Step 5 -- Verify, then ship
 
@@ -205,8 +211,9 @@ Each edit keeps today's literal as the fallback:
 
 ## Mode: add checkout N
 
-Run from the primary checkout. Pick N as the next number not in the
-registry table and not already a directory on disk.
+Run from the primary checkout. Pick N as the lowest number from 2 up
+whose `<primary-basename>N` directory does not exist on disk. Never
+change the primary's checked-out branch or working tree in this mode.
 
 ### Step 1 -- Clone
 
@@ -225,9 +232,10 @@ clone; it is pushed, since its pull request is open.
 ### Step 2 -- Carry over what git does not
 
 - **Excludes:** append each line of the primary's `.git/info/exclude`
-  that the new clone's file lacks. Without this, files the primary
-  hides (scratch directories, local tool-version files) show up as
-  untracked in the new checkout, one `git add -A` from a commit.
+  that the new clone's file lacks, then add `.parallel-checkout`.
+  Without this, files the primary hides (scratch directories, local
+  tool-version files) show up as untracked in the new checkout, one
+  `git add -A` from a commit.
 - **Ignored configuration the app needs to boot:** list the primary's
   ignored files outside bulky directories --
   `git -C <primary> ls-files --others --ignored --exclude-standard --directory`,
@@ -266,6 +274,10 @@ exactly the variables that project reads. The Redis rule: each role
 keeps its default database number and adds the checkout index times
 the number of roles, so checkout blocks never overlap.
 
+Then write the suffix alone to `.parallel-checkout` at the checkout's
+root (`printf '2\n' > <checkout>/.parallel-checkout`). The guard reads
+it to refuse a run in this checkout that has no identity loaded.
+
 Then `direnv allow <checkout>`, and ask the user to run it themselves
 if the harness refuses (allowing an `.envrc` is a trust decision).
 
@@ -274,7 +286,9 @@ if the harness refuses (allowing an `.envrc` is a trust decision).
 - Every port in the block is free:
   `lsof -nP -iTCP:<port> -sTCP:LISTEN` prints nothing.
 - The highest Redis database number is below the server's count:
-  `redis-cli -p <port> CONFIG GET databases` (16 by default). If it
+  `redis-cli -p <port> CONFIG GET databases` (16 by default; without
+  `redis-cli`, `bin/rails runner 'p Redis.new(url: "redis://localhost:<port>").config(:get, "databases")'`
+  from the primary asks the same question). If it
   does not fit, stop and say so: raising `databases` in the Redis
   config is the user's call, since it is shared by every project.
 
@@ -326,24 +340,23 @@ either checkout edits the same index), one plans directory (do not
 work the same plan from both at once), and one `settings.local.json`
 (permission approvals in either apply to both).
 
-### Step 7 -- Register and verify
+### Step 7 -- Verify
 
-1. Add the checkout's row to the registry table in
-   `docs/parallel-checkouts.md` and commit it on its own branch per
-   the project's conventions (it is the one tracked change add makes).
-   Projects with no services have no doc and skip this.
-2. Prove the isolation *(services)*: start the full suite in the
+1. Prove the isolation *(services)*: start the full suite in the
    primary and in the new checkout at the same moment. Both must pass,
    with identical example counts. A failure that appears only when
    the two overlap is a collision the inventory missed: find the
    shared resource, add it to the doc and the tracked config, and
    rerun.
-3. Prove the guard *(services)*: run the new checkout's code under
-   the primary's identity. `direnv exec` loads a directory's
-   environment without changing directory, so
-   `cd <new> && direnv exec <primary> bin/rails runner -e test 'puts 1'`
-   must refuse with the guard's message, and the same command with
-   `direnv exec <new>` must print `1`.
+2. Prove the guard *(services)*. `direnv exec <dir>` loads a
+   directory's environment without changing directory, and `env -i`
+   runs with none at all, so from the new checkout's directory:
+   - `direnv exec <new> bin/rails runner -e test 'puts 1'` prints `1`;
+   - `env -i HOME="$HOME" PATH="$PATH" bin/rails runner -e test 'puts 1'`
+     refuses: the checkout's identity is not loaded;
+   - from the primary's directory,
+     `direnv exec <new> bin/rails runner -e test 'puts 1'` refuses: the
+     shell carries the new checkout's identity.
 
 ## Mode: remove checkout N
 
@@ -367,8 +380,6 @@ starting, and never remove the primary.
    symlink, so the primary's memory is untouched; check that before
    deleting.
 5. Delete the checkout directory.
-6. Remove its registry row and commit that per the project's
-   conventions.
 
 ## Caveats to pass on
 

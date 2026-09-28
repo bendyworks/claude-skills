@@ -23,15 +23,18 @@ class ParallelCheckoutGuardTest < Minitest::Test
     @primary = File.realpath(Dir.mktmpdir('primary'))
     @other = File.realpath(Dir.mktmpdir('other'))
     @saved_root = ENV.fetch('APP_CHECKOUT_ROOT', nil)
+    @saved_suffix = ENV.fetch('APP_CHECKOUT_SUFFIX', nil)
   end
 
   def teardown
     FileUtils.rm_rf([@primary, @other])
     ENV['APP_CHECKOUT_ROOT'] = @saved_root
+    ENV['APP_CHECKOUT_SUFFIX'] = @saved_suffix
   end
 
-  def boot(env:, root:, claimed:)
+  def boot(env:, root:, claimed:, suffix: nil)
     ENV['APP_CHECKOUT_ROOT'] = claimed
+    ENV['APP_CHECKOUT_SUFFIX'] = suffix
     rails = Module.new
     rails.define_singleton_method(:env) { StubEnv.new(env) }
     rails.define_singleton_method(:root) { Pathname.new(root) }
@@ -65,6 +68,26 @@ class ParallelCheckoutGuardTest < Minitest::Test
   def test_refuses_when_the_claimed_directory_no_longer_exists
     missing = File.join(@other, 'gone')
     assert_raises(RuntimeError) { boot(env: 'test', root: @primary, claimed: missing) }
+  end
+
+  def mark_as_checkout(root, suffix)
+    File.write(File.join(root, '.parallel-checkout'), "#{suffix}\n")
+  end
+
+  def test_refuses_a_marked_checkout_whose_identity_is_not_loaded
+    mark_as_checkout(@other, '2')
+    error = assert_raises(RuntimeError) { boot(env: 'test', root: @other, claimed: nil) }
+    assert_includes error.message, @other
+  end
+
+  def test_refuses_a_marked_checkout_carrying_another_checkouts_suffix
+    mark_as_checkout(@other, '2')
+    assert_raises(RuntimeError) { boot(env: 'test', root: @other, claimed: @other, suffix: '3') }
+  end
+
+  def test_boots_a_marked_checkout_whose_identity_is_loaded
+    mark_as_checkout(@other, '2')
+    boot(env: 'test', root: @other, claimed: @other, suffix: '2')
   end
 
   def test_never_checks_in_production
