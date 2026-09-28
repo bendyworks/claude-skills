@@ -486,7 +486,7 @@ Prose findings have fixed buckets, because correcting prose rewrites history or 
 - **A wrong pull request description is `[ask]`**, with the corrected text in the batch: the description is text under the developer's name.
 - **A wrong follow-up draft is corrected in place** in the record file, since it has not been filed, under developer triage too: the correction publishes nothing, and filing still waits for the developer. Say in the batch what changed.
 
-**A scoped bug hunt for the riskiest Phase 5 fixes.** A Phase 5 fix to a must-fix finding, or one tagged `(guard rewrite)`, gets the Phase 4 sub-agent brief, dispatched fresh, with its scope narrowed to that fix's commit (`git show <sha>`). It runs without asking, like a fired Phase 4 trigger. Before dispatching, append `Phase 5 bug hunt: ran (<short sha>)`. Its findings go in the Phase 5 section, in a subsection named for that commit and written when the hunt returns, and are sorted and fixed the same way; its own fixes get the suite gate and nothing more.
+**A scoped bug hunt for the riskiest Phase 5 fixes.** A Phase 5 fix to a must-fix finding, or one tagged `(guard rewrite)`, gets the Phase 4 sub-agent brief, dispatched fresh, with its scope narrowed to that fix's commit (`git show <sha>`). It runs without asking, like a fired Phase 4 trigger. Before dispatching, append `Phase 5 bug hunt: ran (<short sha>)`. Its findings go in the Phase 5 section, in a subsection named for that commit and written when the hunt returns, and are sorted and fixed the same way; its own fixes get the suite gate and nothing more. When the hunt returns after the batch was sent, as it does under developer triage, where Phase 5's fixes wait for the pick, its findings go in one last short batch, as a late Phase 4's do.
 
 **Developer triage.** Under `Phase 3: developer triages`, Phase 5's findings are sorted and recorded, then presented in the batch for the developer's pick; none is fixed first.
 
@@ -498,7 +498,7 @@ Before dispatching, append one line to the record file, in one of these forms:
 - `Phase 5 decision: code audits skipped (empty fix diff); prose checked`
 - `Phase 5 decision: code audits opted out; prose checked`
 
-**Resuming.** A resumed run that finds no `Phase 5 decision:` line runs Phase 5 before it sends the batch. One that finds the line re-dispatches every lane the line names, and the `prose` lane in every case, that has no subsection in the Phase 5 section yet, and every scoped bug hunt whose `Phase 5 bug hunt:` line has no subsection yet. Only then does it send the batch.
+**Resuming.** A resumed run first finishes Phase 4: a `Phase 4 decision: ran` or `Phase 4 answer: accepted` line with no "Phase 4 -- find-the-bug" section after it means the pass never returned, so re-dispatch it before anything else. A run that then finds no `Phase 5 decision:` line runs Phase 5. One that finds the line re-dispatches every lane the line names, and the `prose` lane in every case, that has no subsection in the Phase 5 section yet, and every scoped bug hunt whose `Phase 5 bug hunt:` line has no subsection yet. Only then does it send the batch, and only when no `Batch sent` line follows the `Phase 5 decision:` line: a batch already sent is waiting on answers, not unsent.
 
 When Phase 5 is done, return to step 5 of the Phase 3 tail, which sends the batch.
 
