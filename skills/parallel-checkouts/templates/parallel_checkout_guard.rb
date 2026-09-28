@@ -11,27 +11,34 @@
 # parallel-checkout inside its git directory, where `git clean` never
 # reaches and every worktree of that clone finds it. Checkouts are compared
 # by git directory rather than by path, so a worktree of a checkout runs
-# under that checkout's identity. See docs/parallel-checkouts.md.
+# under that checkout's identity, and an app in a subdirectory of its
+# repository resolves to that repository. See docs/parallel-checkouts.md.
 if Rails.env.development? || Rails.env.test?
-  git_common_dir = lambda do |root|
-    dot_git = File.join(root, ".git")
-    if File.directory?(dot_git)
-      File.realpath(dot_git)
-    elsif File.file?(dot_git)
-      git_dir = File.expand_path(File.read(dot_git)[/\Agitdir: (.+)$/, 1].to_s, root)
-      common_file = File.join(git_dir, "commondir")
-      File.realpath(File.exist?(common_file) ? File.expand_path(File.read(common_file).strip, git_dir) : git_dir)
-    end
+  # The git common directory of the repository containing `path`, nil when
+  # there is none, or :missing when a worktree's .git file points nowhere.
+  git_common_dir = lambda do |path|
+    dir = path
+    dir = File.dirname(dir) until File.exist?(File.join(dir, ".git")) || dir == File.dirname(dir)
+    dot_git = File.join(dir, ".git")
+    return nil unless File.exist?(dot_git)
+    return File.realpath(dot_git) if File.directory?(dot_git)
+
+    git_dir = File.expand_path(File.read(dot_git)[/\Agitdir:(.+)$/, 1].to_s.strip, dir)
+    common_file = File.join(git_dir, "commondir")
+    common = File.exist?(common_file) ? File.expand_path(File.read(common_file).strip, git_dir) : git_dir
+    File.exist?(common) ? File.realpath(common) : :missing
   end
 
   actual_root = File.realpath(Rails.root.to_s)
   actual_git = git_common_dir.call(actual_root)
   claimed_root = ENV.fetch("PRJ_CHECKOUT_ROOT", "")
-  marker = actual_git && File.join(actual_git, "parallel-checkout")
+  marker = actual_git.is_a?(String) ? File.join(actual_git, "parallel-checkout") : nil
   expected_suffix = File.read(marker).strip if marker && File.exist?(marker)
 
   problem =
-    if expected_suffix == ""
+    if actual_git == :missing
+      "Rails cannot find the git directory that #{actual_root}/.git points to."
+    elsif expected_suffix == ""
       "This checkout's parallel-checkout marker (#{marker}) is empty."
     elsif !claimed_root.empty? && !claimed_root.start_with?("/")
       "PRJ_CHECKOUT_ROOT (#{claimed_root}) is not an absolute path."

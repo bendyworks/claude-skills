@@ -178,6 +178,34 @@ class ParallelCheckoutGuardTest < Minitest::Test
     assert_refuses('carries the parallel-checkout identity', env: 'test', root: nested, claimed: @other)
   end
 
+  def test_refuses_an_app_in_a_repository_subdirectory_whose_identity_is_not_loaded
+    mark_as_checkout(@other, '2')
+    app = File.join(@other, 'web')
+    FileUtils.mkdir_p(app)
+    assert_refuses('suffix 2', env: 'test', root: app, claimed: nil)
+  end
+
+  def test_boots_an_app_in_a_repository_subdirectory_under_its_repositorys_identity
+    mark_as_checkout(@other, '2')
+    app = File.join(@other, 'web')
+    FileUtils.mkdir_p(app)
+    assert_nil boot(env: 'test', root: app, claimed: @other, suffix: '2')
+  end
+
+  def test_reads_a_gitdir_line_with_a_windows_line_ending
+    mark_as_checkout(@other, '2')
+    outside = add_worktree(@other, File.join(@scratch, 'crlf-worktree'))
+    dot_git = File.join(outside, '.git')
+    File.write(dot_git, File.read(dot_git).sub(/\n\z/, "\r\n"))
+    assert_refuses('suffix 2', env: 'test', root: outside, claimed: nil)
+  end
+
+  def test_explains_a_worktree_whose_git_directory_is_gone
+    outside = add_worktree(@other, File.join(@scratch, 'pruned-worktree'))
+    File.write(File.join(outside, '.git'), "gitdir: #{File.join(@scratch, 'missing')}\n")
+    assert_refuses('cannot find', env: 'test', root: outside, claimed: nil)
+  end
+
   def test_never_checks_in_production
     mark_as_checkout(@other, '2')
     assert_nil boot(env: 'production', root: @primary, claimed: @other)
