@@ -31,13 +31,14 @@ never substitutes other evidence and calls the check done.
 
 1. **Create the tab** rather than waiting for one to appear.
 2. **Navigate it to the app's sign-in screen.** If the app redirects
-   away or shows a signed-in user, the browser already holds a
-   session. When that session is the wrong role, park the tab on a page
-   that shows the sign-out control and ask the developer to sign out,
-   then sign in as the role the check needs. Offer to click sign-out
-   rather than doing it unasked: signing out ends the developer's
-   session on every tab in that browser, and the control often sits
-   behind a menu and a confirmation.
+   away or shows a signed-in user, the browser already holds a session.
+   When that session is the role the check needs, skip the ask and run
+   the check. When it is the wrong role, park the tab on a page that
+   shows the sign-out control and ask the developer to sign out, then
+   sign in as the role the check needs. Offer to click sign-out rather
+   than doing it unasked: signing out ends the developer's session on
+   every tab in that browser, and the control often sits behind a menu
+   and a confirmation.
 3. **Name the role in the ask:** "sign in as a non-admin so I can
    confirm the refusal", not "please log in". A tab signed in as the
    wrong role costs a second round trip.
