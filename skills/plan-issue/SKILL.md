@@ -1039,6 +1039,10 @@ Deploy-on-Merge Mode there is a second gap to wait out first, between
 
 ### Step 1 -- Confirm preconditions
 
+When the task list holds this plan's confirm-shipped task, mark it in
+progress before anything else in this step, and completed once all
+three checks below pass (record Step 4 owns the task-list cadence).
+
 **First establish whether the project is in Deploy-on-Merge Mode**, by
 reading its checked-in CLAUDE.md and rules files now -- check 2 depends
 on the answer, and this phase is a standalone entry point, so nothing
@@ -1048,10 +1052,7 @@ above carries the recognition floor, the never-infer rule, and the
 default for a project that declares nothing.
 
 Then walk through these checks (the housekeeping skill will re-verify,
-but catching a "no" here lets you exit early before invoking it). When
-the task list holds this plan's confirm-shipped task, mark it in
-progress before the first check and completed once all three pass
-(record Step 4 owns the task-list cadence):
+but catching a "no" here lets you exit early before invoking it):
 
 1. **PR is merged to the default branch.** Verify with `gh pr view <PR#> --json state,mergedAt,mergeCommit` (or whichever forge the project uses).
 2. **The merged code is live in production.** Before taking any shortcut, confirm the premise: nothing after the merge can still fail or be skipped. A project whose merge *triggers* a deploy that can go red does not qualify however its rules read.
