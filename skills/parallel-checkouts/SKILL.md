@@ -256,10 +256,11 @@ clone; it is pushed, since its pull request is open.
   and show the user the list of what was copied. Never copy these
   anywhere but the new checkout.
 
-### Step 3 -- Write the identity *(services)*
+### Step 3 -- Write the `.envrc` and the identity
 
-The new `.envrc` is the primary's `.envrc` with its identity block
-replaced (or appended, when the primary has none yet), and with any
+The new `.envrc` is the primary's `.envrc` (it often carries tokens
+and settings every checkout needs, services or not), with its identity
+block replaced or appended *(services)*, and with any
 line that labels the checkout for a human (a terminal background
 color, a prompt tag) changed so the two terminals look different. Never overwrite
 an existing `.envrc` in the new checkout without merging: keep every
@@ -284,7 +285,7 @@ exactly the variables that project reads. The Redis rule: each role
 keeps its default database number and adds the checkout index times
 the number of roles, so checkout blocks never overlap.
 
-Then write the suffix alone to `.parallel-checkout` at the checkout's
+*(services)* Then write the suffix alone to `.parallel-checkout` at the checkout's
 root (`printf '2\n' > <checkout>/.parallel-checkout`). The guard reads
 it to refuse a run in this checkout that has no identity loaded.
 
@@ -335,7 +336,9 @@ about it, and nothing that belongs to one session:
   as relative symlinks. Tracked entries come from the clone; replacing
   one with a symlink shows as a type change in git, and an edit on a
   branch in the new checkout would land in the primary's working tree.
-  An untracked directory that holds no tracked files is linked whole;
+  Walk `.claude/` itself entry by entry, even when nothing in it is
+  tracked, so the runtime state below stays out. Below the top level,
+  an untracked directory that holds no tracked files is linked whole;
   a directory mixing both is walked, linking its untracked entries.
   List candidates with
   `git -C <primary> ls-files --others --directory -- .claude`.
