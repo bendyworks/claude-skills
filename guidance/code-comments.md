@@ -21,8 +21,8 @@ This means:
   Test names and descriptions should describe the behavior under test
   in timeless terms.
 - No "we just changed X, so this now has to..." comments. State what
-  the code does and why, not what it used to do. A comment describes
-  no change, so it takes no side of one: "now" and "previously"
+  the code does and why, not what it used to do. A comment describing
+  current behavior takes no side of a change: "now" and "previously"
   belong in the commit message or PR description.
 - No "TODO: clean up after launch" comments without a tracker issue
   reference; if it needs cleaning, file the issue and reference it,
