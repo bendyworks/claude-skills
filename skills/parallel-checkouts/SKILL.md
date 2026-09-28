@@ -80,7 +80,7 @@ For checkout N (N = 2, 3, ...; the primary is checkout 1):
 | `PRJ_CHECKOUT_SUFFIX` | (empty) | `N` |
 | `PRJ_CHECKOUT_INDEX` | `0` | `N - 1` |
 | `PRJ_PORT_OFFSET` | `0` | `200 * (N - 1)` |
-| `PRJ_CHECKOUT_ROOT` | the checkout's absolute path | the checkout's absolute path |
+| `PRJ_CHECKOUT_ROOT` | (unset) | the checkout's absolute path |
 
 plus one derived variable per port and per Redis role, below. They are
 exported from the checkout's `.envrc` ([direnv](https://direnv.net/)).
@@ -138,7 +138,11 @@ and whether it is read in development, test, or production:
   `config/puma.rb`, `Procfile.dev`, `bin/dev`), a pinned
   `Capybara.server_port`, webpack or Vite dev servers, anything else
   bound to a fixed port. A port chosen at random (Capybara's default,
-  a WebDriver started by Selenium Manager) needs nothing.
+  a WebDriver started by Selenium Manager) needs nothing. Every pinned
+  port moves by the same 200-per-checkout offset, so the pinned ports
+  must all fall within 200 of the lowest one, or checkout N's app port
+  lands on checkout M's other port (3000 and 4000 collide at checkout
+  6). When they do not, say so and ask which to move.
 - **Other shared servers** -- Elasticsearch or OpenSearch indexes,
   S3-compatible buckets in a local MinIO, a shared mail catcher. Each
   gets the same treatment as Redis: a per-checkout name or number
@@ -175,9 +179,10 @@ Each edit keeps today's literal as the fallback:
 
   If the test name already carries `ENV['TEST_ENV_NUMBER']` (the
   parallel_tests gem sets it to `""`, `"2"`, `"3"`, ... per worker),
-  separate the two numbers, or the primary's worker 2 and checkout 2's
-  worker 1 both get `app_test2`:
-  `app_test<%= "_checkout#{ENV['PRJ_CHECKOUT_SUFFIX']}" unless ENV.fetch("PRJ_CHECKOUT_SUFFIX", "").empty? %><%= ENV['TEST_ENV_NUMBER'] %>`.
+  separate both numbers, or the primary's worker 2 and checkout 2's
+  worker 1 both get `app_test2` (and checkout 2's worker 3 meets
+  checkout 23's worker 1):
+  `app_test<%= "_checkout#{ENV['PRJ_CHECKOUT_SUFFIX']}_" unless ENV.fetch("PRJ_CHECKOUT_SUFFIX", "").empty? %><%= ENV['TEST_ENV_NUMBER'] %>`.
   Rails' own `parallelize` appends `-<worker>` and needs nothing.
 
 - **Redis roles:** give each role its own variable, falling back to
@@ -336,9 +341,9 @@ decision.
 - Every Redis database number in the block is below the server's count
   and empty: `redis-cli -p <port> CONFIG GET databases` (16 by
   default) and `redis-cli -p <port> -n <db> DBSIZE` (0) for each.
-  Without `redis-cli`,
-  `bin/rails runner 'r = Redis.new(url: "redis://localhost:<port>/<db>"); p r.config(:get, "databases"), r.dbsize'`
-  asks the same. A non-empty database belongs to something else --
+  Without `redis-cli`, the primary can ask the same, since its gems
+  are installed:
+  `cd <primary> && direnv exec . bin/rails runner 'r = Redis.new(url: "redis://localhost:<port>/<db>"); p r.config(:get, "databases"), r.dbsize'`. A non-empty database belongs to something else --
   another project on the same server -- so stop and say which. If the
   block passes the count, stop and say so too: raising `databases` in
   the Redis config is the user's call, since every project shares it.
@@ -360,6 +365,27 @@ cd <new> && direnv exec . bin/rails runner -e test 'puts ActiveRecord::Base.conn
 Both names must end in the checkout's suffix, and
 `config/initializers/00_parallel_checkout_guard.rb` must exist.
 Anything else stops here.
+
+That check holds only for the branch checked out now. The suffix and
+the guard are tracked files, so a branch older than the preparation
+(an in-flight feature branch, a `git bisect` step, the default branch
+before the preparation merges) has neither, and a test run there
+purges the primary's test database. Install a `post-checkout` hook in
+the clone that warns when a checkout leaves the guard missing, unless
+the clone already has a `post-checkout` hook, in which case tell the
+user instead of replacing it:
+
+```bash
+hook="$(git -C <new> rev-parse --path-format=absolute --git-common-dir)/hooks/post-checkout"
+cat > "$hook" <<'HOOK'
+#!/bin/sh
+[ -f config/initializers/00_parallel_checkout_guard.rb ] && exit 0
+echo "WARNING: this branch predates the parallel-checkout preparation." >&2
+echo "Rails here uses the ORIGINAL checkout's databases. Merge the default" >&2
+echo "branch into it before running anything." >&2
+HOOK
+chmod +x "$hook"
+```
 
 Then create the databases. In development, `db:create` and
 `db:schema:load` also cover the test database:
@@ -437,15 +463,21 @@ work the same plan from both at once), and one `settings.local.json`
      prints `1`;
    - `cd <new> && env -i HOME="$HOME" PATH="$PATH" bin/rails runner -e test 'puts 1'`
      fails with "is not loaded in this shell";
-   - `cd <primary-on-the-preparation-branch> && direnv exec <new> bin/rails runner -e test 'puts 1'`
-     fails with "carries the parallel-checkout identity of".
+   - when the primary's checked-out branch has the guard,
+     `cd <primary> && direnv exec <new> bin/rails runner -e test 'puts 1'`
+     fails with "carries the parallel-checkout identity of". When it
+     does not, skip this one and say so: add mode never changes the
+     primary's branch.
 
 ## Mode: remove checkout N
 
 Destructive at every step. Confirm the whole list with the user before
 starting, and check each target mechanically rather than by reading
-it: N is 2 or more, and `realpath <checkout>` is neither the primary's
-realpath nor inside it.
+it: N is 2 or more; the checkout's `origin` URL matches the primary's;
+its marker (`<git-common-dir>/parallel-checkout`) says N; and
+`realpath <checkout>` is neither the primary's realpath nor inside it.
+Use that realpath for every step below, so a symlinked checkout path
+removes the checkout rather than only the link.
 
 1. **Look before deleting.** In the checkout:
    - `git status` is clean;
@@ -463,15 +495,20 @@ realpath nor inside it.
    bound to its ports.
 3. *(services)* Resolve its database names the way add Step 5 does
    and require both to end in its suffix, then drop exactly those:
-   `dropdb <name>` for each. Read its Redis URLs from the checkout
+   `dropdb <name>` for each. Parallel test workers leave more
+   (`<name>-0`, `<name>-1` from Rails' `parallelize`; `<name>1`,
+   `<name>2` from parallel_tests): list them with
+   `psql -lqt | cut -d '|' -f 1` filtered to names that start with
+   the checkout's own test name plus a separator, show the list, and
+   drop those after confirmation. Read its Redis URLs from the checkout
    itself (`direnv exec <checkout> printenv PRJ_JOBS_REDIS_URL`, one
    per role), refuse any database number below the stride (those are
    the primary's), and flush each with `redis-cli -u "<url>" FLUSHDB`.
 4. Remove its `~/.claude/projects/<dir>` directory, after checking
    that `<dir>` names this checkout and that its `memory` is a symlink
    (`test -L <dir>/memory`), so the primary's memory is untouched.
-5. Delete the checkout: `rm -rf -- "<absolute path>"`, with no
-   trailing slash, so a symlinked path is not followed.
+5. Delete the checkout: `rm -rf -- "<realpath>"`, then any symlink
+   that pointed at it.
 
 ## Caveats to pass on
 
@@ -484,6 +521,10 @@ realpath nor inside it.
 - **Machine-level singletons stay single.** A browser-automation
   session in the user's own Chrome, a staging deploy, anything outside
   the checkout: one at a time.
+- **A branch older than the preparation uses the primary's data.**
+  Merge the default branch into a branch before checking it out in
+  checkout N, and do not bisect across the preparation there. The
+  `post-checkout` hook from add Step 5 warns when this happens.
 - **Worktrees share their checkout's identity.** A worktree nested in
   a checkout picks up its `.envrc`; one created elsewhere needs
   `direnv exec <checkout>`. Two full suites from two worktrees of one

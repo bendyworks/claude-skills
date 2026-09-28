@@ -79,9 +79,10 @@ export PORT=$PRJ_APP_PORT
    numbers below the server's count and empty
    (`redis-cli -p <port> CONFIG GET databases`, `redis-cli -p <port> -n <db> DBSIZE`).
 5. `direnv exec . bundle install`, then check that
+   `config/initializers/00_parallel_checkout_guard.rb` exists and that both
    `direnv exec . bin/rails runner 'puts ActiveRecord::Base.connection_db_config.database'`
-   prints the suffixed name, then `direnv exec . bin/rails db:create db:schema:load`
-   (development and test).
+   and the same with `-e test` print suffixed names. Only then
+   `direnv exec . bin/rails db:create db:schema:load` (development and test).
 6. Start the full suite here and in another checkout at the same moment;
    both must pass with identical example counts.
 
@@ -89,6 +90,9 @@ export PORT=$PRJ_APP_PORT
 
 - **One branch, one session.** Give each checkout's session its own branch;
   both on the default branch for verification is fine.
+- **A branch older than this setup uses the original checkout's data**, since
+  the suffix and the guard live in tracked files. Merge the default branch
+  into a branch before checking it out in a second checkout.
 - **Worktrees share their checkout's identity**, so two full suites run from
   two worktrees of one checkout still collide.
 - **Machine-level singletons stay single:** a browser-automation session in
