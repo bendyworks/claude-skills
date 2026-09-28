@@ -20,7 +20,9 @@ class ParallelCheckoutCheckerTest < Minitest::Test
   PREFIX = 'ZZCHECK_'
   SYSTEM_BASH = '/bin/bash'
   BASH3 = File.executable?(SYSTEM_BASH) && `#{SYSTEM_BASH} -c 'echo $BASH_VERSINFO'`.strip == '3'
-  # Each call is logged; the answers come from FAKE_* variables.
+  # Each call is logged; the answers come from FAKE_* variables. Like
+  # Compose, `config` takes the project name from COMPOSE_PROJECT_NAME in
+  # the environment before the one the env file gives (FAKE_CONFIG_NAME).
   FAKE_DOCKER = <<~'SH'
     #!/bin/sh
     printf '%s\n' "$*" >> "$FAKE_DOCKER_LOG"
@@ -28,10 +30,16 @@ class ParallelCheckoutCheckerTest < Minitest::Test
       info) exit "${FAKE_INFO_EXIT:-1}" ;;
     esac
     case "$*" in
-      *" config -q"*) exit "${FAKE_CONFIG_EXIT:-0}" ;;
-      *" config"*) [ "${FAKE_CONFIG_EXIT:-0}" = 0 ] && printf 'name: %s\nservices: {}\n' "${FAKE_CONFIG_NAME:-stack2}"; exit "${FAKE_CONFIG_EXIT:-0}" ;;
-      *" ps "*) printf '%s' "${FAKE_PS_OUTPUT:-}"; exit 0 ;;
-      *" exec "*) exit 0 ;;
+      *" config -q"*)
+        [ "${FAKE_CONFIG_EXIT:-0}" = 0 ] || echo "fake compose: interpolation failed" >&2
+        exit "${FAKE_CONFIG_EXIT:-0}" ;;
+      *" config"*)
+        [ "${FAKE_CONFIG_EXIT:-0}" = 0 ] || exit "${FAKE_CONFIG_EXIT:-0}"
+        name="${COMPOSE_PROJECT_NAME:-${FAKE_CONFIG_NAME:-stack2}}"
+        [ -n "${FAKE_CONFIG_QUOTE:-}" ] && name="\"$name\""
+        printf 'name: %s\nservices: {}\n' "$name"; exit 0 ;;
+      *" ps "*) printf '%s' "${FAKE_PS_OUTPUT:-}"; exit "${FAKE_PS_EXIT:-0}" ;;
+      *" exec "*) exit "${FAKE_EXEC_EXIT:-0}" ;;
     esac
     exit 0
   SH
@@ -77,50 +85,98 @@ class ParallelCheckoutCheckerTest < Minitest::Test
                    chdir: @scratch, unsetenv_others: true)
   end
 
-  def summary(out) = out[/(\d+) passed, (\d+) failed, (\d+) skipped/]&.then { $~.captures.map(&:to_i) }
+  # [passed, failed, skipped] from the checker's last line.
+  def summary(out)
+    match = out.lines.last.to_s.match(/\A(\d+) passed, (\d+) failed, (\d+) skipped\Z/)
+    flunk "no summary line in:\n#{out}" unless match
+    match.captures.map(&:to_i)
+  end
 
-  def test_passes_the_refusal_checks_and_skips_the_container_checks_without_a_daemon
+  def execs = docker_log.lines.grep(/ exec /)
+
+  def test_checks_the_compose_file_and_skips_the_container_checks_without_a_daemon
     out, err, status = check
     assert status.success?, out + err
-    passed, failed, skipped = summary(out)
-    assert_operator passed, :>=, 3
-    assert_equal 0, failed
-    assert_operator skipped, :>=, 1
+    assert_equal [6, 0, 1], summary(out)
     assert_includes out, 'Docker is not running'
+  end
+
+  def test_skips_the_port_check_when_the_identity_has_no_port
+    File.write(File.join(@root, '.devcontainer', '.env'), "COMPOSE_PROJECT_NAME=stack2\n")
+    out, err, status = check
+    assert status.success?, out + err
+    assert_includes out, 'skip  no PRJ_*_PORT'.sub('PRJ_', PREFIX)
+    assert_equal [5, 0, 2], summary(out)
   end
 
   def test_passes_every_check_against_a_running_stack
     out, err, status = check('FAKE_INFO_EXIT' => '0', 'FAKE_PS_OUTPUT' => "abc123\n")
     assert status.success?, out + err
-    _passed, failed, skipped = summary(out)
-    assert_equal [0, 0], [failed, skipped]
-    assert_includes docker_log, 'exec -T app true'
+    assert_equal [7, 0, 0], summary(out)
+    assert_equal 1, execs.size
+    assert_match(/ exec -T app true$/, execs.first)
+  end
+
+  def test_fails_when_dexec_cannot_reach_the_running_container
+    out, _err, status = check('FAKE_INFO_EXIT' => '0', 'FAKE_PS_OUTPUT' => "abc123\n", 'FAKE_EXEC_EXIT' => '1')
+    refute status.success?
+    assert_includes out, 'FAIL  bin/dexec could not reach'
   end
 
   def test_skips_the_container_check_when_the_stack_is_stopped
     out, err, status = check('FAKE_INFO_EXIT' => '0', 'FAKE_PS_OUTPUT' => '')
     assert status.success?, out + err
-    assert_includes out, 'not running'
-    refute_includes docker_log, 'exec'
+    assert_includes out, 'skip  the app container is not running'
+    assert_equal [6, 0, 1], summary(out)
+    assert_empty execs
   end
 
-  def test_fails_when_the_compose_project_does_not_load
-    out, _err, status = check('FAKE_INFO_EXIT' => '0', 'FAKE_CONFIG_EXIT' => '1')
+  def test_fails_when_compose_cannot_list_the_containers
+    out, _err, status = check('FAKE_INFO_EXIT' => '0', 'FAKE_PS_EXIT' => '1')
     refute status.success?
-    assert_includes out, 'does not load'
+    assert_includes out, 'FAIL  Compose could not list'
+  end
+
+  def test_fails_when_the_compose_project_does_not_load_and_says_why
+    out, _err, status = check('FAKE_CONFIG_EXIT' => '1')
+    refute status.success?
+    assert_includes out, 'FAIL  this checkout\'s compose project does not load'
+    assert_includes out, 'fake compose: interpolation failed'
+    refute_includes out, "project name ''"
   end
 
   def test_fails_when_compose_reads_another_project_name_from_the_file
-    out, _err, status = check('FAKE_INFO_EXIT' => '0', 'FAKE_CONFIG_NAME' => 'other')
+    out, _err, status = check('FAKE_CONFIG_NAME' => 'other')
     refute status.success?
-    assert_includes out, 'other'
+    assert_includes out, "FAIL  Compose reads the project name 'other'"
+  end
+
+  def test_reads_a_quoted_project_name_the_way_compose_prints_it
+    out, err, status = check('FAKE_CONFIG_QUOTE' => '1')
+    assert status.success?, out + err
+  end
+
+  def test_fails_the_refusal_checks_when_the_resolver_warns_but_lets_the_command_through
+    install('compose-project', <<~'SH')
+      #!/usr/bin/env bash
+      echo "ZZCHECK_: COMPOSE_PROJECT_NAME=stack2-other (this shell) disagrees; ZZCHECK_APP_PORT=not-a-port (this shell) disagrees; ZZCHECK_PARALLEL_CHECK_PORT=1, but it does not set it" >&2
+      export COMPOSE_PROJECT_NAME=stack2
+      compose_project_env_file="$(dirname "${BASH_SOURCE[0]}")/../.devcontainer/.env"
+      compose_project_files=(-f "$(dirname "${BASH_SOURCE[0]}")/../.devcontainer/docker-compose.yml")
+      compose() { docker compose "${compose_project_files[@]}" "$@"; }
+    SH
+    out, _err, status = check
+    refute status.success?
+    assert_operator summary(out)[1], :>=, 3
   end
 
   def test_fails_every_refusal_check_when_the_resolver_compares_nothing
     install('compose-project', <<~'SH')
       #!/usr/bin/env bash
       export COMPOSE_PROJECT_NAME=stack2
-      compose() { docker compose -f "$(dirname "${BASH_SOURCE[0]}")/../.devcontainer/docker-compose.yml" "$@"; }
+      compose_project_env_file="$(dirname "${BASH_SOURCE[0]}")/../.devcontainer/.env"
+      compose_project_files=(-f "$(dirname "${BASH_SOURCE[0]}")/../.devcontainer/docker-compose.yml")
+      compose() { docker compose "${compose_project_files[@]}" "$@"; }
     SH
     out, _err, status = check
     refute status.success?
@@ -137,6 +193,6 @@ class ParallelCheckoutCheckerTest < Minitest::Test
 
   def test_refusal_checks_never_reach_docker
     check
-    refute_includes docker_log, 'exec'
+    assert_empty execs
   end
 end

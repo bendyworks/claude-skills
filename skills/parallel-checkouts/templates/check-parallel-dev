@@ -1,20 +1,23 @@
 #!/usr/bin/env bash
 # parallel-checkouts template v1 (bendyworks/claude-skills)
 #
-# Checks that this checkout's stack scripts act on THIS checkout's stack,
-# and refuse rather than guess when a shell claims a different identity.
-# Several checkouts of this repository share one Docker daemon (see
+# Checks that bin/dexec, and so every stack script that sources
+# bin/compose-project, acts on THIS checkout's stack and refuses rather
+# than guesses when a shell claims a different identity. Several checkouts
+# of this repository share one Docker daemon (see
 # docs/parallel-checkouts.md), so a script that resolves the wrong project
 # reaches another checkout's containers, silently and with a zero exit
-# status. Run it after adding a checkout, and whenever a command looks
-# like it reached the wrong stack.
+# status. Run it after adding a checkout, and whenever a command looks like
+# it reached the wrong stack.
 #
-# It knows nothing about any other checkout. Each refusal check asserts the
-# refusal's own message, never merely a failing status: a status-only
-# check passes when bin/dexec is broken outright, which is the one
-# regression this script exists to catch. The container checks skip, with
-# a note, when Docker is not running or the stack is stopped, so the script
-# stays usable as a diagnostic on a stopped stack.
+# It knows nothing about any other checkout. Each refusal check asserts
+# the refusal's own message, naming the variable it refused, and a failing
+# status: a status-only check passes when bin/dexec is broken outright,
+# which is the one regression this script exists to catch. The compose
+# file checks need the docker CLI but no daemon; the container checks
+# skip, with a note, when the daemon or the stack is down, so the script
+# stays usable as a diagnostic on a stopped stack. `docker info` can take
+# a while to answer while Docker Desktop is starting.
 #
 # Usage: bin/check-parallel-dev
 set -u
@@ -29,6 +32,7 @@ if ! . "$root/bin/compose-project"; then
   echo "check-parallel-dev: run this from this checkout's own shell; the refusal above is the stack scripts doing their job" >&2
   exit 1
 fi
+env_file="$compose_project_env_file"
 
 passed=0
 failed=0
@@ -42,7 +46,7 @@ ok() {
 bad() {
   failed=$((failed + 1))
   printf 'FAIL  %s\n' "$1"
-  [ $# -gt 1 ] && printf '      %s\n' "$2"
+  [ $# -gt 1 ] && printf '%s\n' "$2" | sed 's/^/      /'
   return 0
 }
 
@@ -68,38 +72,45 @@ refuses() {
 ok "the stack scripts resolve this checkout as $COMPOSE_PROJECT_NAME"
 
 # --- Refusals driven by the environment -------------------------------------
-refuses "refuses a shell carrying another checkout's project name" "disagrees" \
+refuses "refuses a shell carrying another checkout's project name" \
+  "COMPOSE_PROJECT_NAME=${COMPOSE_PROJECT_NAME}-other (this shell) disagrees" \
   "COMPOSE_PROJECT_NAME=${COMPOSE_PROJECT_NAME}-other"
 
 port_name="$(sed -n 's/^[[:space:]]*\(export[[:space:]][[:space:]]*\)\{0,1\}\(PRJ_[A-Za-z0-9_]*_PORT\)[[:space:]]*=.*/\2/p' \
-  "$root/.devcontainer/.env" | head -n 1)"
+  "$env_file" | head -n 1)"
 if [ -n "$port_name" ]; then
-  refuses "refuses a shell carrying another checkout's $port_name" "disagrees" "$port_name=not-a-port"
+  refuses "refuses a shell carrying another checkout's $port_name" \
+    "$port_name=not-a-port (this shell) disagrees" "$port_name=not-a-port"
 else
-  skip "no PRJ_*_PORT in .devcontainer/.env to disagree about"
+  skip "no PRJ_*_PORT in $env_file to disagree about"
 fi
 
-refuses "refuses an identity variable this checkout does not set" "does not set it" \
-  "PRJ_PARALLEL_CHECK_PORT=1"
+refuses "refuses an identity variable this checkout does not set" \
+  "PRJ_PARALLEL_CHECK_PORT=1, but" "PRJ_PARALLEL_CHECK_PORT=1"
 
-# --- Checks that need the Docker daemon -------------------------------------
-if docker info >/dev/null 2>&1; then
-  if compose config -q >/dev/null 2>&1; then
-    ok "this checkout's compose project loads"
-  else
-    bad "this checkout's compose project does not load" "run: bin/docker-up, or docker compose config, to see why"
-  fi
+# --- Checks of the compose file (the docker CLI, no daemon) -----------------
+if config_errors="$(compose config -q 2>&1)"; then
+  ok "this checkout's compose project loads"
 
   compose_name="$(env -u COMPOSE_PROJECT_NAME docker compose "${compose_project_files[@]}" config 2>/dev/null |
     sed -n 's/^name: //p' | head -n 1)"
+  compose_name="${compose_name#[\"\']}"
+  compose_name="${compose_name%[\"\']}"
   if [ "$compose_name" = "$COMPOSE_PROJECT_NAME" ]; then
-    ok "Compose reads the same project name from .devcontainer/.env"
+    ok "Compose reads the same project name from $env_file"
   else
-    bad "Compose reads the project name '$compose_name' from .devcontainer/.env, not '$COMPOSE_PROJECT_NAME'" \
+    bad "Compose reads the project name '$compose_name' from $env_file, not '$COMPOSE_PROJECT_NAME'" \
       "the two parsers disagree about the file; regenerate it with a direnv load"
   fi
+else
+  bad "this checkout's compose project does not load" "$config_errors"
+fi
 
-  if [ -n "$(compose ps -q "$service" 2>/dev/null)" ]; then
+# --- Checks that need the Docker daemon -------------------------------------
+if docker info >/dev/null 2>&1; then
+  if ! containers="$(compose ps -q "$service" 2>&1)"; then
+    bad "Compose could not list this checkout's $service container" "$containers"
+  elif [ -n "$containers" ]; then
     if "$root/bin/dexec" true; then
       ok "bin/dexec reaches this checkout's $service container"
     else
