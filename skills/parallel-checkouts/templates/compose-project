@@ -1,0 +1,185 @@
+#!/usr/bin/env bash
+# parallel-checkouts template v1 (bendyworks/claude-skills)
+#
+# Sourced, not executed: verifies that this shell's parallel-checkout
+# identity agrees with this checkout's, and defines the `compose` wrapper
+# every stack script runs through. See docs/parallel-checkouts.md.
+#
+# Compose resolves the project name itself, reading the env file beside the
+# compose file, with a documented per-variable precedence: the `-p` flag,
+# then the environment, then that env file, then the compose file's `name:`.
+# What Compose cannot do is notice that the shell is lying about which
+# checkout it is in. An environment variable outranks the file, so a shell
+# carrying another checkout's COMPOSE_PROJECT_NAME resolves that checkout's
+# containers, silently and with a zero exit status. The ports are the same
+# hazard in a subtler form: a shell carrying one checkout's PRJ_* port block
+# with a matching project name composes a hybrid, and a routine `up`
+# recreates containers on the wrong ports.
+#
+# So this file reads the env file for one purpose only, comparing it with
+# the environment, and never to decide anything. The identity is exactly
+# COMPOSE_PROJECT_NAME plus every PRJ_* variable; nothing wider, because the
+# comparison prints the values it compares. A shell that disagrees on any of
+# them is refused rather than guessed at.
+#
+# It reads the file the way Compose's dotenv parser does for the shapes a
+# generated identity file can hold: an optional `export ` prefix, CRLF
+# endings, whitespace around the `=`, one layer of quotes, and a trailing
+# comment after a quoted value or after whitespace in an unquoted one. It
+# does not implement backslash escapes inside quotes or `${VAR}`
+# interpolation; both fail closed, as a refusal rather than a wrong answer.
+# It never evaluates anything the file says: a key must match a shell
+# variable name and is read back by indirect expansion.
+#
+# It does not rely on `set -e`: callers source it as
+# `. bin/compose-project || exit 1`, which suppresses `set -e` inside it, so
+# every failure path here is an explicit `return 1`. It targets bash 3.2,
+# macOS's /bin/bash.
+
+if [ -z "${BASH_SOURCE[0]:-}" ]; then
+  echo "${0##*/}: needs bash (BASH_SOURCE is empty under zsh, so the checkout root would resolve wrongly); run the bin/ scripts rather than sourcing this by hand" >&2
+  return 1 2>/dev/null || exit 1
+fi
+
+if [ "${BASH_SOURCE[0]}" = "$0" ]; then
+  echo "${0##*/}: source this file, do not execute it; the bin/ scripts do that for you" >&2
+  exit 64
+fi
+
+compose_project_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# The two paths a project adapts when it copies this template.
+compose_project_env_file="$compose_project_root/.devcontainer/.env"
+compose_project_files=(-f "$compose_project_root/.devcontainer/docker-compose.yml")
+
+# Normalize one raw value as Compose's dotenv parser would. A quoted value
+# ends at its closing quote, whatever follows it; an unquoted value loses a
+# trailing comment only when whitespace precedes the '#'.
+compose_project_clean_value() {
+  local raw="$1" quote rest
+
+  raw="${raw%$'\r'}"
+  raw="${raw#"${raw%%[![:space:]]*}"}"
+  raw="${raw%"${raw##*[![:space:]]}"}"
+
+  case "$raw" in
+    '"'*|"'"*)
+      quote="${raw:0:1}"
+      rest="${raw:1}"
+      case "$rest" in
+        *"$quote"*) raw="${rest%%"$quote"*}" ;;
+      esac
+      ;;
+    *)
+      case "$raw" in
+        *[[:space:]]"#"*) raw="${raw%%[[:space:]]"#"*}" ;;
+      esac
+      raw="${raw%"${raw##*[![:space:]]}"}"
+      ;;
+  esac
+
+  printf '%s' "$raw"
+}
+
+# Strip a line down to the KEY=VALUE Compose would see, or to nothing when
+# the line carries none. The key is canonicalized here, trimming whitespace
+# before the `=`, so that `KEY =value` is compared rather than skipped.
+compose_project_strip_line() {
+  local line="$1" key
+
+  line="${line%$'\r'}"
+  line="${line#"${line%%[![:space:]]*}"}"
+  line="${line#export }"
+  line="${line#"${line%%[![:space:]]*}"}"
+
+  case "$line" in
+    ''|'#'*) return 0 ;;
+    *=*)
+      key="${line%%=*}"
+      key="${key%"${key##*[![:space:]]}"}"
+      line="$key=${line#*=}"
+      ;;
+  esac
+
+  printf '%s' "$line"
+}
+
+if [ ! -f "$compose_project_env_file" ]; then
+  echo "${0##*/}: $compose_project_env_file is missing, so this checkout has no identity; set it up per docs/parallel-checkouts.md (a direnv load writes it)" >&2
+  return 1
+fi
+
+compose_project_name=""
+compose_project_line=""
+compose_project_key=""
+compose_project_want=""
+compose_project_have=""
+compose_project_shown=""
+
+# The last assignment of a variable wins, matching Compose, so collect the
+# identity first and compare once.
+compose_project_keys=""
+while IFS= read -r compose_project_line || [ -n "$compose_project_line" ]; do
+  compose_project_line="$(compose_project_strip_line "$compose_project_line")"
+  case "$compose_project_line" in
+    COMPOSE_PROJECT_NAME=*|PRJ_*=*) ;;
+    *) continue ;;
+  esac
+
+  compose_project_key="${compose_project_line%%=*}"
+  case "$compose_project_key" in
+    ''|[0-9]*|*[!A-Za-z0-9_]*)
+      echo "${0##*/}: $compose_project_env_file has an identity line whose name is not a shell variable name; refusing to interpret it -- regenerate the file with a direnv load, per docs/parallel-checkouts.md" >&2
+      return 1
+      ;;
+  esac
+
+  printf -v "compose_project_value_$compose_project_key" '%s' "$(compose_project_clean_value "${compose_project_line#*=}")"
+  case " $compose_project_keys " in
+    *" $compose_project_key "*) ;;
+    *) compose_project_keys="$compose_project_keys $compose_project_key" ;;
+  esac
+done < "$compose_project_env_file"
+
+for compose_project_key in $compose_project_keys; do
+  compose_project_want_var="compose_project_value_$compose_project_key"
+  compose_project_want="${!compose_project_want_var}"
+
+  if [ "$compose_project_key" = COMPOSE_PROJECT_NAME ]; then
+    compose_project_name="$compose_project_want"
+  fi
+
+  # Set-but-empty counts as disagreement: Compose asks whether a variable is
+  # set, not whether it has a value, so an empty one still shadows the file.
+  compose_project_have="${!compose_project_key-}"
+  if [ "${!compose_project_key+set}" = set ] && [ "$compose_project_have" != "$compose_project_want" ]; then
+    compose_project_shown="$compose_project_have"
+    [ -z "$compose_project_shown" ] && compose_project_shown="(set, but empty)"
+    echo "${0##*/}: $compose_project_key=$compose_project_shown (this shell) disagrees with $compose_project_env_file ($compose_project_want), so this command would act on a different checkout's stack than the one it lives in; run it from this checkout's own direnv shell, or unset $compose_project_key -- see docs/parallel-checkouts.md" >&2
+    return 1
+  fi
+done
+
+if [ -z "$compose_project_name" ]; then
+  echo "${0##*/}: $compose_project_env_file names no COMPOSE_PROJECT_NAME, so this checkout has no identity; set it up per docs/parallel-checkouts.md" >&2
+  return 1
+fi
+
+# Exported so a nested `docker compose` in a child process resolves the same
+# project; it also outranks a `name:` in an override file, which stops an
+# override from redirecting a command at another stack.
+export COMPOSE_PROJECT_NAME="$compose_project_name"
+
+# An explicit -f disables Compose's own loading of an override file, so a
+# personal docker-compose.override.yml beside the compose file is named here,
+# and announced: it is untracked and can change what every container is.
+compose_project_override="$compose_project_root/.devcontainer/docker-compose.override.yml"
+if [ -f "$compose_project_override" ]; then
+  compose_project_files+=(-f "$compose_project_override")
+  echo "${0##*/}: including ${compose_project_override#"$compose_project_root"/}" >&2
+fi
+
+compose() {
+  docker compose "${compose_project_files[@]}" "$@"
+}
+
+unset compose_project_line compose_project_key compose_project_want compose_project_have compose_project_shown compose_project_want_var
