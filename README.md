@@ -40,6 +40,7 @@ To pick up updates later:
 | `dependabot-batch` | Triage, verify, and (behind opt-in dials) merge and deploy a batch of open Dependabot PRs. |
 | `bug-cluster-ledger` | Mine a time window of tracker issues and cluster them upward to root causes per subsystem, with prevention analysis. Used by architecture-survey. |
 | `app-wind-down` | Wind down a hosted app safely and reversibly: caretaker mode first, then hibernation to ~$0 with full restore assets. |
+| `parallel-checkouts` | Run several full clones of one project side by side, each with its own dev server and full test suite running at the same time as the others. Prepares a project once (its database names, Redis databases, and pinned ports follow a per-checkout identity), then adds or removes checkouts and shares Claude Code's project memory between them. Rails-first; covers projects whose Postgres and Redis run natively. |
 | `targeted-specs` | Run just the specs a feature branch plausibly affects instead of the full local suite, leaning on CI for the full run. Escalates to "this branch needs a full run" when blast-radius files are touched, announces the subset for your veto, and never subsets lint. Rails/RSpec-first. |
 
 ## Engineering guidance
