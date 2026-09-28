@@ -7,3 +7,6 @@
 
 # SimpleCov output from COVERAGE=1 test runs (see test/coverage_helper.rb).
 coverage/
+
+# macOS Finder metadata, written into any directory Finder opens.
+.DS_Store
