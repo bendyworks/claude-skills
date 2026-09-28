@@ -21,6 +21,8 @@ This skill runs the cleanup steps below in order. It is invoked either:
 
 ## Step 1 -- Confirm preconditions
 
+**Before anything else, when the conversation's task list holds this plan's run-housekeeping task, mark it `in_progress` via `TaskUpdate`.** The pass is that task's work, so the task shows as active for the whole pass; Step 8 completes it. A standalone run in a fresh session often has no such task, so skip this when `TaskList` shows none. Whenever the pass stops before Step 8 -- a precondition below fails, or Step 2 surfaces outstanding work -- return the task to `pending`, so the task list does not show a stopped pass as still running.
+
 **First, establish whether the project is in Deploy-on-Merge Mode**, because check 2 below depends on the answer. The mode holds only when the project's checked-in CLAUDE.md or a rules file declares it -- an explicit statement that merging to the default branch is the production deploy, naming the mode or saying so unambiguously. Three rules make that judgment safe:
 
 - **Never infer the mode from the project's shape.** No version file, auto-merge enabled, a deploy workflow present, a fast-looking pipeline: none of these is a declaration. A silent inference here skips a real deploy check and then deletes a branch and closes an issue, which is the failure this precondition exists to prevent.
@@ -39,7 +41,7 @@ Then verify:
    - Other deploy targets: ask the user, or look at the deploy log / dashboard.
 3. **The user explicitly confirms** the work is wrapped up (they invoked this skill or said "we shipped X").
 
-If any of these is "no" -- **stop**. Do not delete anything. The branch may still be needed for a hotfix; the plan may still have post-ship tasks.
+If any of these is "no" -- **stop**, and return the run-housekeeping task to `pending`. Do not delete anything. The branch may still be needed for a hotfix; the plan may still have post-ship tasks.
 
 ## Step 2 -- Plan file finalization
 
@@ -52,7 +54,7 @@ If a plan file exists for this story (the plan-issue skill places them under `.c
 - **Deferred to a follow-up issue.** The work was intentionally split off; a separate issue tracks it. Tick the box and append the destination to the item text, keeping the item's number -- `- [x] **N.** <original text> (deferred to <ISSUE-ID>)` (for a GitHub issue, `#NNN` even under a declared issue key) -- so the deferral and its destination are both visible in the historical record.
 - **Genuinely not done, and unsure whether it should be.** Surface it to the user and ask: "I see `<item>` is still unchecked. Was it done, deferred, or still outstanding?" Wait for the answer.
 
-If the user identifies any item that **is still outstanding and should be finished**, **STOP the entire housekeeping pass.** The story is not actually done; finishing the housekeeping would lock that fact behind a `[x]` and lose it. Surface the outstanding work clearly, and let the user decide whether to extend the PR / open a follow-up / accept the deferral. Resume housekeeping only after the situation is resolved.
+If the user identifies any item that **is still outstanding and should be finished**, **STOP the entire housekeeping pass.** Return the run-housekeeping task to `pending` (Step 1). The story is not actually done; finishing the housekeeping would lock that fact behind a `[x]` and lose it. Surface the outstanding work clearly, and let the user decide whether to extend the PR / open a follow-up / accept the deferral. Resume housekeeping only after the situation is resolved.
 
 Check the tracker issue's state before you hand the decision back, because a STOP can leave the board lying. A repo that auto-closes on merge -- the common setup in Deploy-on-Merge Mode -- has already put the issue in its terminal state, so an issue whose plan still has outstanding work reads as Done to everyone else. Say so plainly and offer to reopen it. Step 5, which is where issue state is normally read, is never reached on this path.
 
