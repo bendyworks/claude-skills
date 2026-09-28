@@ -8,22 +8,27 @@
 # Whether this shell agrees with the checkout is bin/compose-project's
 # business. See docs/parallel-checkouts.md.
 #
-# `docker compose exec` allocates a TTY only when one is attached, so one
-# invocation serves an interactive shell and a scripted call alike; stdin
-# is forwarded either way, and the command's exit status passes through.
+# A TTY is allocated only when stdin and stdout are both terminals, so one
+# invocation serves an interactive shell and a scripted or piped call
+# alike. `docker compose exec` decides from stdout alone and then refuses
+# piped stdin at a terminal ("the input device is not a TTY"), so -T is
+# added here whenever either side is not a terminal. Stdin is forwarded
+# either way, and the command's exit status passes through.
 #
 # Usage: bin/dexec [flags] <command...>
 #   bin/dexec bundle exec rspec spec/models/user_spec.rb
 #   bin/dexec bash
 #   cat dump.sql | DEXEC_SERVICE=db bin/dexec psql -U postgres
 #
-# Flags are `docker compose exec`'s (-e, -w, -u, -T, --index), collected here
-# and passed ahead of the service, since Compose treats everything after the
-# service name as the command. -i and -t are accepted and ignored. A `--`
-# ends the flags, for a command whose name begins with a dash.
+# Any of `docker compose exec`'s flags (-e, -w, -u, --index, --privileged,
+# ...) are collected here and passed ahead of the service, since Compose
+# treats everything after the service name as the command. The terminal
+# flags (-i, -t, -it, --interactive, --tty) are accepted and ignored, since
+# the terminal is decided as above; -T forces no terminal. A `--` ends the
+# flags, for a command whose name begins with a dash.
 set -eu
 
-root="$(cd "$(dirname "$0")/.." && pwd)"
+root="$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)"
 . "$root/bin/compose-project" || exit 1
 
 if [ $# -eq 0 ]; then
@@ -34,13 +39,19 @@ fi
 service="${DEXEC_SERVICE:-app}"
 
 flags=()
+no_tty=""
+[ -t 0 ] && [ -t 1 ] || no_tty=1
 while [ $# -gt 0 ]; do
   case "$1" in
     --)
       shift
       break
       ;;
-    -i|-t|-it|-ti)
+    -i|-t|-it|-ti|--interactive|--tty)
+      shift
+      ;;
+    -T|--no-TTY|-Ti|-iT|-Tt|-tT)
+      no_tty=1
       shift
       ;;
     -e|--env|-w|--workdir|-u|--user|--index)
@@ -66,4 +77,5 @@ if [ $# -eq 0 ]; then
   exit 64
 fi
 
+[ -n "$no_tty" ] && flags+=(-T)
 compose exec ${flags[@]+"${flags[@]}"} "$service" "$@"
