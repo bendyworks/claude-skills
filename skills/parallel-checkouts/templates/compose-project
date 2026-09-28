@@ -220,6 +220,8 @@ if [ -f "$compose_project_dir/docker-compose.override.yml" ]; then
   echo "${0##*/}: including ${compose_project_dir#"$compose_project_root"/}/docker-compose.override.yml" >&2
 fi
 
+# compose_project_files and compose_project_env_file stay set for the
+# scripts that source this one; everything else it used is cleared below.
 compose() {
   docker compose "${compose_project_files[@]}" "$@"
 }
@@ -227,7 +229,7 @@ compose() {
 for compose_project_key in ${compose_project_keys[@]+"${compose_project_keys[@]}"}; do
   unset "compose_project_value_$compose_project_key"
 done
-unset compose_project_root compose_project_dir compose_project_env_file compose_project_keys \
+unset compose_project_root compose_project_dir compose_project_keys \
   compose_project_sep compose_project_env_override \
   compose_project_line compose_project_key compose_project_name compose_project_have \
   compose_project_shown compose_project_want compose_project_want_var

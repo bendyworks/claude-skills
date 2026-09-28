@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # parallel-checkouts template v1 (bendyworks/claude-skills)
 #
-# Start this checkout's stack, detached. Safe from any directory: the
-# checkout is found from this script's own location, and bin/compose-project
+# Start this checkout's stack, detached. It finds its checkout from its own
+# location, so it is safe to run from any directory (but not through a
+# symlink placed elsewhere, which fails closed), and bin/compose-project
 # refuses a shell carrying another checkout's identity. Extra arguments go
 # to `docker compose up`. See docs/parallel-checkouts.md.
 set -eu

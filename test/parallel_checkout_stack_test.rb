@@ -5,11 +5,11 @@
 # bin/compose-project (the sourced resolver that refuses a shell whose
 # identity disagrees with its checkout's), bin/dexec (runs a command in
 # the checkout's app container), and the bin/docker-up, bin/docker-down,
-# and bin/docker-rebuild lifecycle wrappers. Each test copies the templates into
-# a throwaway project, replaces the PRJ placeholder prefix the way the
-# skill does, and runs them against a fake `docker` on PATH that records
-# its arguments, its stdin, whether stdin was a terminal, and the project
-# name it inherited.
+# and bin/docker-rebuild lifecycle wrappers. Each test copies the
+# templates into a throwaway project, replaces the PRJ placeholder prefix
+# the way the skill does, and runs them against a fake `docker` on PATH
+# that records its arguments, its stdin, whether stdin was a terminal,
+# and the project name it inherited.
 #
 # The templates promise macOS's bash 3.2. Where /bin/bash is 3.x, the
 # tests run them under it, through a `bash` placed first on PATH; CI's
@@ -293,11 +293,11 @@ class ParallelCheckoutStackTest < Minitest::Test
                    'not a shell variable name')
   end
 
-  def test_leaves_only_the_compose_wrapper_behind_in_the_sourcing_shell
-    write_probe('compgen -v compose_project_; declare -F | grep compose_project_ || true')
+  def test_leaves_only_the_compose_wrapper_and_its_paths_behind_in_the_sourcing_shell
+    write_probe('compgen -v compose_project_; declare -F | grep compose_project_ || true; printf %s "$compose_project_env_file"')
     out, err, status = run_script('probe')
     assert status.success?, err
-    assert_equal "compose_project_files\n", out
+    assert_equal "compose_project_env_file\ncompose_project_files\n#{env_file}", out
   end
 
   def test_includes_an_override_file_and_says_so
@@ -418,13 +418,35 @@ class ParallelCheckoutStackTest < Minitest::Test
     assert_equal ['compose', '-f', compose_file, 'down', '--volumes'], docker_args
   end
 
-  def test_docker_rebuild_runs_the_projects_initializer_first
+  def write_initializer(body, executable: true)
     initializer = File.join(@root, '.devcontainer', 'initialize.sh')
-    File.write(initializer, "#!/bin/sh\necho ran > #{record('initializer')}\n")
-    File.chmod(0o755, initializer)
+    File.write(initializer, "#!/bin/sh\n#{body}\n")
+    File.chmod(executable ? 0o755 : 0o644, initializer)
+  end
+
+  def test_docker_rebuild_runs_the_projects_initializer_first
+    write_initializer("echo ran > #{record('initializer')}")
     assert_ran(run_script('docker-rebuild'))
     assert_equal "ran\n", recorded('initializer')
     assert_equal ['compose', '-f', compose_file, 'up', '--force-recreate', '--build', '-d'], docker_args
+  end
+
+  def test_docker_rebuild_runs_the_initializer_from_the_checkout_root
+    write_initializer('echo ran > .devcontainer/initializer-ran')
+    assert_ran(run_script('docker-rebuild', chdir: @scratch))
+    assert_path_exists File.join(@root, '.devcontainer', 'initializer-ran')
+  end
+
+  def test_docker_rebuild_runs_an_initializer_that_is_not_executable
+    write_initializer("echo ran > #{record('initializer')}", executable: false)
+    assert_ran(run_script('docker-rebuild'))
+    assert_equal "ran\n", recorded('initializer')
+  end
+
+  def test_docker_rebuild_rechecks_the_identity_the_initializer_wrote
+    write_initializer("sed 's/^#{PREFIX}APP_PORT=.*/#{PREFIX}APP_PORT=9999/' .devcontainer/.env > .devcontainer/.env.new && " \
+                      'mv .devcontainer/.env.new .devcontainer/.env')
+    assert_refused(run_script('docker-rebuild', env: { "#{PREFIX}APP_PORT" => '3200' }), "#{PREFIX}APP_PORT=3200", '(9999)')
   end
 
   def test_docker_rebuild_needs_no_initializer
@@ -433,12 +455,17 @@ class ParallelCheckoutStackTest < Minitest::Test
   end
 
   def test_docker_rebuild_stops_when_the_initializer_fails
-    initializer = File.join(@root, '.devcontainer', 'initialize.sh')
-    File.write(initializer, "#!/bin/sh\nexit 5\n")
-    File.chmod(0o755, initializer)
+    write_initializer('exit 5')
     _out, _err, status = run_script('docker-rebuild')
     refute status.success?
     assert_nil docker_args
+  end
+
+  def test_the_lifecycle_wrappers_pass_composes_exit_status_through
+    %w[docker-up docker-down docker-rebuild].each do |script|
+      _out, _err, status = run_script(script, env: { 'FAKE_DOCKER_EXIT' => '3' })
+      assert_equal 3, status.exitstatus, script
+    end
   end
 
   def test_the_lifecycle_wrappers_refuse_a_shell_that_disagrees_with_the_checkout

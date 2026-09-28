@@ -1,19 +1,28 @@
 #!/usr/bin/env bash
 # parallel-checkouts template v1 (bendyworks/claude-skills)
 #
-# Rebuild this checkout's images and recreate its containers. Safe from any
-# directory, for the reasons bin/docker-up gives. When the project has a
-# .devcontainer/initialize.sh (which writes machine-specific lines into
-# .devcontainer/.env), it runs first, and a failure there stops the
-# rebuild. Extra arguments go to `docker compose up`. See
-# docs/parallel-checkouts.md.
+# Rebuild this checkout's images and recreate its containers. It finds its
+# checkout from its own location, so it is safe to run from any directory
+# (but not through a symlink placed elsewhere, which fails closed), and
+# bin/compose-project refuses a shell carrying another checkout's identity.
+# Extra arguments go to `docker compose up`. See docs/parallel-checkouts.md.
+#
+# A project whose devcontainer has an initialize.sh beside its env file (it
+# writes machine-specific lines into that file) gets it run first, from the
+# checkout's root the way the devcontainer tooling runs it, and a failure
+# there stops the rebuild. The identity is checked before the initializer
+# runs, so no project code runs for a shell claiming another checkout, and
+# again after, so a line it rewrote is checked too. The env file must
+# already exist: a direnv load writes it.
 set -eu
 
 root="$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)"
 . "$root/bin/compose-project" || exit 1
 
-if [ -x "$root/.devcontainer/initialize.sh" ]; then
-  "$root/.devcontainer/initialize.sh"
+initializer="$(dirname -- "$compose_project_env_file")/initialize.sh"
+if [ -f "$initializer" ]; then
+  (cd -- "$root" && bash "$initializer")
+  . "$root/bin/compose-project" || exit 1
 fi
 
 compose up --force-recreate --build -d "$@"

@@ -1,10 +1,12 @@
 #!/usr/bin/env bash
 # parallel-checkouts template v1 (bendyworks/claude-skills)
 #
-# Stop this checkout's stack and remove its containers. Safe from any
-# directory, for the reasons bin/docker-up gives. Extra arguments go to
-# `docker compose down`; `--volumes` also deletes this checkout's databases.
-# See docs/parallel-checkouts.md.
+# Stop this checkout's stack and remove its containers. It finds its
+# checkout from its own location, so it is safe to run from any directory
+# (but not through a symlink placed elsewhere, which fails closed), and
+# bin/compose-project refuses a shell carrying another checkout's identity.
+# Extra arguments go to `docker compose down`; `--volumes` also deletes this
+# checkout's databases. See docs/parallel-checkouts.md.
 set -eu
 
 root="$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)"
