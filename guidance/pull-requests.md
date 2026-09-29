@@ -58,19 +58,21 @@ team requires.
 
 ## Lead with why
 
-Open every PR description with a short Why paragraph: the
-user-visible outcome or the reason the change exists, before any What
-or mechanism content. A tracker-reference line (an issue link, or
-`Closes #NNN` when the PR fully resolves the issue) may sit above it,
+Open every PR description with a short Why paragraph: the user-visible
+outcome or the reason the change exists, before any What or mechanism
+content. A tracker-reference line (an issue link with the issue's
+title in its link text, or `Closes #NNN` when the PR fully resolves
+the issue, never wrapped in a link, since GitHub reads the keyword
+only when the issue reference follows it directly) may sit above it,
 but the first prose paragraph is the Why. This is the same why-first
 principle commit titles follow in the commit-messages guidance:
 motivation first, mechanism second. For a change that remedies
-something, the strongest Why names the concrete cost of leaving
-things as they were. Label that old behavior as before the change:
-"before this change, any signed-in user could open any repository",
-never "any signed-in user can open any repository today", which reads
-after the merge as a hole still open. The writing-about-change
-guidance covers tense in the rest of the body.
+something, the strongest Why names the concrete cost of leaving things
+as they were. Label that old behavior as before the change: "before
+this change, any signed-in user could open any repository", never "any
+signed-in user can open any repository today", which reads after the
+merge as a hole still open. The writing-about-change guidance covers
+tense in the rest of the body.
 
 ## Write descriptions for the reader
 
@@ -78,6 +80,15 @@ When a PR description mentions an outside resource -- a spec, a
 library's docs, a standard, an article -- turn its first mention into
 a link. Readers unfamiliar with the resource get the source; familiar
 readers get the convenience of a click.
+
+Issues and pull requests get the same care: look up each one's title
+and put it beside the ID on first mention, in the link text when
+linked -- "[ABC-123 Expire Stale Sessions](...)", "[#45 Retry Webhook
+Deliveries](...)", never "[ABC-123](...)" alone. A reviewer does not
+remember what a bare number was. Never invent a title the lookup did
+not return; name the item in lowercase prose instead. The Plain
+language section of the code-comments guidance carries the full rule,
+including the forms tooling parses, such as the closing keyword above.
 
 ## A PR owns the bugs it introduces
 
@@ -321,17 +332,18 @@ not agreed to install it; installing an extension on their machine is
 theirs to decide:
 
 - **Deleting the merged PR's head branch triggers the retarget; the
-  merge alone does not**
-  ([pull request retargeting changelog](https://github.blog/changelog/2020-05-19-pull-request-retargeting/)).
+  merge alone does not** ([pull request retargeting
+  changelog](https://github.blog/changelog/2020-05-19-pull-request-retargeting/)).
   Per layer: check that the PR's base is the mainline (retarget it if
   not), merge, delete the head branch, and confirm the next PR's base
   flipped. The merge and the deletion are the human's; a session
   retargets before handing off and confirms the flip afterward. The
   confirm step earns its place: `gh pr merge --delete-branch` has a
   race that can skip the retarget or close the dependent PR
-  ([cli/cli#1168](https://github.com/cli/cli/issues/1168)). Set a base
-  that did not flip with `gh pr edit <number> --base <target>`. A
-  closed dependent PR cannot be reopened while its base branch is
+  ([cli/cli#1168 `gh pr merge --delete-branch`: GitHub does not update
+  base of dependent PRs](https://github.com/cli/cli/issues/1168)). Set
+  a base that did not flip with `gh pr edit <number> --base <target>`.
+  A closed dependent PR cannot be reopened while its base branch is
   gone: restore the branch, reopen, retarget, and delete it again, or
   open a fresh PR from the same head branch. The "Automatically delete
   head branches" repo setting moves the deletion to merge time; the
