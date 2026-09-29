@@ -104,15 +104,17 @@ Ctrl-C, `kill`, or a closed terminal. Every checkout of this repo on
 your machine shares one config directory, so the script holds a lock
 while the file is parked and refuses to start while another session
 holds it. Arms that the batch starts in parallel can each wrap
-themselves in the script too; they share the batch's park. Any Claude
-Code session you start while the file is parked runs without it, and
-if one of them saves a new CLAUDE.md meanwhile, the script keeps both
-copies and prints how to merge them. After a crash or `kill -9`,
-`scripts/park-claude-md.sh --status` shows what is parked and
-`--recover` puts it back. Files under `~/.claude/rules/` load the same
-way and are not parked; move any that could reach an arm yourself. The
-tell for a contaminated run is an arm citing a rule only your global
-file carries.
+themselves in the script too; they share the batch's park. The batch
+must `wait` for its arms before it exits: the file goes back when the
+wrapped command ends, and an arm still running then reads it. Any
+Claude Code session you start while the file is parked runs without
+it, and if one of them saves a new CLAUDE.md meanwhile, the script
+keeps both copies and prints how to merge them. After a crash or
+`kill -9`, `scripts/park-claude-md.sh --status` shows what is parked
+and `--recover` puts it back. Files under `~/.claude/rules/` load the
+same way and are not parked; move any that could reach an arm
+yourself. The tell for a contaminated run is an arm citing a rule only
+your global file carries.
 
 **Trigger injection.** To force a specific code path (an escalation
 rule, an edge case), plant an untracked dummy file that matches the
