@@ -63,16 +63,16 @@ outcome or the reason the change exists, before any What or mechanism
 content. A tracker-reference line (an issue link with the issue's
 title in its link text, or `Closes #NNN` when the PR fully resolves
 the issue, never wrapped in a link, since GitHub reads the keyword
-only when the issue reference follows it directly; the title may
-follow the number) may sit above it, but the first prose paragraph is
-the Why. This is the same why-first principle commit titles follow in
-the commit-messages guidance: motivation first, mechanism second. For
-a change that remedies something, the strongest Why names the concrete
-cost of leaving things as they were. Label that old behavior as before
-the change: "before this change, any signed-in user could open any
-repository", never "any signed-in user can open any repository today",
-which reads after the merge as a hole still open. The
-writing-about-change guidance covers tense in the rest of the body.
+only when the issue reference follows it directly) may sit above it,
+but the first prose paragraph is the Why. This is the same why-first
+principle commit titles follow in the commit-messages guidance:
+motivation first, mechanism second. For a change that remedies
+something, the strongest Why names the concrete cost of leaving things
+as they were. Label that old behavior as before the change: "before
+this change, any signed-in user could open any repository", never "any
+signed-in user can open any repository today", which reads after the
+merge as a hole still open. The writing-about-change guidance covers
+tense in the rest of the body.
 
 ## Write descriptions for the reader
 
