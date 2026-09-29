@@ -72,8 +72,11 @@ class ParkClaudeMdTest < Minitest::Test
     assert_equal args.inspect, out
   end
 
+  # The form the script records: fixed to the C locale and UTC, so the
+  # same process reads the same from any terminal.
   def start_time(pid)
-    `ps -o lstart= -p #{pid}`.strip
+    out, = Open3.capture2({ 'LC_ALL' => 'C', 'TZ' => 'UTC0' }, 'ps', '-o', 'lstart=', '-p', pid.to_s)
+    out.strip
   end
 
   # Stands in for another session's park: a lock directory holding the
@@ -271,6 +274,17 @@ class ParkClaudeMdTest < Minitest::Test
 
     assert status.success?
     assert_match(/not parked/, out)
+  end
+
+  def test_a_holder_reads_as_running_from_another_time_zone_and_locale
+    live_holder do |pid|
+      hold_lock(pid: pid)
+      out, _err, status = Open3.capture3(env.merge('TZ' => 'Asia/Tokyo', 'LC_ALL' => 'de_DE.UTF-8'),
+                                         'bash', SCRIPT, '--status')
+
+      assert status.success?
+      assert_match(/parked by a running session/, out)
+    end
   end
 
   def test_status_names_a_running_holder

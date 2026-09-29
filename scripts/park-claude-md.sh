@@ -34,7 +34,10 @@ die() { echo "park-claude-md: $*" >&2; exit 2; }
 
 usage() { die "usage: $0 [--none-ok] -- <command> [args...] | --status | --recover"; }
 
-start_time() { ps -o lstart= -p "$1" 2>/dev/null | sed 's/^ *//; s/ *$//'; }
+# Fixed to the C locale and UTC: ps formats the start time in the
+# caller's language and time zone, and a --status or --recover run from
+# another terminal must read a live holder's time the way it was written.
+start_time() { LC_ALL=C TZ=UTC0 ps -o lstart= -p "$1" 2>/dev/null | sed 's/^ *//; s/ *$//'; }
 
 owner_field() { sed -n "s/^$1=//p" "$OWNER" 2>/dev/null; }
 
