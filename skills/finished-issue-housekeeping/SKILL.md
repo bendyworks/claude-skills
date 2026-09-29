@@ -313,7 +313,7 @@ Examples of what qualifies as a **skill**:
 
 An answer can also be **point-in-time state** rather than either: active work, an incident record, a reference, a note tied to code that is expected to change, work paused until someone else finishes theirs. Only state belongs in memory. For an item tied to specific code, ask whether it stays true as long as that code does (a rule) or expires when something planned happens (state).
 
-**If yes, save each item in the home its kind calls for:**
+**If yes, propose each item for the home its kind calls for, and write a rule or skill only after the user approves its exact text and target file:**
 
 1. **A rule or standing fact** -- the home whose readers need it:
    - a guidance file the team already shares, if any, for a team-neutral rule that holds across projects;
