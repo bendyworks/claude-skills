@@ -324,7 +324,7 @@ An answer can also be **point-in-time state** rather than either: active work, a
 
 - **Find the topic's existing home first.** Before writing, look for the topic among the homes above and edit it where it already lives; never add a second copy.
 - **Write generically for a public destination.** Before proposing a repository home, check whether it is public (`gh repo view --json visibility` for a GitHub repository). A lesson learned on one project and written somewhere public carries no client or project names, tracker IDs, or figures from that project: keep the technical substance and drop the identifying wrapper.
-- **A rule or a skill waits for the user's approval.** Show the exact text and the target file (for a skill, its name and scope as well), and write only after the user approves. A guidance file kept in a shared repository gets a drafted change for that repository's own review flow, never a direct commit. A memory for state needs no approval.
+- **A rule or a skill waits for the user's approval.** Show the exact text and the target file (for a skill, its name and scope as well), and write only after the user approves. A guidance file kept in a shared repository gets its change drafted as text for the user to take through that repository's own review flow: never edit or commit in that repository as part of this pass, even in a local clone, and file an issue or pull request there only when the user asks. A memory for state needs no approval.
 - **Check that a repository home reaches its readers.** A rules file or a project-scoped skill reaches teammates only when git tracks it, and many projects ignore `.claude/`. Check the path with `git check-ignore` before choosing it; for an ignored path, prefer the project's CLAUDE.md, or tell the user the file will stay on this machine.
 - **A write inside this project's repository is left uncommitted and named.** The project's CLAUDE.md and any tracked rules file or project-scoped skill are checked-in files, and this pass runs on the branch Step 3 checked out (usually `main`). Committing stays with the user, through the project's normal flow; never commit or push it as part of this pass. Name each such file in the Step 10 summary as uncommitted, so it does not ride into the next story's first commit unnoticed.
 
@@ -464,7 +464,7 @@ Report concisely what was done, one line per item:
 - Branch: `<name>` deleted (or "kept -- <reason>" / "no local branch").
 - Branch sweep: N deleted, M kept (or "skipped -- <why>").
 - Tracker: `<ID>` (<title>) moved to Done (or "no tracker issue").
-- Saved: N rules (naming each home: guidance file, project CLAUDE.md or rules file, global CLAUDE.md), counting any promoted from memory in 4c; N skills created; N state memories (or "nothing to save"). Name each file written inside this repository as left uncommitted.
+- Saved: N rules (naming each home: guidance file, project CLAUDE.md or rules file, global CLAUDE.md), counting any promoted from memory in 4c; N skills created; N state memories (or "nothing to save"). Name each file written inside this repository as left uncommitted, and each draft for a shared guidance repository with where it stands (drafted, or filed at the user's request).
 - Memory: Done entry added; MEMORY.md pruned (now <size> KB, under budget) (or "skipped -- no auto-memory").
 - Sibling-audit: N follow-ups verified; M dropped (filed now / TODO).
 - Dev server: stopped (or "none was running").
