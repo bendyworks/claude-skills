@@ -281,10 +281,12 @@ presses Merge like any other merge.
 
 ### On both paths
 
-- **Expect approvals to drop at each layer.** GitHub marks an approval
-  stale when a retarget or rebase moves the PR's merge base in a way
-  that changes what the approval covered, and a repo with stale-review
-  dismissal enabled dismisses stale approvals outright (the
+- **Expect approvals to drop at each layer.** On a native stack, the
+  server-side rebase pushes new commits to every layer above a merge,
+  and a repo that dismisses stale approvals when new commits are pushed
+  drops them there. On the manual path, a retarget that moves a PR's
+  merge base marks its approval stale (squash and rebase merges below
+  it all but guarantee this), and the same setting dismisses it (the
   [required-approvals security changelog](https://github.blog/changelog/2023-06-06-security-enhancements-to-required-approvals-on-pull-requests/)
   describes the mechanism). Plan for a quick re-approval per layer;
   asking for it while CI runs keeps the chain moving.
