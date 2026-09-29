@@ -13,15 +13,19 @@
 #               park (for a machine that has never had one)
 #   --status    say whether the file is parked, and by whom
 #   --recover   put back a file whose holder is no longer running
-#               (after a crash or kill -9), without the checksum check
+#               (after a crash or kill -9), without the checksum check,
+#               or clear a lock left with no owner record for over a
+#               minute
 #
 # The config directory is $CLAUDE_CONFIG_DIR when set, else ~/.claude:
 # the directory Claude Code reads the user-level CLAUDE.md from.
 #
 # While parked, the file lives inside CLAUDE.md.park-lock/ beside the
 # original, next to an owner record naming the checkout, process ID,
-# and process start time of the session that parked it. The start time
-# tells a live holder from a reused process ID.
+# and process start time of the session that parked it, and a
+# fingerprint of the parked file. The start time tells a live holder
+# from a reused process ID; the fingerprint shows whether the parked
+# copy changed before it is put back.
 set -uo pipefail
 
 CONFIG_DIR="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
