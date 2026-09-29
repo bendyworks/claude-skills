@@ -49,6 +49,13 @@ class ParkClaudeMdTest < Minitest::Test
     refute File.exist?(@lock), 'lock left behind after a clean run'
   end
 
+  def test_warns_that_sessions_started_meanwhile_lack_the_file
+    _out, err, status = park('--', 'true')
+
+    assert status.success?, err
+    assert_match(/sessions started before it is restored/, err)
+  end
+
   def test_exits_with_the_command_status
     _out, _err, status = park('--', 'sh', '-c', 'exit 7')
 

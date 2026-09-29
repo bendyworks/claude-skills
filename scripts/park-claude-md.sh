@@ -160,6 +160,7 @@ printf 'checkout=%s\npid=%s\nstarted=%s\nfingerprint=%s\n' \
 
 if exists "$LIVE"; then
   mv "$LIVE" "$PARKED" || { rm -f "$OWNER"; rmdir "$LOCK"; die "could not park $LIVE"; }
+  echo "park-claude-md: parked $LIVE; Claude Code sessions started before it is restored run without it." >&2
 elif [ "$none_ok" -eq 0 ]; then
   rm -f "$OWNER"; rmdir "$LOCK"
   die "$LIVE does not exist and no park lock explains it; another tool may have moved it. Pass --none-ok if this machine has no user-level CLAUDE.md."
