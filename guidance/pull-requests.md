@@ -214,7 +214,7 @@ there as a stack, using the
 - **Check for a stack before merging a PR, working on its branch, or
   committing to the mainline.** A PR based on another PR's branch is a
   stack layer. GitHub's `stack` field on a pull request says which
-  native stack it belongs to, whether or not anyone tracks it locally:
+  native stack it belongs to:
   `gh api graphql -f query='{ repository(owner:"<owner>", name:"<repo>")
   { pullRequest(number: <pr-number>) { stack { number } } } }'`
   answers for one PR, and before committing to the mainline, ask it of
@@ -228,8 +228,8 @@ there as a stack, using the
   them: it pushes the branches, keeps existing PRs as they are, and
   opens a draft for any branch without one. `link` sets up no local
   tracking, so `sync` and `rebase` refuse until
-  `gh stack checkout <stack-number>` imports the stack, which keeps
-  local commits: rewritten and unpushed local tips stay as they were.
+  `gh stack checkout <stack-number>` imports the stack, leaving
+  rewritten and unpushed local tips as they were.
 - **Keep draft-first.** Never pass `--open`, which marks new and
   existing PRs ready for review. A PR the tool opens has the branch
   name for a title and a credit line for a body; rewrite both (per
@@ -257,10 +257,10 @@ there as a stack, using the
   on a stack that was only linked, import it with `gh stack checkout`
   first. That push rewrites pushed branches under review, so run it on
   the developer's own stack when they have asked for the work that
-  needs it, and otherwise propose it first. Resetting a branch
-  to its remote instead (`git reset --hard <remote>/<branch>`) discards
-  any unpushed commit, so check `git log <remote>/<branch>..<branch>`
-  and take a backup ref before one.
+  needs it, and otherwise propose it first. Resetting a branch to its
+  remote instead (`git reset --hard <remote>/<branch>`) discards any
+  unpushed commit, so check `git log <remote>/<branch>..<branch>` and
+  take a backup ref before one.
 - **Read `gh stack`'s output, not only its exit code.** `sync` exits 0
   after printing "Sync aborted" (the local and remote stacks diverged,
   and nothing changed) and after a failed push ("Push failed", then
@@ -345,6 +345,5 @@ theirs to decide:
   commits in its diff again** until its branch is updated from the
   mainline: the squashed copy is a new commit its fork point predates.
 - **Arm auto-merge on the next PR only after its base has flipped, and
-  only where arming is authorized at all**, since arming is itself a
-  merge; armed earlier, it is the wrong-base merge with no human in
-  the loop.
+  only where arming is authorized** (see Who presses Merge); armed
+  earlier, it is the wrong-base merge with no human in the loop.
