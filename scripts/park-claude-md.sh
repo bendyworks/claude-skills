@@ -258,6 +258,7 @@ descendants() {
 # otherwise, hence the <&0.
 child=
 command_done=0
+own_group=0
 on_signal() {
   local pid ppid listing parent
   # A signal can land after the command starts but before child is set;
@@ -280,15 +281,41 @@ on_signal() {
     done <<EOF
 $listing
 EOF
-    if [ -z "$listing" ] || [ "$parent" = "$$" ]; then
-      for pid in "$child" $(printf '%s\n' "$listing" | descendants "$child"); do
-        kill -TERM "$pid" 2>/dev/null
-      done
+    if [ -z "$listing" ] || [ "$parent" = "$$" ] || [ "$command_done" -eq 1 ]; then
+      [ "$own_group" -eq 0 ] || kill -TERM -- "-$child" 2>/dev/null
+      if [ "$command_done" -eq 0 ]; then
+        for pid in "$child" $(printf '%s\n' "$listing" | descendants "$child"); do
+          kill -TERM "$pid" 2>/dev/null
+        done
+      fi
     fi
     wait "$child" 2>/dev/null
   fi
   finish "$1"
 }
+# Processes still in the command's group once it has exited: arms a
+# batch started without waiting for them. They would read the file
+# once it is back, so they are stopped first, and the batch is told.
+group_members() {
+  ps -A -o pid= -o pgid= 2>/dev/null | awk -v g="$child" '$2 == g { print $1 }'
+}
+
+stop_leftovers() {
+  local left tries
+  [ "$own_group" -eq 1 ] || return 0
+  left="$(group_members)"
+  [ -n "$left" ] || return 0
+  echo "park-claude-md: the command left running process(es) $(echo $left); stopping them before putting $LIVE back. Have the batch wait for its arms." >&2
+  kill -TERM -- "-$child" 2>/dev/null
+  tries=0
+  while [ -n "$(group_members)" ] && [ "$tries" -lt 50 ]; do
+    sleep 0.1
+    tries=$((tries + 1))
+  done
+  kill -KILL -- "-$child" 2>/dev/null
+  return 0
+}
+
 trap 'on_signal 129' HUP
 trap 'on_signal 130' INT
 trap 'on_signal 143' TERM
@@ -311,10 +338,21 @@ elif [ "$none_ok" -eq 0 ]; then
   die "$LIVE does not exist and no park lock explains it; another tool may have moved it. Pass --none-ok if this machine has no user-level CLAUDE.md."
 fi
 
-CLAUDE_MD_PARK_HOLDER=$$ "$@" <&0 &
+# The command gets a process group of its own when perl is there to
+# set one up, so arms it starts and leaves running can still be found
+# after it exits, when they no longer descend from anything here. A
+# command in a group of its own is stopped by the terminal if it reads
+# from it; a headless batch does not.
+if command -v perl >/dev/null; then
+  own_group=1
+  CLAUDE_MD_PARK_HOLDER=$$ perl -e 'setpgrp(0, 0); exec { $ARGV[0] } @ARGV or do { print STDERR "park-claude-md: cannot run $ARGV[0]: $!\n"; exit 127 }' -- "$@" <&0 &
+else
+  CLAUDE_MD_PARK_HOLDER=$$ "$@" <&0 &
+fi
 child=$!
 wait "$child"
 status=$?
 command_done=1
+stop_leftovers
 child=
 finish "$status"

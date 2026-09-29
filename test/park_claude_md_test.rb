@@ -640,6 +640,33 @@ class ParkClaudeMdTest < Minitest::Test
     end
   end
 
+  def test_stops_and_reports_arms_the_command_left_running
+    arm_file = File.join(@tmp, 'arm')
+    _out, err, status = park('--', 'sh', '-c', "sleep 30 & echo $! > '#{arm_file}'")
+    arm = Integer(File.read(arm_file))
+
+    assert status.success?, err
+    assert_match(/left running/, err)
+    wait_for(seconds: 3) { !running?(arm) }
+    assert_equal ORIGINAL, File.read(@live)
+    refute File.exist?(@lock)
+  ensure
+    begin
+      Process.kill('KILL', arm) if arm
+    rescue Errno::ESRCH
+      nil
+    end
+  end
+
+  def test_a_command_that_does_not_exist_exits_127_and_restores
+    _out, err, status = park('--', 'no-such-command-for-park-test')
+
+    assert_equal 127, status.exitstatus
+    assert_match(/cannot run no-such-command-for-park-test/, err)
+    assert_equal ORIGINAL, File.read(@live)
+    refute File.exist?(@lock)
+  end
+
   def test_refuses_without_the_separator_and_parks_nothing
     _out, err, status = park('true')
 
