@@ -317,14 +317,15 @@ An answer can also be **point-in-time state** rather than either: active work, a
 
 1. **A rule or standing fact** -- the home whose readers need it:
    - a guidance file the team already shares, if any, for a team-neutral rule that holds across projects;
-   - the project's checked-in CLAUDE.md or a rules file under `.claude/rules/`, for a fact about this repository (client-visible, so domain invariants yes, opinions about people or billing never);
+   - the project's checked-in CLAUDE.md or a rules file under `.claude/rules/` that git tracks, for a fact about this repository (client-visible, so domain invariants yes, opinions about people or billing never);
    - the user's global CLAUDE.md, for a personal rule, even when a team guidance file exists: a preference of the user's own, or a rule about this project that must not be client-visible.
 2. **A procedure** -- a skill: `~/.claude/skills/<name>/SKILL.md` (global) or `<project>/.claude/skills/<name>/SKILL.md` (project-scoped), following the same shape as the surrounding skills.
 3. **Point-in-time state** that no rule can carry -- a memory file in the project memory directory, using the standard auto-memory frontmatter, with a one-line pointer in `MEMORY.md`'s topic-file section, under the file's existing heading. Only when the project keeps auto-memory; without one, tell the user the item has no home here rather than inventing one.
 
 - **Find the topic's existing home first.** Before writing, look for the topic among the homes above and edit it where it already lives; never add a second copy.
 - **A rule or a skill waits for the user's approval.** Show the exact text and the target file (for a skill, its name and scope as well), and write only after the user approves. A guidance file kept in a shared repository gets a drafted change for that repository's own review flow, never a direct commit. A memory for state needs no approval.
-- **A write inside this project's repository is left uncommitted and named.** The project's CLAUDE.md, a rules file, and a project-scoped skill are checked-in files, and this pass runs on the branch Step 3 checked out (usually `main`). Committing stays with the user, through the project's normal flow; never commit or push it as part of this pass. Name each such file in the Step 10 summary as uncommitted, so it does not ride into the next story's first commit unnoticed.
+- **Check that a repository home reaches its readers.** A rules file or a project-scoped skill reaches teammates only when git tracks it, and many projects ignore `.claude/`. Check the path with `git check-ignore` before choosing it; for an ignored path, prefer the project's CLAUDE.md, or tell the user the file will stay on this machine.
+- **A write inside this project's repository is left uncommitted and named.** The project's CLAUDE.md and any tracked rules file or project-scoped skill are checked-in files, and this pass runs on the branch Step 3 checked out (usually `main`). Committing stays with the user, through the project's normal flow; never commit or push it as part of this pass. Name each such file in the Step 10 summary as uncommitted, so it does not ride into the next story's first commit unnoticed.
 
 **If no -- skip.** Do NOT fabricate to fill the slot. Empty is the right answer most of the time, and bloating the rules, the skills list, or memory with low-signal entries makes the high-signal ones harder to find later.
 
