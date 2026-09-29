@@ -250,8 +250,11 @@ build every chain there as a stack, using the
 - **After a layer merges, bring local branches current before any
   other work, since the server-side rebase rewrote every branch above
   it.** `gh stack sync` rebases each local branch onto its new parent,
-  keeping unpushed commits, and pushes them; on a stack that was only
-  linked, import it with `gh stack checkout` first. Resetting a branch
+  keeping unpushed commits, and force-pushes every layer with lease;
+  on a stack that was only linked, import it with `gh stack checkout`
+  first. That push rewrites pushed branches under review, so run it on
+  the developer's own stack when they have asked for the work that
+  needs it, and otherwise propose it first. Resetting a branch
   to its remote instead (`git reset --hard <remote>/<branch>`) discards
   any unpushed commit, so check `git log <remote>/<branch>..<branch>`
   and take a backup ref before one.
@@ -266,16 +269,19 @@ build every chain there as a stack, using the
   lower branch into a higher one.** The stack's linear rebase drops a
   merge commit inside a branch, and its conflict resolution has to be
   redone by hand where the conflict first appears.
-- **While a stack is open, keep unrelated commits off the mainline and
-  off every layer.** On a layer, the change rides into a PR under
-  review that is not about it. On the mainline, it puts every branch
-  in the chain behind at once, and bringing them current rewrites all
-  of them: new commit ids, a CI run per branch, a stale review on
-  anything already read. Put the change on its own branch from the
-  mainline, or hold it until the stack lands. If it cannot wait, say
-  that it forces the cascade and run `gh stack sync` right after
-  (after `gh stack checkout` on a stack that was only linked), rather
-  than rebasing one PR, which leaves the layers above it behind.
+- **While the developer's own stack is open, keep unrelated commits
+  off its mainline and off every layer.** On a layer, the change rides
+  into a PR under review that is not about it. Committed straight to
+  the mainline, it puts every branch in the chain behind at once, and
+  bringing them current rewrites all of them: new commit ids, a CI run
+  per branch, a stale review on anything already read. Put the change
+  on its own branch from the mainline, as its own PR, or hold it until
+  the stack lands. If it cannot wait, say that it forces that cascade
+  and propose running `gh stack sync` right after (after
+  `gh stack checkout` on a stack that was only linked), rather than
+  rebasing one PR, which leaves the layers above it behind. Other
+  people's PRs landing on the mainline are the ordinary course of a
+  team repository, not a breach of this rule.
 
 GitHub's own agent skill for gh-stack
 ([`SKILL.md`](https://github.com/github/gh-stack/blob/main/skills/gh-stack/SKILL.md))
