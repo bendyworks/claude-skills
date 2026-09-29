@@ -475,6 +475,22 @@ class ParkClaudeMdTest < Minitest::Test
     refute_match(/another session/, err)
   end
 
+  def test_refuses_to_park_when_it_cannot_read_its_own_start_time
+    shims = File.join(@tmp, 'shims')
+    Dir.mkdir(shims)
+    File.write(File.join(shims, 'ps'), "#!/bin/sh\ncase \"$*\" in *lstart*) exit 1 ;; esac\nexec /bin/ps \"$@\"\n")
+    File.chmod(0o755, File.join(shims, 'ps'))
+    probe = File.join(@tmp, 'probe')
+    _out, err, status = Open3.capture3(env.merge('PATH' => "#{shims}:#{ENV.fetch('PATH')}"),
+                                       'bash', SCRIPT, '--', 'touch', probe)
+
+    assert_equal 2, status.exitstatus
+    assert_match(/start time/, err)
+    refute File.exist?(probe)
+    assert_equal ORIGINAL, File.read(@live)
+    refute File.exist?(@lock)
+  end
+
   def test_refuses_without_the_separator_and_parks_nothing
     _out, err, status = park('true')
 

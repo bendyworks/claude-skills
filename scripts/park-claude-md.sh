@@ -251,8 +251,12 @@ trap 'on_signal 143' TERM
 trap restore EXIT
 
 mkdir "$LOCK" 2>/dev/null && held=1 || refuse_existing_lock
+# Without a start time no other session could tell this run is alive,
+# and a --recover would put the file back under it.
+started="$(start_time $$)"
+[ -n "$started" ] || die "could not read this process's start time from ps, which the lock needs; nothing was parked."
 printf 'checkout=%s\npid=%s\nstarted=%s\nfingerprint=%s\n' \
-  "$(checkout_root)" "$$" "$(start_time $$)" "$(fingerprint "$LIVE")" > "$OWNER.tmp" &&
+  "$(checkout_root)" "$$" "$started" "$(fingerprint "$LIVE")" > "$OWNER.tmp" &&
   mv "$OWNER.tmp" "$OWNER" || die "could not write $OWNER"
 recorded=1
 
