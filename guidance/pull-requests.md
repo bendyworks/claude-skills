@@ -312,9 +312,20 @@ server-side cascade, and the invariant is held by hand:
   that did not flip with `gh pr edit <number> --base <target>`. A
   closed dependent PR cannot be reopened while its base branch is
   gone: restore the branch, reopen, retarget, and delete it again, or
-  open a fresh PR from the same head branch.
-- **A retarget alone triggers no new CI run**, and a stale branch runs
-  outdated workflow files. Update each branch from the default branch
-  before merging it, which refreshes both.
+  open a fresh PR from the same head branch. The "Automatically delete
+  head branches" repo setting moves the deletion to merge time; the
+  confirm step still applies.
+- **A retarget alone triggers no new CI run.** A base change is not
+  among the `pull_request` activity types workflows listen to by
+  default, and required checks are named in the target branch's
+  protection rules, so a retargeted PR whose runs never reported a
+  newly required or renamed check waits on it forever, marked
+  "Expected". A stale branch also runs outdated workflow files. Update
+  each branch from the default branch before merging it, which fixes
+  both.
+- **On a squash-merge repo, a retargeted PR shows the merged layer's
+  commits in its diff again** until its branch is updated from the
+  default branch: the squashed copy is a new commit its fork point
+  predates.
 - **Arm auto-merge on the next PR only after its base has flipped**;
   armed earlier, it is the wrong-base merge with no human in the loop.
