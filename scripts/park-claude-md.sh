@@ -86,7 +86,7 @@ exists() { [ -e "$1" ] || [ -L "$1" ]; }
 put_back() {
   if exists "$PARKED"; then
     if exists "$LIVE"; then
-      echo "park-claude-md: a new $LIVE appeared while parked; kept it, and kept the parked copy at $PARKED. Compare the two, then run $0 --recover." >&2
+      echo "park-claude-md: a new $LIVE appeared while parked; kept it, and kept the parked copy at $PARKED. Copy anything you need from the parked copy into $LIVE, delete $PARKED, then run $0 --recover to clear the lock." >&2
       return 1
     fi
     if [ "${1:-}" != unchecked ] && [ "$(fingerprint "$PARKED")" != "$(owner_field fingerprint)" ]; then

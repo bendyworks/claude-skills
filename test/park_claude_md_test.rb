@@ -240,7 +240,18 @@ class ParkClaudeMdTest < Minitest::Test
     assert_equal 2, status.exitstatus
     assert_equal "saved by another session\n", File.read(@live)
     assert_equal ORIGINAL, File.read(File.join(@lock, 'CLAUDE.md'))
-    assert_match(/--recover/, err)
+    assert_match(/appeared while parked/, err)
+  end
+
+  def test_the_conflict_advice_leads_to_a_clean_recovery
+    _out, err, = park('--', 'sh', '-c', "echo 'saved by another session' > '#{@live}'")
+    parked = File.join(@lock, 'CLAUDE.md')
+    File.delete(parked) if err.include?("delete #{parked}")
+    _out, recover_err, status = park('--recover')
+
+    assert status.success?, recover_err
+    assert_equal "saved by another session\n", File.read(@live)
+    refute File.exist?(@lock)
   end
 
   def test_keeps_the_parked_copy_when_it_changed_while_parked
@@ -351,7 +362,7 @@ class ParkClaudeMdTest < Minitest::Test
     assert_equal 2, status.exitstatus
     assert_equal "newer\n", File.read(@live)
     assert_equal ORIGINAL, File.read(File.join(@lock, 'CLAUDE.md'))
-    assert_match(/Compare/, err)
+    assert_match(/appeared while parked/, err)
   end
 
   def test_recover_restores_a_parked_copy_that_changed
