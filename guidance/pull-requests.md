@@ -88,7 +88,7 @@ Deliveries](...)", never "[ABC-123](...)" alone. A reviewer does not
 remember what a bare number was. Never invent a title the lookup did
 not return; name the item in lowercase prose instead. The Plain
 language section of the code-comments guidance carries the full rule,
-including the forms that stay bare, such as the closing keyword above.
+including the forms tooling parses, such as the closing keyword above.
 
 ## A PR owns the bugs it introduces
 

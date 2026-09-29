@@ -38,4 +38,4 @@ link text when linked ("[#45 Retry Webhook Deliveries](...)", never
 memory of what the number was. Never invent a title the lookup did
 not return; name the item in lowercase prose instead. The Plain
 language section of the code-comments guidance carries the full rule,
-including the forms that stay bare.
+including the forms tooling parses.
