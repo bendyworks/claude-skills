@@ -109,6 +109,8 @@ class ParkClaudeMdTest < Minitest::Test
       _out, err, status = park('--', 'touch', probe)
 
       assert_refused_leaving_lock_alone(status, probe)
+      assert_match(/parked by a running session/, err)
+      refute_match(/--recover/, err)
       assert_match(%r{/elsewhere/checkout2}, err)
       assert_match(/\b#{pid}\b/, err)
     end
@@ -293,7 +295,8 @@ class ParkClaudeMdTest < Minitest::Test
       out, _err, status = park('--status')
 
       assert status.success?
-      assert_match(/running/, out)
+      assert_match(/parked by a running session/, out)
+      refute_match(/no longer running/, out)
       assert_match(%r{/elsewhere/checkout2}, out)
       assert_match(/\b#{pid}\b/, out)
     end
