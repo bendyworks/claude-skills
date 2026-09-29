@@ -25,10 +25,13 @@ This means:
   current behavior takes no side of a change: "now" and "previously"
   belong in the commit message or PR description.
 - No "TODO: clean up after launch" comments without a tracker issue
-  reference; if it needs cleaning, file the issue and reference it by
-  ID and title (`TODO(ABC-123 Expire Stale Sessions): ...`), otherwise
-  the TODO rots forever. The title is the one the issue had when the
-  comment was written; a later rename does not call for editing it.
+  reference; if it needs cleaning, file the issue and reference it,
+  otherwise the TODO rots forever. The ID goes in the tag and the
+  title starts the text,
+  `TODO(ABC-123): Expire Stale Sessions -- ...`, so tools that read
+  `TODO(<id>)` still match it. The title is the one the issue had
+  when the comment was written; a later rename does not call for
+  editing it.
 
 A comment that explains why the code is shaped a certain way (a
 third-party quirk, a non-obvious data invariant, a stakeholder
