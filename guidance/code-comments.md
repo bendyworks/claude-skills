@@ -75,9 +75,9 @@ the future reader, not for insiders of the current moment.
     follow the number, as in `Closes #45 (Retry Webhook Deliveries)`,
     but never `Closes [#45 ...](...)`), commit trailers
     (`Refs: ABC-123`), branch names, command arguments, and the
-    `filed as #45` and `(deferred to #45)` notes a plan file keeps for
-    later tooling to match on. The same follow-up mentioned in a
-    comment or message to people still gets its title.
+    `filed as #45` and `(deferred to #45)` notes a skill or script
+    matches on. The same follow-up mentioned in a comment or message
+    to people still gets its title.
   - Commit messages are outside this rule: the `Refs:` trailer names
     the issue a commit serves, and cross-references to other issues
     belong in the PR description (see the commit-messages guidance).
