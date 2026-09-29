@@ -296,8 +296,8 @@ presses Merge like any other merge.
 ### Without native stacks
 
 A chain across forks, on another forge, or where `gh stack` exits 9
-("Stacked PRs unavailable") gets no server-side cascade, and the
-invariant is held by hand:
+("Stacked PRs are not enabled for this repository") gets no
+server-side cascade, and the invariant is held by hand:
 
 - **Deleting the merged PR's head branch triggers the retarget; the
   merge alone does not**
