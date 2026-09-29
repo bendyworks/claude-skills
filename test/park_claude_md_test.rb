@@ -397,8 +397,19 @@ class ParkClaudeMdTest < Minitest::Test
     refute File.exist?(@lock)
   end
 
+  def test_recover_leaves_a_new_ownerless_lock_to_the_session_parking
+    Dir.mkdir(@lock)
+    _out, err, status = park('--recover')
+
+    assert_equal 2, status.exitstatus
+    assert_match(/try again/i, err)
+    assert Dir.exist?(@lock)
+  end
+
   def test_recover_clears_an_empty_lock_left_by_a_crash
     Dir.mkdir(@lock)
+    two_minutes_ago = Time.now - 120
+    File.utime(two_minutes_ago, two_minutes_ago, @lock)
     _out, err, status = park('--recover')
 
     assert status.success?, err

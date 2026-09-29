@@ -125,6 +125,12 @@ recover() {
   if [ -f "$OWNER" ] && holder_alive; then
     die "CLAUDE.md is parked by a running session: $(describe_holder). Let it finish; its exit restores the file."
   fi
+  # A lock with no owner record is also what a session looks like for
+  # the instant between creating the lock and recording itself, so only
+  # one that has sat that way for over a minute counts as stranded.
+  if [ ! -f "$OWNER" ] && [ -z "$(find "$LOCK" -maxdepth 0 -mmin +1)" ]; then
+    die "$LOCK has no owner record yet; another session may be parking right now. Try again in a minute."
+  fi
   put_back unchecked || exit 2
   echo "Restored $LIVE and cleared the park lock."
   exit 0
