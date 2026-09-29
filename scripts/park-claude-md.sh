@@ -156,24 +156,22 @@ if [ -n "${CLAUDE_MD_PARK_HOLDER:-}" ] && [ -f "$OWNER" ] &&
   exec "$@"
 fi
 
-mkdir "$LOCK" 2>/dev/null || refuse_existing_lock
-printf 'checkout=%s\npid=%s\nstarted=%s\nfingerprint=%s\n' \
-  "$(checkout_root)" "$$" "$(start_time $$)" "$(fingerprint "$LIVE")" > "$OWNER.tmp" &&
-  mv "$OWNER.tmp" "$OWNER" || { rm -rf "$LOCK"; die "could not write $OWNER"; }
-
-if exists "$LIVE"; then
-  mv "$LIVE" "$PARKED" || { rm -f "$OWNER"; rmdir "$LOCK"; die "could not park $LIVE"; }
-  echo "park-claude-md: parked $LIVE; Claude Code sessions started before it is restored run without it." >&2
-elif [ "$none_ok" -eq 0 ]; then
-  rm -f "$OWNER"; rmdir "$LOCK"
-  die "$LIVE does not exist and no park lock explains it; another tool may have moved it. Pass --none-ok if this machine has no user-level CLAUDE.md."
-fi
-
+# The traps go in before the lock is taken, so no signal can land
+# between parking the file and being ready to put it back. restore acts
+# only once this process holds the lock, and every failure after that
+# point exits through it, so it releases exactly what this run created.
+held=0
 restored=0
 restore_failed=0
 restore() {
   [ "$restored" -eq 0 ] || return 0
   restored=1
+  [ "$held" -eq 1 ] || return 0
+  if [ ! -f "$OWNER" ]; then
+    rm -f "$OWNER.tmp"
+    rmdir "$LOCK" 2>/dev/null
+    return
+  fi
   # A --recover run while this one was mistaken for stranded, followed
   # by another session's park, leaves that session's file in the lock.
   if [ "$(owner_field pid)" != "$$" ]; then
@@ -229,6 +227,19 @@ trap 'on_signal 129' HUP
 trap 'on_signal 130' INT
 trap 'on_signal 143' TERM
 trap restore EXIT
+
+mkdir "$LOCK" 2>/dev/null || refuse_existing_lock
+held=1
+printf 'checkout=%s\npid=%s\nstarted=%s\nfingerprint=%s\n' \
+  "$(checkout_root)" "$$" "$(start_time $$)" "$(fingerprint "$LIVE")" > "$OWNER.tmp" &&
+  mv "$OWNER.tmp" "$OWNER" || die "could not write $OWNER"
+
+if exists "$LIVE"; then
+  mv "$LIVE" "$PARKED" || die "could not park $LIVE"
+  echo "park-claude-md: parked $LIVE; Claude Code sessions started before it is restored run without it." >&2
+elif [ "$none_ok" -eq 0 ]; then
+  die "$LIVE does not exist and no park lock explains it; another tool may have moved it. Pass --none-ok if this machine has no user-level CLAUDE.md."
+fi
 
 CLAUDE_MD_PARK_HOLDER=$$ "$@" <&0 &
 child=$!
