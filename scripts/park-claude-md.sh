@@ -117,7 +117,11 @@ put_back() {
       return 1
     fi
   fi
-  rm -f "$OWNER" "$OWNER.tmp" && rmdir "$LOCK"
+  rm -f "$OWNER" "$OWNER.tmp"
+  rmdir "$LOCK" 2>/dev/null || {
+    echo "park-claude-md: could not remove $LOCK; something else is in it. Check its contents, remove them, then run $0 --recover." >&2
+    return 1
+  }
 }
 
 show_status() {

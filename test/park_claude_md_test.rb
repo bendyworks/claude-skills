@@ -580,6 +580,14 @@ class ParkClaudeMdTest < Minitest::Test
     end
   end
 
+  def test_explains_a_lock_it_cannot_remove
+    _out, err, status = park('--', 'touch', File.join(@lock, 'stray'))
+
+    assert_equal 2, status.exitstatus
+    assert_match(/could not remove/, err)
+    assert_equal ORIGINAL, File.read(@live)
+  end
+
   def test_refuses_without_the_separator_and_parks_nothing
     _out, err, status = park('true')
 
