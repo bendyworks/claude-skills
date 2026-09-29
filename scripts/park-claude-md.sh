@@ -26,6 +26,8 @@
 # fingerprint of the parked file. The start time tells a live holder
 # from a reused process ID; the fingerprint shows whether the parked
 # copy changed before it is put back.
+# No -e: every failure here is checked by hand, and wait must hand back
+# the command's status for the script to exit with.
 set -uo pipefail
 
 CONFIG_DIR="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
@@ -79,7 +81,7 @@ refuse_existing_lock() {
 }
 
 sha256() {
-  if command -v sha256sum >/dev/null; then sha256sum "$1"; else shasum -a 256 "$1"; fi | cut -d' ' -f1
+  if command -v sha256sum >/dev/null; then sha256sum < "$1"; else shasum -a 256 < "$1"; fi | cut -d' ' -f1
 }
 
 # A symlinked CLAUDE.md is compared by where it points, not by content,
@@ -147,7 +149,7 @@ recover() {
   if [ -f "$OWNER" ] && ! can_judge_holders; then
     die "CLAUDE.md is parked by $(describe_holder); $UNKNOWN"
   fi
-  if [ -f "$OWNER" ] && holder_alive; then
+  if holder_alive; then
     die "CLAUDE.md is parked by a running session: $(describe_holder). Let it finish; its exit restores the file."
   fi
   # A lock with no owner record is also what a session looks like for
@@ -182,7 +184,7 @@ done
 # A batch that fans out parallel arms, each wrapped in this script,
 # shares the batch's park: the holder exports its process ID, and a
 # nested call that finds that same live holder runs its command as is.
-if [ -n "${CLAUDE_MD_PARK_HOLDER:-}" ] && [ -f "$OWNER" ] &&
+if [ -n "${CLAUDE_MD_PARK_HOLDER:-}" ] &&
   [ "$(owner_field pid)" = "$CLAUDE_MD_PARK_HOLDER" ] && holder_alive; then
   exec "$@"
 fi
