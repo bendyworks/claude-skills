@@ -261,14 +261,16 @@ build every chain there as a stack, using the
 - **Read `gh stack`'s output, not only its exit code.** `sync` exits 0
   after printing "Sync aborted" (the local and remote stacks diverged,
   and nothing changed) and after a failed push ("Push failed", then
-  "Stack synced"). After a hand-resolved `gh stack rebase`, push with
-  `gh stack push` (per-branch `--force-with-lease`), once
-  `git diff --quiet <backup> <branch>` has shown each rewritten
-  branch's tree matches a backup ref.
+  "Stack synced"). After a hand-resolved `gh stack rebase`, `sync`'s
+  push is the one that fails; push with `gh stack push` (per-branch
+  `--force-with-lease`) instead.
 - **Carry fixes up the chain with `gh stack rebase`, never by merging a
   lower branch into a higher one.** The stack's linear rebase drops a
   merge commit inside a branch, and its conflict resolution has to be
-  redone by hand where the conflict first appears.
+  redone by hand where the conflict first appears. `rebase` is local:
+  take a backup ref of each branch first, confirm with
+  `git range-diff <backup>...<branch>` that only the intended changes
+  moved, then push with `gh stack push`.
 - **While the developer's own stack is open, keep unrelated commits
   off its mainline and off every layer.** On a layer, the change rides
   into a PR under review that is not about it. Committed straight to
