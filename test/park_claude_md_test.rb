@@ -190,7 +190,9 @@ class ParkClaudeMdTest < Minitest::Test
   def interrupt_parked_run(signal, target)
     ready = File.join(@tmp, 'ready')
     arm = File.join(@tmp, 'arm')
-    command = "sleep 30 & echo $! > '#{arm}'; touch '#{ready}'; wait"
+    # The trailing sleep keeps the command running after its arm dies,
+    # so the script's exit shows the command itself was stopped.
+    command = "sleep 30 & echo $! > '#{arm}'; touch '#{ready}'; wait; sleep 30"
     pid = Process.spawn(env, 'bash', SCRIPT, '--', 'sh', '-c', command, pgroup: true, err: File::NULL)
     wait_for { File.exist?(ready) }
     refute File.exist?(@live), 'command started before the file was parked'
@@ -206,8 +208,11 @@ class ParkClaudeMdTest < Minitest::Test
   # Cleanup for a failed signal test only: after a clean exit the arm
   # must have stopped on its own, and killing the group would hide it.
   def kill_group(pid)
-    Process.kill('KILL', -pid) if pid
-  rescue Errno::ESRCH
+    return unless pid
+
+    Process.kill('KILL', -pid)
+    Process.wait(pid)
+  rescue Errno::ESRCH, Errno::ECHILD
     nil
   end
 
@@ -272,7 +277,10 @@ class ParkClaudeMdTest < Minitest::Test
   def test_the_conflict_advice_leads_to_a_clean_recovery
     _out, err, = park('--', 'sh', '-c', "echo 'saved by another session' > '#{@live}'")
     parked = File.join(@lock, 'CLAUDE.md')
-    File.delete(parked) if err.include?("delete #{parked}")
+
+    assert_includes err, "delete #{parked}"
+    assert_includes err, '--recover'
+    File.delete(parked)
     _out, recover_err, status = park('--recover')
 
     assert status.success?, recover_err
@@ -315,6 +323,8 @@ class ParkClaudeMdTest < Minitest::Test
     assert_match(/not parked/, out)
   end
 
+  # Where de_DE.UTF-8 is not installed (most CI images), only the time
+  # zone half is exercised; the locale half runs where it is.
   def test_a_holder_reads_as_running_from_another_time_zone_and_locale
     live_holder do |pid|
       hold_lock(pid: pid)
@@ -327,6 +337,12 @@ class ParkClaudeMdTest < Minitest::Test
   end
 
   def test_a_holder_this_user_cannot_signal_still_reads_as_running
+    begin
+      Process.kill(0, 1)
+      skip 'process 1 can be signalled here, so it cannot stand in for an unsignalable holder'
+    rescue Errno::EPERM
+      nil
+    end
     hold_lock(pid: 1)
     out, _err, status = park('--status')
 
@@ -463,11 +479,11 @@ class ParkClaudeMdTest < Minitest::Test
 
   def test_leaves_alone_a_lock_another_session_is_creating_after_a_clear
     clear = "mv '#{@lock}/CLAUDE.md' '#{@live}' && rm '#{@lock}/owner' && rmdir '#{@lock}'"
-    other = "mkdir '#{@lock}' && touch '#{@lock}/owner.tmp'"
+    other = "mkdir '#{@lock}'"
     _out, _err, status = park('--', 'sh', '-c', "#{clear} && #{other}")
 
     assert_equal 2, status.exitstatus
-    assert File.exist?(File.join(@lock, 'owner.tmp')), "removed another session's half-made lock"
+    assert Dir.exist?(@lock), "removed another session's newly created lock"
   end
 
   def test_says_plainly_when_the_lock_cannot_be_created
@@ -490,6 +506,22 @@ class ParkClaudeMdTest < Minitest::Test
 
     assert_equal 2, status.exitstatus
     assert_match(/start time/, err)
+    refute File.exist?(probe)
+    assert_equal ORIGINAL, File.read(@live)
+    refute File.exist?(@lock)
+  end
+
+  def test_cleans_up_its_lock_when_it_cannot_write_the_owner_record
+    shims = File.join(@tmp, 'shims')
+    Dir.mkdir(shims)
+    File.write(File.join(shims, 'mv'), "#!/bin/sh\ncase \"$2\" in */owner) exit 1 ;; esac\nexec /bin/mv \"$@\"\n")
+    File.chmod(0o755, File.join(shims, 'mv'))
+    probe = File.join(@tmp, 'probe')
+    _out, err, status = Open3.capture3(env.merge('PATH' => "#{shims}:#{ENV.fetch('PATH')}"),
+                                       'bash', SCRIPT, '--', 'touch', probe)
+
+    assert_equal 2, status.exitstatus
+    assert_match(/could not write/, err)
     refute File.exist?(probe)
     assert_equal ORIGINAL, File.read(@live)
     refute File.exist?(@lock)
