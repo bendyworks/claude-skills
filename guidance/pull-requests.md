@@ -196,10 +196,9 @@ A stacked chain (each PR based on the previous PR's branch) lands in
 order on its mainline: the branch the bottom layer targets, usually
 the repo's default branch but sometimes a develop or release branch.
 One invariant protects every step: **a PR's work lands only on the
-mainline, never on another layer's branch.** A native stack merge
-holds it by landing every layer up to its target on the mainline (in
-one merge, or in the queue's groups under a merge queue); on the
-manual path, a PR's base must be the mainline before it merges.
+mainline, never on another layer's branch.** Native stacks hold it
+themselves (below); on the manual path, a PR's base must be the
+mainline before it merges.
 
 ### Native stacks (the default on GitHub)
 
@@ -207,8 +206,9 @@ GitHub's
 [stacked pull requests](https://docs.github.com/en/pull-requests/get-started/about-stacked-prs)
 maintain the invariant themselves: merging a layer retargets the layer
 above it to the mainline and rebases every branch above the merge on
-the server. They are available on every github.com repository, so
-build every chain there as a stack, using the
+the server. GitHub offers them on github.com repositories (exit 9
+below covers one where they are not enabled), so build every chain
+there as a stack, using the
 [`github/gh-stack`](https://github.com/github/gh-stack) CLI extension:
 
 - **Check for a stack before merging a PR, working on its branch, or
