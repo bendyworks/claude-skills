@@ -222,9 +222,10 @@ finish() {
   exit "$1"
 }
 
-# Prints the process IDs of every process descended from $1.
+# Reads a "pid ppid" process listing on stdin and prints the process
+# IDs of every process descended from $1.
 descendants() {
-  ps -A -o pid= -o ppid= | awk -v root="$1" '
+  awk -v root="$1" '
     { kids[$2] = kids[$2] " " $1 }
     END {
       queue = root
@@ -252,7 +253,7 @@ descendants() {
 child=
 command_done=0
 on_signal() {
-  local pid
+  local pid ppid listing parent
   # A signal can land after the command starts but before child is set;
   # $! already names the command then, since nothing else here runs in
   # the background. bash 3.2 treats an unset $! as unbound under set -u
@@ -260,10 +261,24 @@ on_signal() {
   if [ -z "$child" ] && [ "$command_done" -eq 0 ]; then
     child="$(set +u; printf %s "$!")"
   fi
-  # Once the command is reaped its process ID can be reused, so signal
-  # it only while it is still this script's child.
-  if [ -n "$child" ] && [ "$(ps -o ppid= -p "$child" 2>/dev/null | tr -d ' ')" = "$$" ]; then
-    for pid in "$child" $(descendants "$child"); do kill -TERM "$pid" 2>/dev/null; done
+  if [ -n "$child" ]; then
+    # Once the command is reaped its process ID can be reused, so skip
+    # it only when a process listing shows the ID gone or under another
+    # parent. An empty listing (ps failed, or a second Ctrl-C cut it
+    # short) proves nothing, and the command is signalled anyway. The
+    # parent is read in this shell, where a signal cannot empty it.
+    listing="$(ps -A -o pid= -o ppid= 2>/dev/null)"
+    parent=
+    while read -r pid ppid; do
+      [ "$pid" = "$child" ] && parent="$ppid"
+    done <<EOF
+$listing
+EOF
+    if [ -z "$listing" ] || [ "$parent" = "$$" ]; then
+      for pid in "$child" $(printf '%s\n' "$listing" | descendants "$child"); do
+        kill -TERM "$pid" 2>/dev/null
+      done
+    fi
     wait "$child" 2>/dev/null
   fi
   finish "$1"

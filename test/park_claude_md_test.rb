@@ -187,19 +187,19 @@ class ParkClaudeMdTest < Minitest::Test
   # starts an arm of its own (the way a batch starts its claude -p runs)
   # and marks itself ready, sends the signal once the file is parked,
   # and returns the script's exit status and the arm's process ID.
-  def interrupt_parked_run(signal, target)
+  def interrupt_parked_run(signal, target, run_env = env)
     ready = File.join(@tmp, 'ready')
     arm = File.join(@tmp, 'arm')
     # The trailing sleep keeps the command running after its arm dies,
     # so the script's exit shows the command itself was stopped.
-    command = "sleep 30 & echo $! > '#{arm}'; touch '#{ready}'; wait; sleep 30"
-    pid = Process.spawn(env, 'bash', SCRIPT, '--', 'sh', '-c', command, pgroup: true, err: File::NULL)
+    command = "echo $$ > '#{arm}.command'; sleep 30 & echo $! > '#{arm}'; touch '#{ready}'; wait; sleep 30"
+    pid = Process.spawn(run_env, 'bash', SCRIPT, '--', 'sh', '-c', command, pgroup: true, err: File::NULL)
     wait_for { File.exist?(ready) }
     refute File.exist?(@live), 'command started before the file was parked'
     Process.kill(signal, target == :group ? -pid : pid)
     status = nil
     wait_for { (status = Process.wait2(pid, Process::WNOHANG)&.last) }
-    [status, Integer(File.read(arm))]
+    [status, Integer(File.read(arm)), Integer(File.read("#{arm}.command"))]
   rescue StandardError, Minitest::Assertion
     kill_group(pid)
     raise
@@ -558,6 +558,25 @@ class ParkClaudeMdTest < Minitest::Test
       assert_equal 2, status.exitstatus
       assert_match(/cannot tell/, err)
       refute_match(/--recover/, err)
+    end
+  end
+
+  def test_term_still_stops_the_command_when_ps_cannot_report_parents
+    shims = File.join(@tmp, 'list-shims')
+    Dir.mkdir(shims)
+    File.write(File.join(shims, 'ps'), "#!/bin/sh\ncase \"$*\" in *ppid*) exit 1 ;; esac\nexec /bin/ps \"$@\"\n")
+    File.chmod(0o755, File.join(shims, 'ps'))
+    status, arm, command = interrupt_parked_run('TERM', :script, env.merge('PATH' => "#{shims}:#{ENV.fetch('PATH')}"))
+
+    assert_equal 143, status.exitstatus
+    wait_for(seconds: 3) { !running?(command) }
+    assert_equal ORIGINAL, File.read(@live)
+    refute File.exist?(@lock)
+  ensure
+    [arm, command].compact.each do |leftover|
+      Process.kill('KILL', leftover)
+    rescue Errno::ESRCH
+      nil
     end
   end
 
