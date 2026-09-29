@@ -11,6 +11,7 @@
 # Run: ruby test/park_claude_md_test.rb
 
 require_relative 'cli_test_case'
+require 'digest'
 require 'open3'
 require 'tmpdir'
 
@@ -411,6 +412,21 @@ class ParkClaudeMdTest < Minitest::Test
     assert status.success?
     assert_match(/nothing to recover/, out)
     assert_equal ORIGINAL, File.read(@live)
+  end
+
+  def test_leaves_alone_a_lock_another_session_took_over
+    live_holder do |pid|
+      owner = File.join(@lock, 'owner')
+      fingerprint = "sha256:#{Digest::SHA256.hexdigest(ORIGINAL)}"
+      takeover = "checkout=/elsewhere/checkout2\npid=#{pid}\nstarted=#{start_time(pid)}\nfingerprint=#{fingerprint}\n"
+      _out, err, status = park('--', 'ruby', '-e', "File.write(#{owner.inspect}, #{takeover.inspect})")
+
+      assert_equal 2, status.exitstatus
+      assert_match(/taken over/, err)
+      assert_equal takeover, File.read(owner)
+      assert_equal ORIGINAL, File.read(File.join(@lock, 'CLAUDE.md'))
+      refute File.exist?(@live)
+    end
   end
 
   def test_refuses_without_the_separator_and_parks_nothing

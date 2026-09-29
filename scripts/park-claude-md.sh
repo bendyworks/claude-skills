@@ -174,6 +174,13 @@ restore_failed=0
 restore() {
   [ "$restored" -eq 0 ] || return 0
   restored=1
+  # A --recover run while this one was mistaken for stranded, followed
+  # by another session's park, leaves that session's file in the lock.
+  if [ "$(owner_field pid)" != "$$" ]; then
+    echo "park-claude-md: the park lock was taken over by $(describe_holder); left it alone." >&2
+    restore_failed=1
+    return
+  fi
   put_back || restore_failed=1
 }
 
