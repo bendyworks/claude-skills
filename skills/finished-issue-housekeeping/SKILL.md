@@ -302,9 +302,9 @@ approving anything.
 Ask the user **literally**: "Did anything surprising or non-obvious come up during this story that's worth saving as a rule or a skill for the next time we work in this area?"
 
 Examples of what qualifies as a **rule** -- a standing fact, or how to behave, that the next session working in this area has to know before it acts:
-- An invariant or timing/ordering constraint that holds for as long as the code it governs exists.
-- A library or framework gotcha that applies wherever the library is used, whose reasoning would not be obvious from reading the code.
-- A workaround the code needs for as long as the underlying behavior stays the same, which future-you will not be able to derive from current-you's commit message alone.
+- A hidden invariant or timing/ordering constraint in the code.
+- A library or framework gotcha whose reasoning would not be obvious from reading the code.
+- A non-obvious workaround that future-you will not be able to derive from current-you's commit message alone.
 
 Examples of what qualifies as a **skill**:
 - A repeated multi-step workflow that you executed ad-hoc this time and would benefit from running deterministically next time.
