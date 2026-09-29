@@ -244,14 +244,13 @@ enable, so build every chain there as a stack, using the
   groups, so the confirmation names the queue rather than a method.
   Auto-merge armed on any layer lands every layer below it too.
 - **After a layer merges, bring local branches current before any
-  other work.** The server-side rebase rewrote every branch above the
-  merge. On a tracked stack, `gh stack sync` rebases each local branch
-  onto its new parent, keeping unpushed commits, and pushes them. On a
-  linked stack that is not tracked, import it with `gh stack checkout`
-  first; resetting a branch to its remote instead
-  (`git reset --hard <remote>/<branch>`) discards any unpushed commit,
-  so check `git log <remote>/<branch>..<branch>` and take a backup ref
-  before one.
+  other work, since the server-side rebase rewrote every branch above
+  it.** `gh stack sync` rebases each local branch onto its new parent,
+  keeping unpushed commits, and pushes them; on a stack that was only
+  linked, import it with `gh stack checkout` first. Resetting a branch
+  to its remote instead (`git reset --hard <remote>/<branch>`) discards
+  any unpushed commit, so check `git log <remote>/<branch>..<branch>`
+  and take a backup ref before one.
 - **Read `gh stack`'s output, not only its exit code.** `sync` exits 0
   after printing "Sync aborted" (the local and remote stacks diverged,
   and nothing changed) and after a failed push ("Push failed", then
@@ -269,10 +268,10 @@ enable, so build every chain there as a stack, using the
   in the chain behind at once, and bringing them current rewrites all
   of them: new commit ids, a CI run per branch, a stale review on
   anything already read. Put the change on its own branch from the
-  mainline, or hold it until the stack lands. If it
-  cannot wait, say that it forces the cascade and run `gh stack sync`
-  right after, rather than rebasing one PR, which leaves the layers
-  above it behind.
+  mainline, or hold it until the stack lands. If it cannot wait, say
+  that it forces the cascade and run `gh stack sync` right after
+  (after `gh stack checkout` on a stack that was only linked), rather
+  than rebasing one PR, which leaves the layers above it behind.
 
 GitHub's own agent skill,
 [`skills/gh-stack/SKILL.md`](https://github.com/github/gh-stack/blob/main/skills/gh-stack/SKILL.md)
