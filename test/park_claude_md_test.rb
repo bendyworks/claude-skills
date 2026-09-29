@@ -47,6 +47,18 @@ class ParkClaudeMdTest < Minitest::Test
   # The script's argv run in a new session with no controlling
   # terminal, the way a headless batch runs, wherever the suite itself
   # is run from.
+  def perl_available?
+    system('command -v perl >/dev/null 2>&1')
+  end
+
+  # An arm that outlives its batch: output away from the test's pipes,
+  # and a TERM handler that records whether CLAUDE.md was already back,
+  # then keeps running so only a KILL ends it.
+  def stubborn_arm(arm_file, saw_file)
+    "(trap \"test -e '#{@live}' && touch '#{saw_file}'\" TERM; " \
+      "while :; do sleep 0.1; done) >/dev/null 2>&1 & echo $! > '#{arm_file}'"
+  end
+
   def headless(*args)
     ['perl', '-MPOSIX', '-e', 'POSIX::setsid(); exec { $ARGV[0] } @ARGV', '--', 'bash', SCRIPT, *args]
   end
@@ -86,7 +98,8 @@ class ParkClaudeMdTest < Minitest::Test
   # Starts the script in its own process group around a command that
   # starts an arm of its own (the way a batch starts its claude -p runs)
   # and marks itself ready, sends the signal once the file is parked,
-  # and returns the script's exit status and the arm's process ID.
+  # and returns the script's exit status, the arm's process ID, and the
+  # command's own process ID.
   def interrupt_parked_run(signal, target, run_env = env)
     ready = File.join(@tmp, 'ready')
     arm = File.join(@tmp, 'arm')
@@ -601,6 +614,16 @@ class ParkClaudeMdTest < Minitest::Test
     assert File.exist?(File.join(@lock, 'owner')), 'dropped the owner record, leaving a lock nobody can name'
   end
 
+  def test_the_unremovable_lock_advice_leads_to_a_clean_recovery
+    park('--', 'touch', File.join(@lock, 'stray'))
+    File.delete(File.join(@lock, 'stray'))
+    _out, err, status = park('--recover')
+
+    assert status.success?, err
+    assert_equal ORIGINAL, File.read(@live)
+    refute File.exist?(@lock)
+  end
+
   def test_refuses_without_a_command_and_parks_nothing
     _out, err, status = park('--')
 
@@ -650,13 +673,16 @@ class ParkClaudeMdTest < Minitest::Test
   end
 
   def test_stops_and_reports_arms_the_command_left_running
+    skip 'perl is needed for the command to get a process group of its own' unless perl_available?
     arm_file = File.join(@tmp, 'arm')
-    _out, err, status = Open3.capture3(env, *headless('--', 'sh', '-c', "(trap '' TERM; exec sleep 30) & echo $! > '#{arm_file}'"))
+    saw = File.join(@tmp, 'saw')
+    _out, err, status = Open3.capture3(env, *headless('--', 'sh', '-c', stubborn_arm(arm_file, saw)))
     arm = Integer(File.read(arm_file))
 
     assert status.success?, err
-    assert_match(/left running/, err)
+    assert_match(/left running process\(es\) .*\b#{arm}\b/, err)
     refute running?(arm), 'an arm that ignores TERM outlived the restore'
+    refute File.exist?(saw), 'the arm was signalled after the file was back'
     assert_equal ORIGINAL, File.read(@live)
     refute File.exist?(@lock)
   ensure
@@ -677,9 +703,10 @@ class ParkClaudeMdTest < Minitest::Test
   end
 
   def test_a_signal_while_stopping_leftovers_still_stops_them_first
+    skip 'perl is needed for the command to get a process group of its own' unless perl_available?
     arm_file = File.join(@tmp, 'arm')
-    command = "(trap '' TERM; exec sleep 30) & echo $! > '#{arm_file}'"
-    pid = Process.spawn(env, *headless('--', 'sh', '-c', command), err: File::NULL)
+    saw = File.join(@tmp, 'saw')
+    pid = Process.spawn(env, *headless('--', 'sh', '-c', stubborn_arm(arm_file, saw)), err: File::NULL)
     wait_for { File.size?(arm_file) }
     sleep 0.5
     Process.kill('TERM', pid)
@@ -689,6 +716,7 @@ class ParkClaudeMdTest < Minitest::Test
 
     assert_equal 143, status.exitstatus
     refute running?(arm), 'an arm that ignores TERM outlived the restore'
+    refute File.exist?(saw), 'the arm was signalled after the file was back'
     assert_equal ORIGINAL, File.read(@live)
   ensure
     kill_group(pid)
@@ -697,6 +725,52 @@ class ParkClaudeMdTest < Minitest::Test
     rescue Errno::ESRCH
       nil
     end
+  end
+
+  def test_term_stops_an_arm_the_command_orphaned
+    skip 'perl is needed for the command to get a process group of its own' unless perl_available?
+    arm_file = File.join(@tmp, 'arm')
+    ready = File.join(@tmp, 'ready')
+    command = "(sleep 30 >/dev/null 2>&1 & echo $! > '#{arm_file}'); touch '#{ready}'; sleep 30"
+    pid = Process.spawn(env, *headless('--', 'sh', '-c', command), err: File::NULL)
+    wait_for { File.exist?(ready) }
+    arm = Integer(File.read(arm_file))
+    Process.kill('TERM', pid)
+    status = nil
+    wait_for { (status = Process.wait2(pid, Process::WNOHANG)&.last) }
+
+    assert_equal 143, status.exitstatus
+    wait_for(seconds: 3) { !running?(arm) }
+    assert_equal ORIGINAL, File.read(@live)
+  ensure
+    kill_group(pid)
+    begin
+      Process.kill('KILL', arm) if arm
+    rescue Errno::ESRCH
+      nil
+    end
+  end
+
+  def test_without_perl_the_command_runs_and_the_file_comes_back
+    shims = File.join(@tmp, 'no-perl')
+    Dir.mkdir(shims)
+    ENV.fetch('PATH').split(':').each do |dir|
+      Dir.glob(File.join(dir, '*')).each do |tool|
+        name = File.basename(tool)
+        next if name.start_with?('perl') || File.exist?(File.join(shims, name))
+        next unless File.file?(tool) && File.executable?(tool)
+
+        File.symlink(tool, File.join(shims, name))
+      end
+    end
+    probe = File.join(@tmp, 'probe')
+    _out, err, status = Open3.capture3(env.merge('PATH' => shims), 'bash', SCRIPT, '--', 'touch', probe)
+
+    assert status.success?, err
+    assert File.exist?(probe)
+    refute_match(/left running/, err)
+    assert_equal ORIGINAL, File.read(@live)
+    refute File.exist?(@lock)
   end
 
   def test_a_command_can_read_the_terminal

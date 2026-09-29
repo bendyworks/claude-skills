@@ -301,7 +301,7 @@ EOF
 # batch started without waiting for them. They would read the file
 # once it is back, so they are stopped first, and the batch is told.
 group_members() {
-  ps -A -o pid= -o pgid= 2>/dev/null | awk -v g="$child" '$2 == g { print $1 }'
+  ps -A -o pid= -o pgid= -o stat= 2>/dev/null | awk -v g="$child" '$2 == g && $3 !~ /^Z/ { print $1 }'
 }
 
 # TERM to whatever is left in the command's group, then KILL after five
