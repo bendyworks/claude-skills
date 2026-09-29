@@ -232,8 +232,13 @@ descendants() {
 # since a child that dies first leaves its own children unfindable.
 # Background commands also get /dev/null for input unless told
 # otherwise, hence the <&0.
+# A signal can land after the command starts but before child is set;
+# $! already names the command then, and nothing else here runs in the
+# background, so it stands in until the command has finished.
 child=
+command_done=0
 on_signal() {
+  [ -n "$child" ] || [ "$command_done" -eq 1 ] || child="${!:-}"
   if [ -n "$child" ]; then
     for pid in "$child" $(descendants "$child"); do kill -TERM "$pid" 2>/dev/null; done
     wait "$child" 2>/dev/null
@@ -245,8 +250,7 @@ trap 'on_signal 130' INT
 trap 'on_signal 143' TERM
 trap restore EXIT
 
-mkdir "$LOCK" 2>/dev/null || refuse_existing_lock
-held=1
+mkdir "$LOCK" 2>/dev/null && held=1 || refuse_existing_lock
 printf 'checkout=%s\npid=%s\nstarted=%s\nfingerprint=%s\n' \
   "$(checkout_root)" "$$" "$(start_time $$)" "$(fingerprint "$LIVE")" > "$OWNER.tmp" &&
   mv "$OWNER.tmp" "$OWNER" || die "could not write $OWNER"
@@ -264,4 +268,5 @@ child=$!
 wait "$child"
 status=$?
 child=
+command_done=1
 finish "$status"
