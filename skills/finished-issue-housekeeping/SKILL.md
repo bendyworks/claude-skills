@@ -324,6 +324,7 @@ An answer can also be **point-in-time state** rather than either: an incident re
 
 - **Find the topic's existing home first.** Before writing, look for the topic among the homes above and edit it where it already lives; never add a second copy.
 - **A rule or a skill waits for the user's approval.** Show the exact text and the target file (for a skill, its name and scope as well), and write only after the user approves. A guidance file kept in a shared repository gets a drafted change for that repository's own review flow, never a direct commit. A memory for state needs no approval.
+- **A write inside this project's repository is left uncommitted and named.** The project's CLAUDE.md, a rules file, and a project-scoped skill are checked-in files, and this pass runs on the branch Step 3 checked out (usually `main`). Committing stays with the user, through the project's normal flow; never commit or push it as part of this pass. Name each such file in the Step 10 summary as uncommitted, so it does not ride into the next story's first commit unnoticed.
 
 **If no -- skip.** Do NOT fabricate to fill the slot. Empty is the right answer most of the time, and bloating the rules, the skills list, or memory with low-signal entries makes the high-signal ones harder to find later.
 
@@ -439,7 +440,7 @@ skill (a Claude Code built-in, not part of this plugin).
   project's `.claude/settings.json`; if that file is gitignored,
   `git status` will not show it -- fall back to the built-in's own
   report of what it wrote). `git status` will also show the plan-file
-  and any `MEMORY.md` edits from earlier steps, so name the settings
+  edits and any checked-in rule or skill 4a saved, so name the settings
   diff specifically. This step can end the pass with an uncommitted
   settings diff, so say so plainly in the Step 10 summary. Committing
   stays with the user, through the project's normal flow -- possibly
@@ -461,7 +462,7 @@ Report concisely what was done, one line per item:
 - Branch: `<name>` deleted (or "kept -- <reason>" / "no local branch").
 - Branch sweep: N deleted, M kept (or "skipped -- <why>").
 - Tracker: `<ID>` (<title>) moved to Done (or "no tracker issue").
-- Saved: N rules (naming each home: guidance file, project CLAUDE.md or rules file, global CLAUDE.md), counting any promoted from memory in 4c; N skills created; N state memories (or "nothing to save").
+- Saved: N rules (naming each home: guidance file, project CLAUDE.md or rules file, global CLAUDE.md), counting any promoted from memory in 4c; N skills created; N state memories (or "nothing to save"). Name each file written inside this repository as left uncommitted.
 - Memory: Done entry added; MEMORY.md pruned (now <size> KB, under budget) (or "skipped -- no auto-memory").
 - Sibling-audit: N follow-ups verified; M dropped (filed now / TODO).
 - Dev server: stopped (or "none was running").
