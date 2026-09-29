@@ -130,10 +130,10 @@ rule rather than around it.
 A direct instruction authorizes that one merge, confirmed back first:
 name the direction per the rule below, say what lands, and say that a
 merge cannot be taken back. Then wait. A PR whose base is another
-PR's branch is a stack layer, and merging it lands every unmerged PR
-below it, so the confirmation lists each of them (see Merging stacked
-pull requests below).
-Anything landing commits on a shared branch gets that confirmation;
+PR's branch is a stack layer; when it belongs to a native stack,
+merging it lands every unmerged PR below it, so the confirmation lists
+each of them (see Merging stacked pull requests below). Anything
+landing commits on a shared branch gets that confirmation;
 the safe direction -- "merge `main` into the branch" -- gets none. It
 authorizes an ordinary merge and never forcing one past a gate that
 refused it: a merge blocked by branch protection or missing approvals
@@ -211,9 +211,13 @@ enable, so build every chain there as a stack, using the
 
 - **Check for a stack before merging a PR, working on its branch, or
   committing to the mainline.** A PR based on another PR's branch is a
-  stack layer, and `gh stack view --json` (run from any branch in the
-  repository) lists the layers of the stack that branch belongs to.
-  Every rule below applies to a layer.
+  stack layer. GitHub's `stack` field on a pull request says which
+  native stack it belongs to, whether or not anyone tracks it locally:
+  `gh api graphql -f query='{ repository(owner:"<owner>", name:"<repo>")
+  { pullRequests(states: OPEN, first: 100) { nodes { number stack { number } } } } }'`
+  lists every open PR with its stack. `gh stack view --json` reads
+  local tracking only, so on the mainline, or on a layer nobody
+  imported, it reports no stack even while one is open.
 - **Create the stack before anyone reviews it.** `gh stack init` names
   the branches and `gh stack submit --auto` opens every PR as a draft.
   For PRs that already exist, `gh stack link <bottom> ... <top>` joins
