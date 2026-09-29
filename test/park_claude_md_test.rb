@@ -234,7 +234,11 @@ class ParkClaudeMdTest < Minitest::Test
     assert_equal ORIGINAL, File.read(@live)
     refute File.exist?(@lock)
   ensure
-    Process.kill('KILL', arm) if arm && running?(arm)
+    begin
+      Process.kill('KILL', arm) if arm
+    rescue Errno::ESRCH
+      nil
+    end
   end
 
   def test_ctrl_c_stops_the_command_and_its_arms_and_restores_the_file
