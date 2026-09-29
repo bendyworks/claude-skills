@@ -228,8 +228,8 @@ build every chain there as a stack, using the
   them: it pushes the branches, keeps existing PRs as they are, and
   opens a draft for any branch without one. `link` sets up no local
   tracking, so `sync` and `rebase` refuse until
-  `gh stack checkout <stack-number>` imports the stack, which leaves
-  local branches where they are.
+  `gh stack checkout <stack-number>` imports the stack, which keeps
+  local commits: rewritten and unpushed local tips stay as they were.
 - **Keep draft-first.** Never pass `--open`, which marks new and
   existing PRs ready for review. A PR the tool opens has the branch
   name for a title and a credit line for a body; rewrite both (per
