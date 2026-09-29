@@ -318,7 +318,7 @@ An answer can also be **point-in-time state** rather than either: an incident re
 1. **A rule or standing fact** -- the home whose readers need it:
    - a guidance file the user or team already keeps, if any, for a rule that holds across projects;
    - the project's checked-in CLAUDE.md or a rules file under `.claude/rules/`, for a fact about this repository (client-visible, so domain invariants yes, opinions about people or billing never);
-   - the user's global CLAUDE.md, for a personal rule that holds across projects and has no shared home.
+   - the user's global CLAUDE.md, for a personal rule with no shared home: one that holds across projects, or one about this project that must not be client-visible.
 2. **A procedure** -- a skill: `~/.claude/skills/<name>/SKILL.md` (global) or `<project>/.claude/skills/<name>/SKILL.md` (project-scoped), following the same shape as the surrounding skills.
 3. **Point-in-time state** that no rule can carry -- a memory file in the project memory directory, using the standard auto-memory frontmatter, with a one-line pointer under `MEMORY.md`'s "Technical Notes" section. Only when the project keeps auto-memory; without one, tell the user the item has no home here rather than inventing one.
 
