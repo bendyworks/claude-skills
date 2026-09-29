@@ -448,6 +448,24 @@ class ParkClaudeMdTest < Minitest::Test
     end
   end
 
+  def test_reports_a_park_cleared_while_the_command_ran
+    clear = "mv '#{@lock}/CLAUDE.md' '#{@live}' && rm '#{@lock}/owner' && rmdir '#{@lock}'"
+    _out, err, status = park('--', 'sh', '-c', clear)
+
+    assert_equal 2, status.exitstatus
+    assert_match(/cleared while this run was parked/, err)
+    assert_equal ORIGINAL, File.read(@live)
+  end
+
+  def test_leaves_alone_a_lock_another_session_is_creating_after_a_clear
+    clear = "mv '#{@lock}/CLAUDE.md' '#{@live}' && rm '#{@lock}/owner' && rmdir '#{@lock}'"
+    other = "mkdir '#{@lock}' && touch '#{@lock}/owner.tmp'"
+    _out, _err, status = park('--', 'sh', '-c', "#{clear} && #{other}")
+
+    assert_equal 2, status.exitstatus
+    assert File.exist?(File.join(@lock, 'owner.tmp')), "removed another session's half-made lock"
+  end
+
   def test_refuses_without_the_separator_and_parks_nothing
     _out, err, status = park('true')
 

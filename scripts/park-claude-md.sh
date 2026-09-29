@@ -170,6 +170,7 @@ fi
 # only once this process holds the lock, and every failure after that
 # point exits through it, so it releases exactly what this run created.
 held=0
+recorded=0
 restored=0
 restore_failed=0
 restore() {
@@ -177,8 +178,14 @@ restore() {
   restored=1
   [ "$held" -eq 1 ] || return 0
   if [ ! -f "$OWNER" ]; then
-    rm -f "$OWNER.tmp"
-    rmdir "$LOCK" 2>/dev/null
+    if [ "$recorded" -eq 1 ]; then
+      # Someone cleared this run's lock; any lock there now is theirs.
+      echo "park-claude-md: the park lock was cleared while this run was parked; what it ran may have read $LIVE." >&2
+      restore_failed=1
+    else
+      rm -f "$OWNER.tmp"
+      rmdir "$LOCK" 2>/dev/null
+    fi
     return
   fi
   # A --recover run while this one was mistaken for stranded, followed
@@ -242,6 +249,7 @@ held=1
 printf 'checkout=%s\npid=%s\nstarted=%s\nfingerprint=%s\n' \
   "$(checkout_root)" "$$" "$(start_time $$)" "$(fingerprint "$LIVE")" > "$OWNER.tmp" &&
   mv "$OWNER.tmp" "$OWNER" || die "could not write $OWNER"
+recorded=1
 
 if exists "$LIVE"; then
   mv "$LIVE" "$PARKED" || die "could not park $LIVE"
