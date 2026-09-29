@@ -65,6 +65,90 @@ class ParkClaudeMdTest < Minitest::Test
     assert_equal args.inspect, out
   end
 
+  def start_time(pid)
+    `ps -o lstart= -p #{pid}`.strip
+  end
+
+  # Stands in for another session's park: a lock directory holding the
+  # parked file and an owner record for the given process.
+  def hold_lock(pid:, started: start_time(pid), checkout: '/elsewhere/checkout2')
+    Dir.mkdir(@lock)
+    File.write(File.join(@lock, 'owner'), "checkout=#{checkout}\npid=#{pid}\nstarted=#{started}\n")
+    File.rename(@live, File.join(@lock, 'CLAUDE.md'))
+  end
+
+  def live_holder
+    pid = Process.spawn('sleep', '30')
+    yield pid
+  ensure
+    Process.kill('KILL', pid)
+    Process.wait(pid)
+  end
+
+  def assert_refused_leaving_lock_alone(status, probe)
+    assert_equal 2, status.exitstatus
+    refute File.exist?(probe), 'command ran despite the refusal'
+    assert_equal ORIGINAL, File.read(File.join(@lock, 'CLAUDE.md'))
+    refute File.exist?(@live)
+  end
+
+  def test_refuses_while_another_live_session_holds_the_park
+    probe = File.join(@tmp, 'probe')
+    live_holder do |pid|
+      hold_lock(pid: pid)
+      _out, err, status = park('--', 'touch', probe)
+
+      assert_refused_leaving_lock_alone(status, probe)
+      assert_match(%r{/elsewhere/checkout2}, err)
+      assert_match(/\b#{pid}\b/, err)
+    end
+  end
+
+  def test_refuses_a_stale_park_and_points_at_recover
+    probe = File.join(@tmp, 'probe')
+    dead = Process.spawn('true')
+    Process.wait(dead)
+    hold_lock(pid: dead, started: 'Thu Jan  1 00:00:00 1970')
+    _out, err, status = park('--', 'touch', probe)
+
+    assert_refused_leaving_lock_alone(status, probe)
+    assert_match(/--recover/, err)
+  end
+
+  def test_refuses_a_lock_that_is_still_being_acquired
+    probe = File.join(@tmp, 'probe')
+    Dir.mkdir(@lock)
+    _out, err, status = park('--', 'touch', probe)
+
+    assert_equal 2, status.exitstatus
+    refute File.exist?(probe)
+    assert_equal ORIGINAL, File.read(@live)
+    assert Dir.exist?(@lock), 'removed a lock it did not own'
+    assert_match(/no owner/, err)
+  end
+
+  def test_refuses_when_the_file_is_missing_with_no_lock
+    probe = File.join(@tmp, 'probe')
+    File.delete(@live)
+    _out, err, status = park('--', 'touch', probe)
+
+    assert_equal 2, status.exitstatus
+    refute File.exist?(probe)
+    refute File.exist?(@lock)
+    assert_match(/--none-ok/, err)
+  end
+
+  def test_none_ok_runs_the_command_when_there_is_no_file_to_park
+    probe = File.join(@tmp, 'probe')
+    File.delete(@live)
+    _out, err, status = park('--none-ok', '--', 'touch', probe)
+
+    assert status.success?, err
+    assert File.exist?(probe)
+    refute File.exist?(@live)
+    refute File.exist?(@lock)
+  end
+
   def test_refuses_without_the_separator_and_parks_nothing
     _out, err, status = park('true')
 
