@@ -235,7 +235,8 @@ declaration present:
   the only merge method (`gh repo view --json
   mergeCommitAllowed,rebaseMergeAllowed`) or a workflow lints pull
   request titles, keep the title in the project's commit shape and
-  put `PRJ-NNN` on the body's first line instead. A Linear or
+  put `PRJ-NNN` with the issue's title on the body's first line
+  instead. A Linear or
   Shortcut issue's pull request follows that tracker's convention.
 - **Machine tokens stay `#NNN`:** `Closes #NNN`, `Refs: #NNN`,
   `(deferred to #NNN)`, and "filed as #NNN" notes -- GitHub links

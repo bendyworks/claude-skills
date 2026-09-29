@@ -450,7 +450,7 @@ Report concisely what was done, one line per item:
 - Plan file: finalized at `<path>` (or "skipped -- ad-hoc work").
 - Branch: `<name>` deleted (or "kept -- <reason>" / "no local branch").
 - Branch sweep: N deleted, M kept (or "skipped -- <why>").
-- Tracker: `<ID>` moved to Done (or "no tracker issue").
+- Tracker: `<ID>` (<title>) moved to Done (or "no tracker issue").
 - Memory: Done entry added; N new tech-notes saved; N new skills created; N rules promoted to permanent homes; MEMORY.md pruned (now <size> KB, under budget).
 - Sibling-audit: N follow-ups verified; M dropped (filed now / TODO).
 - Dev server: stopped (or "none was running").
