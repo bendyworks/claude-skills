@@ -340,12 +340,10 @@ theirs to decide:
   protection rules, so a retargeted PR whose runs never reported a
   newly required or renamed check waits on it forever, marked
   "Expected". A stale branch also runs outdated workflow files. Update
-  each branch from the default branch before merging it, which fixes
-  both.
+  each branch from the mainline before merging it, which fixes both.
 - **On a squash-merge repo, a retargeted PR shows the merged layer's
   commits in its diff again** until its branch is updated from the
-  default branch: the squashed copy is a new commit its fork point
-  predates.
+  mainline: the squashed copy is a new commit its fork point predates.
 - **Arm auto-merge on the next PR only after its base has flipped, and
   only where arming is authorized at all**, since arming is itself a
   merge; armed earlier, it is the wrong-base merge with no human in
