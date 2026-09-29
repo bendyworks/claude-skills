@@ -4,9 +4,10 @@
 # Tests for scripts/park-claude-md.sh, which parks the user-level
 # CLAUDE.md for the length of a dry-run batch. Every test points the
 # script at a throwaway config directory through CLAUDE_CONFIG_DIR, and
-# setup refuses to run unless that directory sits under the test's own
-# temporary directory, so no test can park the real file. Coverage
-# records nothing here: the project measures only bin/*.
+# points HOME at the same temporary directory, so a script that stopped
+# honoring CLAUDE_CONFIG_DIR would fall back to a sandboxed ~/.claude
+# rather than the real one. Coverage records nothing here: the project
+# measures only bin/*.
 # Run: ruby test/park_claude_md_test.rb
 
 require_relative 'cli_test_case'
@@ -21,7 +22,6 @@ class ParkClaudeMdTest < Minitest::Test
     @tmp = File.realpath(Dir.mktmpdir('park-claude-md-test'))
     @config = File.join(@tmp, 'config')
     Dir.mkdir(@config)
-    flunk "config dir #{@config} is outside #{@tmp}" unless @config.start_with?("#{@tmp}/")
     @live = File.join(@config, 'CLAUDE.md')
     @lock = File.join(@config, 'CLAUDE.md.park-lock')
     File.write(@live, ORIGINAL)
@@ -32,7 +32,7 @@ class ParkClaudeMdTest < Minitest::Test
   end
 
   def env
-    { 'CLAUDE_CONFIG_DIR' => @config, 'CLAUDE_MD_PARK_HOLDER' => nil }
+    { 'CLAUDE_CONFIG_DIR' => @config, 'HOME' => @tmp, 'CLAUDE_MD_PARK_HOLDER' => nil }
   end
 
   def park(*args)
