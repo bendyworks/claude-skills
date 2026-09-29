@@ -232,14 +232,20 @@ descendants() {
 # since a child that dies first leaves its own children unfindable.
 # Background commands also get /dev/null for input unless told
 # otherwise, hence the <&0.
-# A signal can land after the command starts but before child is set;
-# $! already names the command then, and nothing else here runs in the
-# background, so it stands in until the command has finished.
 child=
 command_done=0
 on_signal() {
-  [ -n "$child" ] || [ "$command_done" -eq 1 ] || child="${!:-}"
-  if [ -n "$child" ]; then
+  local pid
+  # A signal can land after the command starts but before child is set;
+  # $! already names the command then, since nothing else here runs in
+  # the background. bash 3.2 treats an unset $! as unbound under set -u
+  # even inside ${!:-}, hence the subshell with -u off.
+  if [ -z "$child" ] && [ "$command_done" -eq 0 ]; then
+    child="$(set +u; printf %s "$!")"
+  fi
+  # Once the command is reaped its process ID can be reused, so signal
+  # it only while it is still this script's child.
+  if [ -n "$child" ] && [ "$(ps -o ppid= -p "$child" 2>/dev/null | tr -d ' ')" = "$$" ]; then
     for pid in "$child" $(descendants "$child"); do kill -TERM "$pid" 2>/dev/null; done
     wait "$child" 2>/dev/null
   fi
@@ -271,6 +277,6 @@ CLAUDE_MD_PARK_HOLDER=$$ "$@" <&0 &
 child=$!
 wait "$child"
 status=$?
-child=
 command_done=1
+child=
 finish "$status"
