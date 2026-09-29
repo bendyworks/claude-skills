@@ -326,8 +326,8 @@ An answer can also be **point-in-time state** rather than either: active work, a
 - **Write generically for a public destination.** Before proposing a repository home, check whether it is public (`gh repo view --json visibility` for a GitHub repository). A lesson learned on one project and written somewhere public carries no client or project names, tracker IDs, or figures from that project: keep the technical substance and drop the identifying wrapper.
 - **A rule or a skill waits for the user's approval.** Show the exact text and the target file (for a skill, its name and scope as well), and write only after the user approves. A memory for state needs no approval.
 - **A rule for another repository's shared guidance gets a draft, never an edit.** When the rule's home is a guidance file the team shares from a repository other than this project, draft the change as text for the user to take through that repository's own review flow: never edit or commit in that repository as part of this pass, even in a local clone, and file an issue or pull request there only when the user asks.
-- **Check that a repository home reaches its readers.** A rules file or a project-scoped skill reaches teammates only when git tracks it, and many projects ignore `.claude/`. Check the path with `git check-ignore` before choosing it; for an ignored path, prefer the project's CLAUDE.md, or tell the user the file will stay on this machine.
-- **A write inside this project's repository is left uncommitted and named.** The project's CLAUDE.md, and a rules file or project-scoped skill that git does not ignore, would be committed with the next change on whatever Step 3 checked out (usually `main`, sometimes a detached HEAD). Committing stays with the user, through the project's normal flow; never commit or push it as part of this pass. Name each such file in the Step 10 summary as uncommitted, so it does not ride into the next story's first commit unnoticed, and name an ignored one as local only.
+- **Check that a repository home reaches its readers.** A file in this repository reaches teammates only when git does not ignore it, and many projects ignore `.claude/`, some their CLAUDE.md too. Check the path with `git check-ignore` before choosing it; for an ignored path, prefer a home git tracks, or tell the user the file will stay on this machine.
+- **A rule or skill written inside this project's repository is left uncommitted and named.** Every such file git does not ignore can ride into the next commit on whatever Step 3 checked out (usually `main`, sometimes a detached HEAD). Committing stays with the user, through the project's normal flow; never commit or push it as part of this pass. Name each such file in the Step 10 summary as uncommitted, so it does not ride into the next story's first commit unnoticed, and name an ignored one as local only.
 
 **If no -- skip.** Do NOT fabricate to fill the slot. Empty is the right answer most of the time, and bloating the rules, the skills list, or memory with low-signal entries makes the high-signal ones harder to find later.
 
@@ -443,7 +443,7 @@ skill (a Claude Code built-in, not part of this plugin).
   project's `.claude/settings.json`; if that file is gitignored,
   `git status` will not show it -- fall back to the built-in's own
   report of what it wrote). `git status` will also show the plan-file
-  edits and any rule or skill file 4a or 4c wrote, so name the settings
+  edits and any rule or skill file 4a or 4c wrote inside this repository that git does not ignore, so name the settings
   diff specifically. This step can end the pass with an uncommitted
   settings diff, so say so plainly in the Step 10 summary. Committing
   stays with the user, through the project's normal flow -- possibly
@@ -467,7 +467,7 @@ Report concisely what was done, one line per item:
 - Tracker: `<ID>` (<title>) moved to Done (or "no tracker issue").
 - Saved: N rules (naming each home: project CLAUDE.md or rules file, global CLAUDE.md), counting any promoted from memory in 4c; N skills created; N state memories (or "nothing to save").
 - Drafted: N changes for a shared guidance repository, each drafted or filed at the user's request (or "none").
-- Uncommitted: each file written inside this repository (an ignored one as local only), or "none".
+- Uncommitted: each rule or skill file 4a or 4c wrote inside this repository (an ignored one as local only), or "none".
 - Memory: Done entry added; MEMORY.md pruned (now <size> KB, under budget) (or "skipped -- no auto-memory").
 - Sibling-audit: N follow-ups verified; M dropped (filed now / TODO).
 - Dev server: stopped (or "none was running").
