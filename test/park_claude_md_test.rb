@@ -253,6 +253,110 @@ class ParkClaudeMdTest < Minitest::Test
     refute File.exist?(@lock)
   end
 
+  def dead_pid
+    pid = Process.spawn('true')
+    Process.wait(pid)
+    pid
+  end
+
+  def test_status_reports_nothing_parked
+    out, _err, status = park('--status')
+
+    assert status.success?
+    assert_match(/not parked/, out)
+  end
+
+  def test_status_names_a_running_holder
+    live_holder do |pid|
+      hold_lock(pid: pid)
+      out, _err, status = park('--status')
+
+      assert status.success?
+      assert_match(/running/, out)
+      assert_match(%r{/elsewhere/checkout2}, out)
+      assert_match(/\b#{pid}\b/, out)
+    end
+  end
+
+  def test_status_flags_a_stranded_park
+    hold_lock(pid: dead_pid, started: 'Thu Jan  1 00:00:00 1970')
+    out, _err, status = park('--status')
+
+    assert status.success?
+    assert_match(/no longer running/, out)
+    assert_match(/--recover/, out)
+  end
+
+  def test_recover_restores_a_stranded_park
+    hold_lock(pid: dead_pid, started: 'Thu Jan  1 00:00:00 1970')
+    _out, err, status = park('--recover')
+
+    assert status.success?, err
+    assert_equal ORIGINAL, File.read(@live)
+    refute File.exist?(@lock)
+  end
+
+  def test_recover_treats_a_reused_process_id_as_stranded
+    live_holder do |pid|
+      hold_lock(pid: pid, started: 'Thu Jan  1 00:00:00 1970')
+      _out, err, status = park('--recover')
+
+      assert status.success?, err
+      assert_equal ORIGINAL, File.read(@live)
+      refute File.exist?(@lock)
+    end
+  end
+
+  def test_recover_refuses_while_the_holder_is_running
+    live_holder do |pid|
+      hold_lock(pid: pid)
+      _out, err, status = park('--recover')
+
+      assert_equal 2, status.exitstatus
+      assert_match(/\b#{pid}\b/, err)
+      assert_equal ORIGINAL, File.read(File.join(@lock, 'CLAUDE.md'))
+      refute File.exist?(@live)
+    end
+  end
+
+  def test_recover_keeps_both_files_when_a_new_one_exists
+    hold_lock(pid: dead_pid, started: 'Thu Jan  1 00:00:00 1970')
+    File.write(@live, "newer\n")
+    _out, err, status = park('--recover')
+
+    assert_equal 2, status.exitstatus
+    assert_equal "newer\n", File.read(@live)
+    assert_equal ORIGINAL, File.read(File.join(@lock, 'CLAUDE.md'))
+    assert_match(/Compare/, err)
+  end
+
+  def test_recover_restores_a_parked_copy_that_changed
+    hold_lock(pid: dead_pid, started: 'Thu Jan  1 00:00:00 1970')
+    File.write(File.join(@lock, 'CLAUDE.md'), "checked by hand\n")
+    _out, err, status = park('--recover')
+
+    assert status.success?, err
+    assert_equal "checked by hand\n", File.read(@live)
+    refute File.exist?(@lock)
+  end
+
+  def test_recover_clears_an_empty_lock_left_by_a_crash
+    Dir.mkdir(@lock)
+    _out, err, status = park('--recover')
+
+    assert status.success?, err
+    assert_equal ORIGINAL, File.read(@live)
+    refute File.exist?(@lock)
+  end
+
+  def test_recover_with_nothing_parked_changes_nothing
+    out, _err, status = park('--recover')
+
+    assert status.success?
+    assert_match(/nothing to recover/, out)
+    assert_equal ORIGINAL, File.read(@live)
+  end
+
   def test_refuses_without_the_separator_and_parks_nothing
     _out, err, status = park('true')
 

@@ -6,9 +6,14 @@
 #
 # Usage:
 #   scripts/park-claude-md.sh [--none-ok] -- <command> [args...]
+#   scripts/park-claude-md.sh --status
+#   scripts/park-claude-md.sh --recover
 #
 #   --none-ok   run the command even when there is no CLAUDE.md to
 #               park (for a machine that has never had one)
+#   --status    say whether the file is parked, and by whom
+#   --recover   put back a file whose holder is no longer running
+#               (after a crash or kill -9), without the checksum check
 #
 # The config directory is $CLAUDE_CONFIG_DIR when set, else ~/.claude:
 # the directory Claude Code reads the user-level CLAUDE.md from.
@@ -27,7 +32,7 @@ OWNER="$LOCK/owner"
 
 die() { echo "park-claude-md: $*" >&2; exit 2; }
 
-usage() { die "usage: $0 [--none-ok] -- <command> [args...]"; }
+usage() { die "usage: $0 [--none-ok] -- <command> [args...] | --status | --recover"; }
 
 start_time() { ps -o lstart= -p "$1" 2>/dev/null | sed 's/^ *//; s/ *$//'; }
 
@@ -73,14 +78,15 @@ exists() { [ -e "$1" ] || [ -L "$1" ]; }
 # Moves the parked file back and releases the lock, or explains why
 # not and leaves both in place: a CLAUDE.md that appeared while parked
 # is never overwritten, and a parked copy that changed is kept for a
-# person to look at.
+# person to look at. --recover passes "unchecked" to skip the checksum,
+# since a person has looked by then.
 put_back() {
   if exists "$PARKED"; then
     if exists "$LIVE"; then
       echo "park-claude-md: a new $LIVE appeared while parked; kept it, and kept the parked copy at $PARKED. Compare the two, then run $0 --recover." >&2
       return 1
     fi
-    if [ "$(fingerprint "$PARKED")" != "$(owner_field fingerprint)" ]; then
+    if [ "${1:-}" != unchecked ] && [ "$(fingerprint "$PARKED")" != "$(owner_field fingerprint)" ]; then
       echo "park-claude-md: the parked copy's checksum changed while parked; kept it at $PARKED. Check it, then run $0 --recover." >&2
       return 1
     fi
@@ -92,7 +98,33 @@ put_back() {
       return 1
     fi
   fi
-  rm -f "$OWNER" && rmdir "$LOCK"
+  rm -f "$OWNER" "$OWNER.tmp" && rmdir "$LOCK"
+}
+
+show_status() {
+  if ! exists "$LOCK"; then
+    echo "CLAUDE.md is not parked."
+  elif [ ! -f "$OWNER" ]; then
+    echo "$LOCK exists with no owner record: a session is parking right now, or one crashed while parking. If it persists, run $0 --recover."
+  elif holder_alive; then
+    echo "CLAUDE.md is parked by a running session: $(describe_holder)."
+  else
+    echo "CLAUDE.md is parked by a session that is no longer running: $(describe_holder). Run $0 --recover to restore it."
+  fi
+  exit 0
+}
+
+recover() {
+  if ! exists "$LOCK"; then
+    echo "CLAUDE.md is not parked; nothing to recover."
+    exit 0
+  fi
+  if [ -f "$OWNER" ] && holder_alive; then
+    die "CLAUDE.md is parked by a running session: $(describe_holder). Let it finish; its exit restores the file."
+  fi
+  put_back unchecked || exit 2
+  echo "Restored $LIVE and cleared the park lock."
+  exit 0
 }
 
 checkout_root() {
@@ -105,6 +137,8 @@ none_ok=0
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --none-ok) none_ok=1; shift ;;
+    --status) show_status ;;
+    --recover) recover ;;
     --) shift; break ;;
     *) usage ;;
   esac
