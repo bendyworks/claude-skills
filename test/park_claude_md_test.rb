@@ -466,6 +466,15 @@ class ParkClaudeMdTest < Minitest::Test
     assert File.exist?(File.join(@lock, 'owner.tmp')), "removed another session's half-made lock"
   end
 
+  def test_says_plainly_when_the_lock_cannot_be_created
+    missing = File.join(@tmp, 'no-such-config')
+    _out, err, status = Open3.capture3(env.merge('CLAUDE_CONFIG_DIR' => missing), 'bash', SCRIPT, '--', 'true')
+
+    assert_equal 2, status.exitstatus
+    assert_match(/could not create/, err)
+    refute_match(/another session/, err)
+  end
+
   def test_refuses_without_the_separator_and_parks_nothing
     _out, err, status = park('true')
 

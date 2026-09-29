@@ -56,6 +56,7 @@ describe_holder() {
 }
 
 refuse_existing_lock() {
+  [ -d "$LOCK" ] || die "could not create $LOCK; check that $CONFIG_DIR exists and is writable."
   if [ ! -f "$OWNER" ]; then
     die "$LOCK exists with no owner record; another session may be parking right now. Try again shortly."
   fi
