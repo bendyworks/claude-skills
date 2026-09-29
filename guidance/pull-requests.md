@@ -240,11 +240,11 @@ there as a stack, using the
   its confirmation lists each PR that will land, bottom to top, with
   the merge method. A confirmed merge passes both explicitly,
   `gh stack merge <pr-number> --yes --squash`, naming the top PR to
-  land: a stack number, or a bare `gh stack merge` in a
-  non-interactive shell, merges every layer, and without a method flag
-  it reuses whichever method ran last. Merge a native-stack layer with
-  `gh stack merge`, never `gh pr merge`, which cannot merge a stack.
-  Without a merge queue the merge is all or nothing. Where the
+  land: a stack number, or a bare `gh stack merge` run with `--yes` or
+  in a non-interactive shell, merges every layer, and without a method
+  flag it reuses whichever method ran last. Merge a native-stack layer
+  with `gh stack merge`, never `gh pr merge`, which cannot merge a
+  stack. Without a merge queue the merge is all or nothing. Where the
   mainline uses a merge queue, the stack joins the queue instead: the
   queue's own method applies and the tool ignores the flag, and the
   layers may land in separate groups, so the confirmation names the
