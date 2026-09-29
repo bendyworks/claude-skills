@@ -322,6 +322,14 @@ class ParkClaudeMdTest < Minitest::Test
     end
   end
 
+  def test_a_holder_this_user_cannot_signal_still_reads_as_running
+    hold_lock(pid: 1)
+    out, _err, status = park('--status')
+
+    assert status.success?
+    assert_match(/parked by a running session/, out)
+  end
+
   def test_status_names_a_running_holder
     live_holder do |pid|
       hold_lock(pid: pid)

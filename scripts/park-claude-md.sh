@@ -41,11 +41,14 @@ start_time() { LC_ALL=C TZ=UTC0 ps -o lstart= -p "$1" 2>/dev/null | sed 's/^ *//
 
 owner_field() { sed -n "s/^$1=//p" "$OWNER" 2>/dev/null; }
 
+# Judged from ps rather than kill -0, which also fails for a running
+# process this user may not signal (another user's, or one outside a
+# sandbox), and that must not read as stranded.
 holder_alive() {
   local pid started
   pid="$(owner_field pid)"
   started="$(owner_field started)"
-  [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null && [ "$(start_time "$pid")" = "$started" ]
+  [ -n "$pid" ] && [ -n "$started" ] && [ "$(start_time "$pid")" = "$started" ]
 }
 
 describe_holder() {
