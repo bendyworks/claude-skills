@@ -26,7 +26,12 @@ This means:
   belong in the commit message or PR description.
 - No "TODO: clean up after launch" comments without a tracker issue
   reference; if it needs cleaning, file the issue and reference it,
-  otherwise the TODO rots forever.
+  otherwise the TODO rots forever. The ID goes in the tag and the
+  title starts the text,
+  `TODO(ABC-123): Expire Stale Sessions -- ...`, so tools that read
+  `TODO(<id>)` still match it. The title is the one the issue had
+  when the comment was written; a later rename does not call for
+  editing it.
 
 A comment that explains why the code is shaped a certain way (a
 third-party quirk, a non-obvious data invariant, a stakeholder
@@ -50,6 +55,36 @@ the future reader, not for insiders of the current moment.
   InventoryAdjustmentReport is not). Spell domain terms out in code comments, commit messages, PR
   descriptions, and issues. This applies to what you author; quoted
   text may keep its author's acronyms.
+- **Never refer to a tracker item (an issue, story, or epic) or a pull
+  request by its ID alone, in a PR, an issue, a tracker comment, a
+  plan, a message to a teammate, or chat: look up its title and put it
+  beside the ID on first mention.** A reader who does not remember
+  "ABC-123" or "#45" has to click through and back to learn what it
+  is, while the writer almost always has the title in hand. In prose
+  that reads "ABC-123 (Expire Stale Sessions)"; in a link the title
+  goes in the link text, "[ABC-123 Expire Stale Sessions](...)" or
+  "[#45 Retry Webhook Deliveries](...)", never "[ABC-123](...)" or
+  "[PR #45](...)". First mention means the first in each message or
+  document, a heading included; later mentions may use the bare ID.
+  When a title already begins with its ID, write the ID once.
+  - Look up every title with the tracker's command-line tool or `gh`,
+    including for items the request already describes. A description
+    is not a title, and neither is a URL slug or memory. If the lookup
+    fails, never write anything presented as its title: name it in
+    lowercase prose ("ABC-123, the session-expiry work") and say its
+    title could not be checked.
+  - Forms that tooling parses stay exactly as the tooling expects,
+    with nothing inserted inside them: `Closes #45` (never
+    `Closes [#45 ...](...)`), commit trailers (`Refs: ABC-123`),
+    branch names, command arguments, and the `filed as #45` and
+    `(deferred to #45)` notes a skill or script matches on. The same
+    follow-up mentioned in a comment or message to people still gets
+    its title. In a PR body, a title may follow the reference after a
+    closing keyword, as in `Closes #45 (Retry Webhook Deliveries)` or
+    `Fixes ABC-123 (Expire Stale Sessions)`.
+  - Commit messages are outside this rule: the `Refs:` trailer names
+    the issue a commit serves, and cross-references to other issues
+    belong in the PR description (see the commit-messages guidance).
 - Prefer plain, concrete language over academic or testing-theory
   jargon. Say what the code or spec actually does ("pins the current
   report output") rather than naming the technique behind it.
