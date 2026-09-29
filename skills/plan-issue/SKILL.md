@@ -236,8 +236,8 @@ declaration present:
   mergeCommitAllowed,rebaseMergeAllowed`) or a workflow lints pull
   request titles, keep the title in the project's commit shape and
   put `PRJ-NNN` with the issue's title on the body's first line
-  instead. A Linear or
-  Shortcut issue's pull request follows that tracker's convention.
+  instead. A Linear or Shortcut issue's pull request follows that
+  tracker's convention.
 - **Machine tokens stay `#NNN`:** `Closes #NNN`, `Refs: #NNN`,
   `(deferred to #NNN)`, and "filed as #NNN" notes -- GitHub links
   and closes by number, and the housekeeping skill cross-references
