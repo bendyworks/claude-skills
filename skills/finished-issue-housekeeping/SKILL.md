@@ -346,7 +346,7 @@ If the issue was in the "Active Work" section of `MEMORY.md`, remove it from the
 
 ### 4c -- Promotion check: rules must not decay in memory
 
-Auto-memory decays -- files get pruned, and recalls carry staleness warnings. For each memory written or touched during this story, classify it:
+Auto-memory decays -- files get pruned, and recalls carry staleness warnings. For each memory written or touched during this story, or found holding a rule by 4a's search for an existing home, classify it:
 
 - **State**, as 4a defines it -- stays in memory. Most memories are state.
 - **A durable rule** ("how to behave", a standing policy, a permanent fact about the codebase or environment) -- promote it to its permanent home instead, choosing from 4a's list of homes and following every 4a bullet on writing there: the public-destination check, approval, the shared-repository draft, and the rules for a write inside this repository.
