@@ -170,6 +170,58 @@ class ParkClaudeMdTest < Minitest::Test
     end
   end
 
+  # Starts the script in its own process group around a long command
+  # that marks itself ready, sends it the signal once the file is
+  # parked, and returns the script's exit status.
+  def interrupt_parked_run(signal, target)
+    ready = File.join(@tmp, 'ready')
+    pid = Process.spawn(env, 'bash', SCRIPT, '--', 'sh', '-c', "touch '#{ready}'; exec sleep 30",
+                        pgroup: true, err: File::NULL)
+    wait_for { File.exist?(ready) }
+    refute File.exist?(@live), 'command started before the file was parked'
+    Process.kill(signal, target == :group ? -pid : pid)
+    status = nil
+    wait_for { (status = Process.wait2(pid, Process::WNOHANG)&.last) }
+    status
+  ensure
+    begin
+      Process.kill('KILL', -pid)
+    rescue Errno::ESRCH
+      nil
+    end
+  end
+
+  def wait_for(seconds: 10)
+    deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + seconds
+    until yield
+      flunk "gave up after #{seconds}s" if Process.clock_gettime(Process::CLOCK_MONOTONIC) > deadline
+      sleep 0.05
+    end
+  end
+
+  def test_ctrl_c_restores_the_file
+    status = interrupt_parked_run('INT', :group)
+
+    assert_equal 130, status.exitstatus
+    assert_equal ORIGINAL, File.read(@live)
+    refute File.exist?(@lock)
+  end
+
+  def test_term_stops_the_command_and_restores_the_file
+    status = interrupt_parked_run('TERM', :script)
+
+    assert_equal 143, status.exitstatus
+    assert_equal ORIGINAL, File.read(@live)
+    refute File.exist?(@lock)
+  end
+
+  def test_passes_standard_input_to_the_command
+    out, err, status = Open3.capture3(env, 'bash', SCRIPT, '--', 'cat', stdin_data: "prompt text\n")
+
+    assert status.success?, err
+    assert_equal "prompt text\n", out
+  end
+
   def test_refuses_without_the_separator_and_parks_nothing
     _out, err, status = park('true')
 

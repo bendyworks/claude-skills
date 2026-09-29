@@ -89,14 +89,36 @@ elif [ "$none_ok" -eq 0 ]; then
   die "$LIVE does not exist and no park lock explains it; another tool may have moved it. Pass --none-ok if this machine has no user-level CLAUDE.md."
 fi
 
+restored=0
 restore() {
+  [ "$restored" -eq 0 ] || return 0
+  restored=1
   if [ -e "$PARKED" ] || [ -L "$PARKED" ]; then
     mv "$PARKED" "$LIVE" || return 1
   fi
   rm -f "$OWNER" && rmdir "$LOCK"
 }
 
-CLAUDE_MD_PARK_HOLDER=$$ "$@"
+# The command runs in the background because bash defers a trapped
+# signal until a foreground command finishes, which would leave the
+# file parked for as long as the command ignores the signal. A
+# non-interactive shell also starts background commands with SIGINT
+# ignored, so both traps stop the command with TERM, and gives them
+# /dev/null for input unless told otherwise, hence the <&0.
+child=
+on_signal() {
+  [ -z "$child" ] || { kill -TERM "$child" 2>/dev/null; wait "$child" 2>/dev/null; }
+  restore
+  exit "$1"
+}
+trap 'on_signal 130' INT
+trap 'on_signal 143' TERM
+trap restore EXIT
+
+CLAUDE_MD_PARK_HOLDER=$$ "$@" <&0 &
+child=$!
+wait "$child"
 status=$?
+child=
 restore
 exit "$status"
