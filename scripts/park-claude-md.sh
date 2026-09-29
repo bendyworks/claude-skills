@@ -281,15 +281,15 @@ on_signal() {
     done <<EOF
 $listing
 EOF
-    if [ -z "$listing" ] || [ "$parent" = "$$" ] || [ "$command_done" -eq 1 ]; then
-      [ "$own_group" -eq 0 ] || kill -TERM -- "-$child" 2>/dev/null
-      if [ "$command_done" -eq 0 ]; then
-        for pid in "$child" $(printf '%s\n' "$listing" | descendants "$child"); do
-          kill -TERM "$pid" 2>/dev/null
-        done
-      fi
+    if [ "$command_done" -eq 0 ] && { [ -z "$listing" ] || [ "$parent" = "$$" ]; }; then
+      for pid in "$child" $(printf '%s\n' "$listing" | descendants "$child"); do
+        kill -TERM "$pid" 2>/dev/null
+      done
     fi
     wait "$child" 2>/dev/null
+    # Whatever is left in the group, including arms that ignore TERM,
+    # is gone before the file goes back.
+    sweep_group
   fi
   finish "$1"
 }
@@ -300,20 +300,29 @@ group_members() {
   ps -A -o pid= -o pgid= 2>/dev/null | awk -v g="$child" '$2 == g { print $1 }'
 }
 
-stop_leftovers() {
-  local left tries
-  [ "$own_group" -eq 1 ] || return 0
-  left="$(group_members)"
-  [ -n "$left" ] || return 0
-  echo "park-claude-md: the command left running process(es) $(echo $left); stopping them before putting $LIVE back. Have the batch wait for its arms." >&2
+# TERM to whatever is left in the command's group, then KILL after five
+# seconds for anything that ignored it. The group is signalled only
+# while it has members, since an empty group's ID can be reused.
+sweep_group() {
+  local tries=0
+  [ "$own_group" -eq 1 ] && [ -n "$child" ] || return 0
+  [ -n "$(group_members)" ] || return 0
   kill -TERM -- "-$child" 2>/dev/null
-  tries=0
   while [ -n "$(group_members)" ] && [ "$tries" -lt 50 ]; do
     sleep 0.1
     tries=$((tries + 1))
   done
-  kill -KILL -- "-$child" 2>/dev/null
+  [ -z "$(group_members)" ] || kill -KILL -- "-$child" 2>/dev/null
   return 0
+}
+
+stop_leftovers() {
+  local left
+  [ "$own_group" -eq 1 ] || return 0
+  left="$(group_members)"
+  [ -n "$left" ] || return 0
+  echo "park-claude-md: the command left running process(es) $(echo $left); stopping them before putting $LIVE back. Have the batch wait for its arms." >&2
+  sweep_group
 }
 
 trap 'on_signal 129' HUP
@@ -342,10 +351,11 @@ fi
 # set one up, so arms it starts and leaves running can still be found
 # after it exits, when they no longer descend from anything here. A
 # command in a group of its own is stopped by the terminal if it reads
-# from it; a headless batch does not.
-if command -v perl >/dev/null; then
+# from it, so the group is used only when nothing here is attached to
+# a terminal: a headless batch, where arms are left running unseen.
+if command -v perl >/dev/null && ! [ -t 0 ] && ! [ -t 1 ] && ! [ -t 2 ]; then
   own_group=1
-  CLAUDE_MD_PARK_HOLDER=$$ perl -e 'setpgrp(0, 0); exec { $ARGV[0] } @ARGV or do { print STDERR "park-claude-md: cannot run $ARGV[0]: $!\n"; exit 127 }' -- "$@" <&0 &
+  CLAUDE_MD_PARK_HOLDER=$$ perl -e 'setpgrp(0, 0); exec { $ARGV[0] } @ARGV or do { print STDERR "park-claude-md: cannot run $ARGV[0]: $!\n"; exit($!{ENOENT} ? 127 : 126) }' -- "$@" <&0 &
 else
   CLAUDE_MD_PARK_HOLDER=$$ "$@" <&0 &
 fi

@@ -13,6 +13,7 @@
 require_relative 'cli_test_case'
 require 'digest'
 require 'open3'
+require 'pty'
 require 'tmpdir'
 
 class ParkClaudeMdTest < Minitest::Test
@@ -642,12 +643,12 @@ class ParkClaudeMdTest < Minitest::Test
 
   def test_stops_and_reports_arms_the_command_left_running
     arm_file = File.join(@tmp, 'arm')
-    _out, err, status = park('--', 'sh', '-c', "sleep 30 & echo $! > '#{arm_file}'")
+    _out, err, status = park('--', 'sh', '-c', "(trap '' TERM; exec sleep 30) & echo $! > '#{arm_file}'")
     arm = Integer(File.read(arm_file))
 
     assert status.success?, err
     assert_match(/left running/, err)
-    wait_for(seconds: 3) { !running?(arm) }
+    refute running?(arm), 'an arm that ignores TERM outlived the restore'
     assert_equal ORIGINAL, File.read(@live)
     refute File.exist?(@lock)
   ensure
@@ -665,6 +666,61 @@ class ParkClaudeMdTest < Minitest::Test
     assert_match(/cannot run no-such-command-for-park-test/, err)
     assert_equal ORIGINAL, File.read(@live)
     refute File.exist?(@lock)
+  end
+
+  def test_a_signal_while_stopping_leftovers_still_stops_them_first
+    arm_file = File.join(@tmp, 'arm')
+    command = "(trap '' TERM; exec sleep 30) & echo $! > '#{arm_file}'"
+    pid = Process.spawn(env, 'bash', SCRIPT, '--', 'sh', '-c', command, pgroup: true, err: File::NULL)
+    wait_for { File.size?(arm_file) }
+    sleep 0.5
+    Process.kill('TERM', pid)
+    status = nil
+    wait_for(seconds: 15) { (status = Process.wait2(pid, Process::WNOHANG)&.last) }
+    arm = Integer(File.read(arm_file))
+
+    assert_equal 143, status.exitstatus
+    refute running?(arm), 'an arm that ignores TERM outlived the restore'
+    assert_equal ORIGINAL, File.read(@live)
+  ensure
+    kill_group(pid)
+    begin
+      Process.kill('KILL', arm) if arm
+    rescue Errno::ESRCH
+      nil
+    end
+  end
+
+  def test_a_command_can_read_the_terminal
+    output = +''
+    PTY.spawn(env, 'bash', SCRIPT, '--', 'sh', '-c', 'read line; echo "got $line"') do |reader, writer, pid|
+      writer.puts 'hello'
+      wait_for(seconds: 5) do
+        output << reader.read_nonblock(4096)
+        output.include?('got hello')
+      rescue IO::WaitReadable, Errno::EIO
+        false
+      end
+      Process.wait(pid)
+    ensure
+      begin
+        Process.kill('KILL', pid)
+      rescue Errno::ESRCH
+        nil
+      end
+    end
+
+    assert_includes output, 'got hello'
+    assert_equal ORIGINAL, File.read(@live)
+  end
+
+  def test_a_command_that_cannot_be_executed_exits_126
+    blocked = File.join(@tmp, 'not-executable')
+    File.write(blocked, "#!/bin/sh\n")
+    _out, _err, status = park('--', blocked)
+
+    assert_equal 126, status.exitstatus
+    assert_equal ORIGINAL, File.read(@live)
   end
 
   def test_refuses_without_the_separator_and_parks_nothing
