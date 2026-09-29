@@ -592,6 +592,54 @@ class ParkClaudeMdTest < Minitest::Test
     assert_equal ORIGINAL, File.read(@live)
   end
 
+  def test_refuses_without_a_command_and_parks_nothing
+    _out, err, status = park('--')
+
+    assert_equal 2, status.exitstatus
+    assert_match(/usage/, err)
+    assert_equal ORIGINAL, File.read(@live)
+    refute File.exist?(@lock)
+  end
+
+  def test_status_reports_a_lock_with_no_owner_record
+    Dir.mkdir(@lock)
+    out, _err, status = park('--status')
+
+    assert status.success?
+    assert_match(/no owner record/, out)
+  end
+
+  def test_a_holder_token_for_a_stranded_park_does_not_bypass_the_lock
+    probe = File.join(@tmp, 'probe')
+    dead = dead_pid
+    hold_lock(pid: dead, started: STALE_START)
+    _out, err, status = Open3.capture3(env.merge('CLAUDE_MD_PARK_HOLDER' => dead.to_s), 'bash', SCRIPT, '--', 'touch', probe)
+
+    assert_refused_leaving_lock_alone(status, probe)
+    assert_match(/no longer running/, err)
+  end
+
+  def test_none_ok_still_parks_a_file_that_exists
+    probe = File.join(@tmp, 'probe')
+    _out, err, status = park('--none-ok', '--', 'sh', '-c', "test -e '#{@live}' && echo present > '#{probe}'; true")
+
+    assert status.success?, err
+    refute File.exist?(probe), 'CLAUDE.md was visible while parked'
+    assert_equal ORIGINAL, File.read(@live)
+    refute File.exist?(@lock)
+  end
+
+  def test_refuses_a_park_whose_process_id_was_reused
+    probe = File.join(@tmp, 'probe')
+    live_holder do |pid|
+      hold_lock(pid: pid, started: STALE_START)
+      _out, err, status = park('--', 'touch', probe)
+
+      assert_refused_leaving_lock_alone(status, probe)
+      assert_match(/no longer running/, err)
+    end
+  end
+
   def test_refuses_without_the_separator_and_parks_nothing
     _out, err, status = park('true')
 
