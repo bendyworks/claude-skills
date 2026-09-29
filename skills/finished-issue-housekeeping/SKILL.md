@@ -302,16 +302,16 @@ approving anything.
 Ask the user **literally**: "Did anything surprising or non-obvious come up during this story that's worth saving as a rule or a skill for the next time we work in this area?"
 
 Examples of what qualifies as a **rule** -- a standing fact, or how to behave, that the next session working in this area has to know before it acts:
-- Hidden invariants or timing/ordering quirks discovered.
-- Library or framework gotchas whose reasoning would not be obvious from reading the code.
-- Non-obvious workarounds that future-you will not be able to derive from current-you's commit message alone.
+- An invariant or timing/ordering constraint that holds for as long as the code it governs exists.
+- A library or framework gotcha that applies wherever the library is used, whose reasoning would not be obvious from reading the code.
+- A workaround the code needs for as long as the underlying behavior stays the same, which future-you will not be able to derive from current-you's commit message alone.
 
 Examples of what qualifies as a **skill**:
 - A repeated multi-step workflow that you executed ad-hoc this time and would benefit from running deterministically next time.
 - A check-and-cleanup pattern that came together late and worth promoting from "we did it once" to "we do it every time."
 - Something the user *asked* you to do that you had to figure out from scratch -- and might have to re-figure-out from scratch next time without the skill.
 
-An answer can also be **point-in-time state** rather than either: an incident record, a note tied to code that may change, work paused until someone else finishes theirs. Only state belongs in memory.
+An answer can also be **point-in-time state** rather than either: active work, an incident record, a reference, a note tied to code that is expected to change, work paused until someone else finishes theirs. Only state belongs in memory. For an item tied to specific code, ask whether it stays true as long as that code does (a rule) or expires when something planned happens (state).
 
 **If yes, save each item in the most durable home that fits, in this order:**
 
@@ -343,9 +343,9 @@ If the issue was in the "Active Work" section of `MEMORY.md`, remove it from the
 
 ### 4c -- Promotion check: rules must not decay in memory
 
-Auto-memory decays -- files get pruned, and recalls carry staleness warnings. For each memory written or touched during this story (including one just written in 4a), classify it:
+Auto-memory decays -- files get pruned, and recalls carry staleness warnings. For each memory written or touched during this story, classify it:
 
-- **State** (active work, incident records, references, notes tied to code that may change) -- stays in memory. Most memories are state.
+- **State**, as 4a defines it -- stays in memory. Most memories are state.
 - **A durable rule** ("how to behave", a standing policy, a permanent fact about the codebase or environment) -- promote it to its permanent home instead, choosing from 4a's list of homes and with 4a's approval before writing.
 - **Already covered** by a permanent home -- delete the redundant memory.
 
