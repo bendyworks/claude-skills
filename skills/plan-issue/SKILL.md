@@ -300,6 +300,67 @@ If the slug changes later (e.g., a parent-story plan spawns a
 follow-up plan with its own slug per the deviation rule above),
 ask the user to `/rename` again with the new slug.
 
+## In-progress label (GitHub Issues only)
+
+**On a GitHub-tracked project, an issue a session is working carries
+the `in progress` label: create Step 2 applies it when the session
+picks the issue up, and the housekeeping skill (bundled in this
+plugin) removes it once the issue is closed. Neither move asks first.**
+A GitHub issue has no started state, so this label is the one signal
+that parallel sessions, and anyone scanning the issues list, share. A
+label that waits on a confirmation is wrong whenever the question goes
+unanswered, and a list that is sometimes wrong gets checked by hand
+anyway.
+
+Whether the project uses the label comes from two sources, established
+at every site that acts on it -- pickup in create Step 2, record Step
+5, and the housekeeping skill's Step 5 -- never from conversation:
+
+- **The repository has the label:** a label named exactly
+  `in progress`, in any case
+  (`gh label list --search "in progress" --json name`). The project
+  uses it. A different name (`status: in progress`, `wip`) is not it.
+- **The project declines it** in its checked-in CLAUDE.md (or a rules
+  file every session loads), in wording like:
+
+  > This project does not use an in-progress label on its GitHub issues.
+
+  Then never apply it and never offer it. The statement is the floor:
+  never infer a decline from the label being absent.
+- **Neither:** at pickup, offer once to create the label, in the same
+  message as the rest of the Step 2 findings. On yes, run
+  `gh label create "in progress" --color FBCA04 --description "Someone is working this issue"`
+  and apply it. On no, record the decline right away through its own
+  small pull request: a branch cut from the default branch that adds
+  only the decline sentence to CLAUDE.md, opened under the project's
+  pull-request rules. Never put it on the story's branch, where an
+  abandoned story would lose the decision. Until that pull request
+  merges, sessions on other branches can offer again; point them at it.
+
+**The label moves are two commands, assignment first:**
+
+```bash
+gh issue edit NNN --add-assignee "@me"
+gh issue edit NNN --add-label "in progress"
+```
+
+`gh` fails the label command when the label does not exist (exit 1,
+"not found"); keeping the two apart makes a failure name its own step.
+If either fails, say so in one line and carry on planning. Never retry
+under a different label name, and never create any label but this one.
+
+**No other tracker write happens without the user asking:** other
+labels, Projects-board moves, issue comments, and body edits outside
+`gh-issue-sync` wait for the user, and use labels the repository
+already has.
+
+GitHub marks the issue at pickup, while Linear and Shortcut move in
+record Step 5, because two sessions can collide while planning too and
+the label is the only claim GitHub shows. A team that wants the moves
+to run without permission prompts adds allow rules for exactly these
+commands (for example `Bash(gh issue edit * --add-label "in progress"*)`)
+to its settings.
+
 ---
 
 ## Phase: create
@@ -345,7 +406,9 @@ follow-up issues too.
 When creating a GitHub issue (`gh issue create`), there is no required
 project or team field; labels and milestone fill that interview slot.
 Offer the repo's existing labels and milestones rather than inventing
-new ones, and skip cleanly when the repo uses neither.
+new ones, and skip cleanly when the repo uses neither. `in progress` is
+not offered here: Step 2 applies it once the issue exists (see
+In-progress label).
 
 If the existing issue title is overly long or sentence-shaped, propose
 a rename now so the plan filename and branch can share the base name.
@@ -376,8 +439,21 @@ key here, where that section says to ask first.
 - **GitHub issue URL or `#NNN`**
   (`github.com/<org>/<repo>/issues/NNN`): use the `gh` CLI.
   ```bash
-  gh issue view NNN --json title,body,state,labels,comments
+  gh issue view NNN --json title,body,state,labels,assignees,comments
   ```
+  **Pick the issue up right after that read, before any research** (see
+  In-progress label):
+  - **Already labeled `in progress`:** when `.claude/plans/` holds a
+    plan file carrying this issue's number, this is the user's own
+    continuing work (a follow-up plan, a second create run); carry on.
+    Otherwise stop, say another session may be working the issue, and
+    ask whether to continue. Checking and then labeling is not atomic,
+    and every session runs as the same user, so this question is the
+    tie-breaker.
+  - **Otherwise:** assign it and apply the label, as two commands and
+    without asking; when the repository lacks the label, offer it
+    instead; when the project declines it, assign only.
+
   A bare `#NNN` means GitHub Issues only when the repo actually tracks
   work there -- issues enabled on the repo, the project's CLAUDE.md
   naming GitHub as the tracker, or existing plan-file slugs carrying
@@ -729,11 +805,11 @@ Draft a plan with:
       MISSING full-suite CI run -- a new repo, a deleted or narrowed
       job -- is owned the same way: fall back to a local full gate
       rather than proceeding on no evidence.
-      (GitHub Issues has no such state. If the repo visibly runs
-      status off labels or a Projects board, update those the same
-      way record Step 5 chose to; otherwise the linked PR going
-      ready-for-review is the visible signal and there is nothing
-      extra to do.)
+      (GitHub Issues has no such state. The `in progress` label stays
+      on through review, and the linked PR going ready-for-review is
+      the visible signal, so there is nothing extra to do. Other
+      status labels and Projects boards move only when the user asks;
+      see In-progress label.)
    5. **Stakeholder change-highlights (conditional).** When the change
       alters something a client stakeholder visibly relies on -- a
       report, receipt, statement, mailer, or screen -- and the project
@@ -970,16 +1046,21 @@ update if one is available; otherwise ask the user to move and assign
 the story in the Shortcut UI.
 
 For GitHub Issues there is no started state to move to -- an issue is
-only open or closed. Assign instead:
+only open or closed. **On GitHub this step is exactly the pickup's two
+commands again, run without asking: the assignment, then the
+`in progress` label when the repository has it and the project has not
+declined it (see In-progress label).** Both are no-ops when pickup
+already ran; this re-run covers a session that skipped create.
 
 ```bash
 gh issue edit NNN --add-assignee "@me"
+gh issue edit NNN --add-label "in progress"
 ```
 
-If the repo visibly runs status off labels (`in progress`,
-`pr review`, ...) or a Projects board, ask the user which to update
-rather than silently doing nothing; do not invent labels the repo does
-not already use.
+Nothing else: this step never offers or creates a label (the offer
+belongs to pickup), and never adds another label, moves a Projects
+board, posts a comment, or edits the issue body. Those happen only
+when the user asks.
 
 Skip this step only for planning-only exercises with no tracker issue.
 
