@@ -127,12 +127,13 @@ automated one:
 
 Merging into the default branch -- or into any shared branch a team
 merges into -- is a human action by default. A session takes the pull
-request as far as it can alone: green, current with the default
-branch, and marked ready for review (where a team requires the
-developer to approve text posted under their name, only once the
-developer has read the current title and body; see A draft is its own
-review above). Then it hands off and says what
-the PR is waiting on; finishing that preparation is the deliverable.
+request as far as it can alone: green, current with its base branch
+(for most PRs the default branch; for a stack layer, the layer below
+it), and marked ready for review (where a team requires the developer
+to approve text posted under their name, only once the developer has
+read the current title and body; see A draft is its own review above).
+Then it hands off and says what the PR is waiting on; finishing that
+preparation is the deliverable.
 
 Arming auto-merge is merging with a delay. `gh pr merge --auto` still
 causes the merge with no human in the loop, so it falls under this
@@ -140,14 +141,18 @@ rule rather than around it.
 
 A direct instruction authorizes that one merge, confirmed back first:
 name the direction per the rule below, say what lands, and say that a
-merge cannot be taken back. Then wait. Anything landing commits on a
-shared branch gets that confirmation; the safe direction -- "merge
-`main` into the branch" -- gets none. It authorizes an ordinary merge
-and never forcing one past a gate that refused it: a merge blocked by
-branch protection or missing approvals is the gate working, and
-`--admin` is not the remedy. The usual way back from a merge that
-should not have happened is a revert pull request, following the
-revert convention in the commit-messages guidance.
+merge cannot be taken back. Then wait. A PR whose base is another PR's
+branch is a stack layer; when it belongs to a native stack, merging it
+lands every unmerged PR up to and including it, so the confirmation
+lists each of them (see Merging stacked pull requests below). Anything
+landing commits on a shared branch gets that confirmation; the safe
+direction -- "merge `main` into the branch" -- gets none. It
+authorizes an ordinary merge and never forcing one past a gate that
+refused it: a merge blocked by branch protection or missing approvals
+is the gate working, and `--admin` is not the remedy. The usual way
+back from a merge that should not have happened is a revert pull
+request, following the revert convention in the commit-messages
+guidance.
 
 ## Say which direction a merge goes
 
@@ -199,75 +204,162 @@ direction rule in force.
 
 ## Merging stacked pull requests
 
-A stacked chain (each PR based on the previous PR's branch) merges in
-order, and the cascade is driven by branch deletion, not by merging.
-One invariant protects every step: **never merge a PR whose base is
-not the branch its work should land on.** Once every slice below a PR
-is merged, its base must be the mainline (the repo's default branch)
--- a base still naming an already-merged slice's branch means stop
-and retarget before doing anything else:
+A stacked chain (each PR based on the previous PR's branch) lands in
+order on its mainline: the branch the bottom layer targets, usually
+the repo's default branch but sometimes a develop or release branch.
+One invariant protects every step: **a PR's work lands only on the
+mainline, never on another layer's branch.** Native stacks hold it
+themselves (below); on the manual path, a PR's base must be the
+mainline before it merges.
 
-- **Deleting the merged PR's head branch is what triggers the
-  automatic retarget -- the merge itself never does.** When the head
-  branch of a merged PR is deleted, GitHub retargets open PRs that
-  targeted it to the merged PR's own base (the
-  [pull request retargeting changelog](https://github.blog/changelog/2020-05-19-pull-request-retargeting/)
-  describes the behavior). Merging without deleting leaves the next
-  PR aimed at the stale branch -- and merging that PR then lands its
-  work on a side branch instead of the real target, silently and
-  successfully. The per-slice sequence that maintains the invariant:
-  check that this PR's base is the mainline (retarget it if not),
-  merge, delete the head branch, and confirm the next PR's base
-  actually flipped. That sequence is the order the steps must happen
-  in, not permission to perform them. Per Who presses Merge above,
-  the merge is the human's, and so is deleting the head branch --
-  the merge UI offers the two together. A session's part in each
-  slice is to retarget before handing off, then, once the merge
-  lands, to confirm the next PR's base actually flipped and report
-  what it finds. The confirm steps earn their place: `gh pr merge
-  --delete-branch` runs a client-side merge-then-delete sequence
-  with a long-standing race that can skip the retarget or close the
-  dependent PR outright
-  ([cli/cli#1168 `gh pr merge --delete-branch`: GitHub does not
-  update base of dependent PRs](https://github.com/cli/cli/issues/1168)).
-  A base that did not flip is set by hand with
-  `gh pr edit <number> --base <target>` or the Edit button on the PR
-  page. A PR the race closed cannot simply be reopened -- GitHub
-  refuses while the PR's base branch no longer exists, and a closed
-  PR's base cannot be edited -- so restore the deleted branch (the
-  merged PR's "Restore branch" button), reopen, retarget, and delete
-  the branch again, or open a fresh PR from the same head branch.
-  The "Automatically delete head branches" repo setting moves the
-  deletion to merge time; keep the confirm step there too.
-- **Expect approvals to drop at each retarget.** GitHub marks an
-  approval stale when a retarget moves the PR's merge base in a way
-  that changes what the approval covered -- squash and rebase merges
-  below it all but guarantee this; a clean merge-commit chain can
-  escape it -- and a repo with stale-review dismissal enabled
-  dismisses stale approvals outright (the
+### Native stacks (the default on GitHub)
+
+GitHub's
+[stacked pull requests](https://docs.github.com/en/pull-requests/get-started/about-stacked-prs)
+maintain the invariant themselves: merging a layer retargets the layer
+above it to the mainline and rebases every branch above the merge on
+the server. GitHub offers them on github.com repositories (exit 9
+below covers one where they are not enabled), so build every chain
+there as a stack, using the
+[`github/gh-stack`](https://github.com/github/gh-stack) CLI extension:
+
+- **Check for a stack before merging a PR, working on its branch, or
+  committing to the mainline.** A PR based on another PR's branch is a
+  stack layer. GitHub's `stack` field on a pull request says which
+  native stack it belongs to:
+  `gh api graphql -f query='{ repository(owner:"<owner>", name:"<repo>")
+  { pullRequest(number: <pr-number>) { stack { number } } } }'`
+  answers for one PR, and before committing to the mainline, ask it of
+  each of the developer's own open PRs (`gh pr list --author @me`).
+  `gh stack view --json` reads local tracking only, so on the
+  mainline, or on a layer nobody imported, it reports no stack even
+  while one is open.
+- **Create the stack before anyone reviews it.** `gh stack init` names
+  the branches and `gh stack submit --auto` opens every PR as a draft.
+  For PRs that already exist, `gh stack link <bottom> ... <top>` joins
+  them: it pushes the branches, keeps existing PRs as they are, and
+  opens a draft for any branch without one. `link` sets up no local
+  tracking, so `sync` and `rebase` refuse until
+  `gh stack checkout <stack-number>` imports the stack, leaving
+  rewritten and unpushed local tips as they were.
+- **Keep draft-first.** Never pass `--open`, which marks new and
+  existing PRs ready for review. A PR the tool opens has the branch
+  name for a title and a credit line for a body; rewrite both (per
+  Lead with why) before handing the stack off. A draft layer blocks
+  the merge of every layer above it.
+- **A stack merge lands every unmerged layer up to and including its
+  target.** It is a merge under Who presses Merge like any other, and
+  its confirmation lists each PR that will land, bottom to top, with
+  the merge method. A confirmed merge passes both explicitly,
+  `gh stack merge <pr-number> --yes --squash`, naming the top PR to
+  land: a stack number, or a bare `gh stack merge` run with `--yes` or
+  in a non-interactive shell, merges every layer, and without a method
+  flag it reuses whichever method ran last. Merge a native-stack layer
+  with `gh stack merge`, never `gh pr merge`, which cannot merge a
+  stack. Without a merge queue the merge is all or nothing. Where the
+  mainline uses a merge queue, the stack joins the queue instead: the
+  queue's own method applies and the tool ignores the flag, and the
+  layers may land in separate groups, so the confirmation names the
+  queue rather than a method. Treat auto-merge armed on any layer as a
+  stack merge up to and including that layer.
+- **After a layer merges, bring local branches current before any
+  other work, since the server-side rebase rewrote every branch above
+  it.** `gh stack sync` rebases each local branch onto its new parent,
+  keeping unpushed commits, and force-pushes every layer with lease;
+  on a stack that was only linked, import it with `gh stack checkout`
+  first. That push rewrites pushed branches under review, so run it on
+  the developer's own stack when they have asked for the work that
+  needs it, and otherwise propose it first. Resetting a branch to its
+  remote instead (`git reset --hard <remote>/<branch>`) discards any
+  unpushed commit, so check `git log <remote>/<branch>..<branch>` and
+  take a backup ref before one.
+- **Read `gh stack`'s output, not only its exit code.** `sync` exits 0
+  after printing "Sync aborted" (the local and remote stacks diverged,
+  and nothing changed) and after a failed push ("Push failed", then
+  "Stack synced").
+- **Carry fixes up the chain with `gh stack rebase`, never by merging
+  a lower branch into a higher one.** The stack's linear rebase drops
+  a merge commit inside a branch, and its conflict resolution has to
+  be redone by hand where the conflict first appears. `rebase` is
+  local: take a backup ref of each branch first, confirm with
+  `git range-diff <parent-backup>..<backup> <parent>..<branch>` (the
+  parent is the layer below, or the mainline for the bottom layer)
+  that only the intended changes moved, then push with
+  `gh stack push`, per-branch `--force-with-lease`: after a
+  hand-resolved rebase, `sync`'s own push fails.
+- **While the developer's own stack is open, keep unrelated commits
+  off its mainline and off every layer.** On a layer, the change rides
+  into a PR under review that is not about it. Committed straight to
+  the mainline, it puts every branch in the chain behind at once, and
+  bringing them current rewrites all of them: new commit ids, a CI run
+  per branch, a stale review on anything already read. Put the change
+  on its own branch, as its own PR, cut from the branch it belongs on,
+  or hold it until the stack lands. If it cannot wait, say that it
+  forces that cascade, and bring the stack current with
+  `gh stack sync` under the rule above rather than rebasing one PR,
+  which leaves the layers above it behind. Other people's PRs landing
+  on the mainline are the ordinary course of a team repository, not a
+  breach of this rule.
+
+GitHub's own agent skill for gh-stack
+([`SKILL.md`](https://github.com/github/gh-stack/blob/main/skills/gh-stack/SKILL.md))
+covers the command mechanics: non-interactive flags, `--json` output,
+exit codes.
+
+### On both paths
+
+- **Expect approvals to drop at each layer.** On a native stack, the
+  server-side rebase pushes new commits to every layer above a merge,
+  and a repo that dismisses stale approvals when new commits are pushed
+  drops them there. On the manual path, a retarget that moves a PR's
+  merge base marks its approval stale (squash and rebase merges below
+  it all but guarantee this), and the same setting dismisses it (the
   [required-approvals security changelog](https://github.blog/changelog/2023-06-06-security-enhancements-to-required-approvals-on-pull-requests/)
-  describes the mechanism). Plan for a quick re-approval per slice;
+  describes the mechanism). Plan for a quick re-approval per layer;
   asking for it while CI runs keeps the chain moving.
-- **A retarget alone triggers no new CI run.** A base change is not
-  among the `pull_request` activity types workflows listen to by
-  default (only a workflow that opts into `edited` sees it), and
-  required checks are named in the target branch's protection rules,
-  not in the branch under test -- so a retargeted PR whose existing runs
-  never reported a newly required or renamed check waits forever on
-  a context marked "Expected". Workflow files do ride the branch
-  under test, so a stale branch also runs outdated CI config. Both
-  problems share one remedy: update each branch from the default
-  branch before merging it, which refreshes the workflows and
-  triggers a fresh run.
 - **A merged PR can never be reopened or retargeted, and approvals do
   not transfer between PRs.** Recovering from a wrong-base merge means
   a fresh PR from the same head branch (the content is intact); the
   old PR's approval is evidence to cite, not something to carry over.
 
-Two adjacent traps: on a squash-merge repo, a retargeted PR shows the
-just-merged slice's commits in its diff again until the branch is
-updated from the default branch (the squashed copy is a new commit
-the fork point predates); and auto-merge armed on the next PR before
-its base flips is the wrong-base merge with no human in the loop --
-arm it only after confirming the retarget, and only where arming is
-authorized at all, since arming is itself a merge.
+### Without native stacks
+
+A chain across forks, on another forge, or where `gh stack` exits 9
+("Stacked PRs are not enabled for this repository") gets no
+server-side cascade, and the invariant is held by hand. So does one
+where the gh-stack extension is not installed and the developer has
+not agreed to install it; installing an extension on their machine is
+theirs to decide:
+
+- **Deleting the merged PR's head branch triggers the retarget; the
+  merge alone does not** ([pull request retargeting
+  changelog](https://github.blog/changelog/2020-05-19-pull-request-retargeting/)).
+  Per layer: check that the PR's base is the mainline (retarget it if
+  not), merge, delete the head branch, and confirm the next PR's base
+  flipped. The merge and the deletion are the human's; a session
+  retargets before handing off and confirms the flip afterward. The
+  confirm step earns its place: `gh pr merge --delete-branch` has a
+  race that can skip the retarget or close the dependent PR
+  ([cli/cli#1168 `gh pr merge --delete-branch`: GitHub does not update
+  base of dependent PRs](https://github.com/cli/cli/issues/1168)). Set
+  a base that did not flip with `gh pr edit <number> --base <target>`.
+  A closed dependent PR cannot be reopened while its base branch is
+  gone: restore the branch, reopen, retarget, and delete it again, or
+  open a fresh PR from the same head branch. The "Automatically delete
+  head branches" repo setting moves the deletion to merge time; the
+  confirm step still applies.
+- **A retarget alone triggers no new CI run.** A base change is not
+  among the `pull_request` activity types workflows listen to by
+  default, and required checks are named in the target branch's
+  protection rules, so a retargeted PR whose runs never reported a
+  newly required or renamed check waits on it forever, marked
+  "Expected". A stale branch also runs outdated workflow files. Once a
+  layer's base is the mainline, update its branch from the mainline
+  before merging it, which fixes both; until then it stays current
+  with the layer below.
+- **On a squash-merge repo, a retargeted PR shows the merged layer's
+  commits in its diff again** until its branch is updated from the
+  mainline: the squashed copy is a new commit its fork point predates.
+- **Arm auto-merge on the next PR only after its base has flipped, and
+  only where arming is authorized** (see Who presses Merge); armed
+  earlier, it is the wrong-base merge with no human in the loop.
