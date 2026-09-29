@@ -26,6 +26,16 @@ today", the plan slips, and weeks later a teammate follows the
 comment's instructions hunting for something that never existed.
 
 A comment about work that has already shipped labels the old behavior
-against a named change or an absolute date ("before #123 merged, the
-export dropped blank rows"), never a relative day. The
-writing-about-change guidance covers tense on both sides of a change.
+against a named change or an absolute date ("before #123 (Keep Blank
+Rows in Exports) merged, the export dropped blank rows"), never a
+relative day. The writing-about-change guidance covers tense on both
+sides of a change.
+
+A comment that points at another issue or pull request names it:
+look up the title and put it beside the ID on first mention, in the
+link text when linked ("[#45 Retry Webhook Deliveries](...)", never
+"#45" or "[#45](...)" alone). A reader arriving weeks later has no
+memory of what the number was. Never invent a title the lookup did
+not return; name the item in lowercase prose instead. The Plain
+language section of the code-comments guidance carries the full rule,
+including the forms tooling parses.
