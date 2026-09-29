@@ -228,8 +228,9 @@ and retarget before doing anything else:
   --delete-branch` runs a client-side merge-then-delete sequence
   with a long-standing race that can skip the retarget or close the
   dependent PR outright
-  ([cli/cli#1168](https://github.com/cli/cli/issues/1168)). A base
-  that did not flip is set by hand with
+  ([cli/cli#1168 `gh pr merge --delete-branch`: GitHub does not
+  update base of dependent PRs](https://github.com/cli/cli/issues/1168)).
+  A base that did not flip is set by hand with
   `gh pr edit <number> --base <target>` or the Edit button on the PR
   page. A PR the race closed cannot simply be reopened -- GitHub
   refuses while the PR's base branch no longer exists, and a closed
