@@ -18,6 +18,9 @@ require 'tmpdir'
 class ParkClaudeMdTest < Minitest::Test
   SCRIPT = File.expand_path('../scripts/park-claude-md.sh', __dir__)
   ORIGINAL = "# user rules\nalways say hello\n"
+  # A start time no running process has, so a holder recorded with it
+  # reads as stranded even when its process ID is reused.
+  STALE_START = 'Thu Jan  1 00:00:00 1970'
 
   def setup
     @tmp = File.realpath(Dir.mktmpdir('park-claude-md-test'))
@@ -40,9 +43,120 @@ class ParkClaudeMdTest < Minitest::Test
     Open3.capture3(env, 'bash', SCRIPT, *args)
   end
 
+  # The form the script records: fixed to the C locale and UTC, so the
+  # same process reads the same from any terminal.
+  def start_time(pid)
+    out, = Open3.capture2({ 'LC_ALL' => 'C', 'TZ' => 'UTC0' }, 'ps', '-o', 'lstart=', '-p', pid.to_s)
+    out.strip
+  end
+
+  # Stands in for another session's park: a lock directory holding the
+  # parked file and an owner record for the given process.
+  def hold_lock(pid:, started: start_time(pid))
+    Dir.mkdir(@lock)
+    File.write(File.join(@lock, 'owner'), "checkout=/elsewhere/checkout2\npid=#{pid}\nstarted=#{started}\n")
+    File.rename(@live, File.join(@lock, 'CLAUDE.md'))
+  end
+
+  def live_holder
+    pid = Process.spawn('sleep', '30')
+    yield pid
+  ensure
+    if pid
+      Process.kill('KILL', pid)
+      Process.wait(pid)
+    end
+  end
+
+  def assert_refused_leaving_lock_alone(status, probe)
+    assert_equal 2, status.exitstatus
+    refute File.exist?(probe), 'command ran despite the refusal'
+    assert_equal ORIGINAL, File.read(File.join(@lock, 'CLAUDE.md'))
+    refute File.exist?(@live)
+  end
+
+  # Starts the script in its own process group around a command that
+  # starts an arm of its own (the way a batch starts its claude -p runs)
+  # and marks itself ready, sends the signal once the file is parked,
+  # and returns the script's exit status and the arm's process ID.
+  def interrupt_parked_run(signal, target, run_env = env)
+    ready = File.join(@tmp, 'ready')
+    arm = File.join(@tmp, 'arm')
+    # The trailing sleep keeps the command running after its arm dies,
+    # so the script's exit shows the command itself was stopped.
+    command = "echo $$ > '#{arm}.command'; sleep 30 & echo $! > '#{arm}'; touch '#{ready}'; wait; sleep 30"
+    pid = Process.spawn(run_env, 'bash', SCRIPT, '--', 'sh', '-c', command, pgroup: true, err: File::NULL)
+    wait_for { File.exist?(ready) }
+    refute File.exist?(@live), 'command started before the file was parked'
+    Process.kill(signal, target == :group ? -pid : pid)
+    status = nil
+    wait_for { (status = Process.wait2(pid, Process::WNOHANG)&.last) }
+    [status, Integer(File.read(arm)), Integer(File.read("#{arm}.command"))]
+  rescue StandardError, Minitest::Assertion
+    kill_group(pid)
+    raise
+  end
+
+  # Cleanup for a failed signal test only: after a clean exit the arm
+  # must have stopped on its own, and killing the group would hide it.
+  def kill_group(pid)
+    return unless pid
+
+    Process.kill('KILL', -pid)
+    Process.wait(pid)
+  rescue Errno::ESRCH, Errno::ECHILD
+    nil
+  end
+
+  def running?(pid)
+    Process.kill(0, pid)
+    stat, = Open3.capture2('ps', '-o', 'stat=', '-p', pid.to_s)
+    !stat.strip.start_with?('Z')
+  rescue Errno::ESRCH
+    false
+  end
+
+  def wait_for(seconds: 10)
+    deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + seconds
+    until yield
+      flunk "gave up after #{seconds}s" if Process.clock_gettime(Process::CLOCK_MONOTONIC) > deadline
+      sleep 0.05
+    end
+  end
+
+  def assert_interrupted(signal, target, exit_status)
+    status, arm = interrupt_parked_run(signal, target)
+
+    assert_equal exit_status, status.exitstatus
+    wait_for(seconds: 3) { !running?(arm) }
+    assert_equal ORIGINAL, File.read(@live)
+    refute File.exist?(@lock)
+  ensure
+    begin
+      Process.kill('KILL', arm) if arm
+    rescue Errno::ESRCH
+      nil
+    end
+  end
+
+  def dead_pid
+    pid = Process.spawn('true')
+    Process.wait(pid)
+    pid
+  end
+
+  # An environment whose ps reports no start times, as some sandboxes do.
+  def start_time_blind_env
+    shims = File.join(@tmp, 'shims')
+    FileUtils.mkdir_p(shims)
+    File.write(File.join(shims, 'ps'), "#!/bin/sh\ncase \"$*\" in *lstart*) exit 1 ;; esac\nexec /bin/ps \"$@\"\n")
+    File.chmod(0o755, File.join(shims, 'ps'))
+    env.merge('PATH' => "#{shims}:#{ENV.fetch('PATH')}")
+  end
+
   def test_runs_the_command_with_the_file_parked_and_restores_it
     probe = File.join(@tmp, 'probe')
-    _out, err, status = park('--', 'sh', '-c', "ls '#{@config}' > '#{probe}'; test -e '#{@live}' && echo present >> '#{probe}'; true")
+    _out, err, status = park('--', 'sh', '-c', "touch '#{probe}'; test -e '#{@live}' && echo present >> '#{probe}'; true")
 
     assert status.success?, err
     refute_includes File.read(probe), 'present', 'CLAUDE.md was visible while parked'
@@ -73,36 +187,6 @@ class ParkClaudeMdTest < Minitest::Test
     assert_equal args.inspect, out
   end
 
-  # The form the script records: fixed to the C locale and UTC, so the
-  # same process reads the same from any terminal.
-  def start_time(pid)
-    out, = Open3.capture2({ 'LC_ALL' => 'C', 'TZ' => 'UTC0' }, 'ps', '-o', 'lstart=', '-p', pid.to_s)
-    out.strip
-  end
-
-  # Stands in for another session's park: a lock directory holding the
-  # parked file and an owner record for the given process.
-  def hold_lock(pid:, started: start_time(pid), checkout: '/elsewhere/checkout2')
-    Dir.mkdir(@lock)
-    File.write(File.join(@lock, 'owner'), "checkout=#{checkout}\npid=#{pid}\nstarted=#{started}\n")
-    File.rename(@live, File.join(@lock, 'CLAUDE.md'))
-  end
-
-  def live_holder
-    pid = Process.spawn('sleep', '30')
-    yield pid
-  ensure
-    Process.kill('KILL', pid)
-    Process.wait(pid)
-  end
-
-  def assert_refused_leaving_lock_alone(status, probe)
-    assert_equal 2, status.exitstatus
-    refute File.exist?(probe), 'command ran despite the refusal'
-    assert_equal ORIGINAL, File.read(File.join(@lock, 'CLAUDE.md'))
-    refute File.exist?(@live)
-  end
-
   def test_refuses_while_another_live_session_holds_the_park
     probe = File.join(@tmp, 'probe')
     live_holder do |pid|
@@ -119,9 +203,7 @@ class ParkClaudeMdTest < Minitest::Test
 
   def test_refuses_a_stale_park_and_points_at_recover
     probe = File.join(@tmp, 'probe')
-    dead = Process.spawn('true')
-    Process.wait(dead)
-    hold_lock(pid: dead, started: 'Thu Jan  1 00:00:00 1970')
+    hold_lock(pid: dead_pid, started: STALE_START)
     _out, err, status = park('--', 'touch', probe)
 
     assert_refused_leaving_lock_alone(status, probe)
@@ -180,69 +262,6 @@ class ParkClaudeMdTest < Minitest::Test
       _out, _err, status = Open3.capture3(env.merge('CLAUDE_MD_PARK_HOLDER' => '1'), 'bash', SCRIPT, '--', 'touch', probe)
 
       assert_refused_leaving_lock_alone(status, probe)
-    end
-  end
-
-  # Starts the script in its own process group around a command that
-  # starts an arm of its own (the way a batch starts its claude -p runs)
-  # and marks itself ready, sends the signal once the file is parked,
-  # and returns the script's exit status and the arm's process ID.
-  def interrupt_parked_run(signal, target, run_env = env)
-    ready = File.join(@tmp, 'ready')
-    arm = File.join(@tmp, 'arm')
-    # The trailing sleep keeps the command running after its arm dies,
-    # so the script's exit shows the command itself was stopped.
-    command = "echo $$ > '#{arm}.command'; sleep 30 & echo $! > '#{arm}'; touch '#{ready}'; wait; sleep 30"
-    pid = Process.spawn(run_env, 'bash', SCRIPT, '--', 'sh', '-c', command, pgroup: true, err: File::NULL)
-    wait_for { File.exist?(ready) }
-    refute File.exist?(@live), 'command started before the file was parked'
-    Process.kill(signal, target == :group ? -pid : pid)
-    status = nil
-    wait_for { (status = Process.wait2(pid, Process::WNOHANG)&.last) }
-    [status, Integer(File.read(arm)), Integer(File.read("#{arm}.command"))]
-  rescue StandardError, Minitest::Assertion
-    kill_group(pid)
-    raise
-  end
-
-  # Cleanup for a failed signal test only: after a clean exit the arm
-  # must have stopped on its own, and killing the group would hide it.
-  def kill_group(pid)
-    return unless pid
-
-    Process.kill('KILL', -pid)
-    Process.wait(pid)
-  rescue Errno::ESRCH, Errno::ECHILD
-    nil
-  end
-
-  def running?(pid)
-    Process.kill(0, pid)
-    !`ps -o stat= -p #{pid}`.strip.start_with?('Z')
-  rescue Errno::ESRCH
-    false
-  end
-
-  def wait_for(seconds: 10)
-    deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + seconds
-    until yield
-      flunk "gave up after #{seconds}s" if Process.clock_gettime(Process::CLOCK_MONOTONIC) > deadline
-      sleep 0.05
-    end
-  end
-
-  def assert_interrupted(signal, target, exit_status)
-    status, arm = interrupt_parked_run(signal, target)
-
-    assert_equal exit_status, status.exitstatus
-    wait_for(seconds: 3) { !running?(arm) }
-    assert_equal ORIGINAL, File.read(@live)
-    refute File.exist?(@lock)
-  ensure
-    begin
-      Process.kill('KILL', arm) if arm
-    rescue Errno::ESRCH
-      nil
     end
   end
 
@@ -310,12 +329,6 @@ class ParkClaudeMdTest < Minitest::Test
     refute File.exist?(@lock)
   end
 
-  def dead_pid
-    pid = Process.spawn('true')
-    Process.wait(pid)
-    pid
-  end
-
   def test_status_reports_nothing_parked
     out, _err, status = park('--status')
 
@@ -364,7 +377,7 @@ class ParkClaudeMdTest < Minitest::Test
   end
 
   def test_status_flags_a_stranded_park
-    hold_lock(pid: dead_pid, started: 'Thu Jan  1 00:00:00 1970')
+    hold_lock(pid: dead_pid, started: STALE_START)
     out, _err, status = park('--status')
 
     assert status.success?
@@ -373,7 +386,7 @@ class ParkClaudeMdTest < Minitest::Test
   end
 
   def test_recover_restores_a_stranded_park
-    hold_lock(pid: dead_pid, started: 'Thu Jan  1 00:00:00 1970')
+    hold_lock(pid: dead_pid, started: STALE_START)
     _out, err, status = park('--recover')
 
     assert status.success?, err
@@ -383,7 +396,7 @@ class ParkClaudeMdTest < Minitest::Test
 
   def test_recover_treats_a_reused_process_id_as_stranded
     live_holder do |pid|
-      hold_lock(pid: pid, started: 'Thu Jan  1 00:00:00 1970')
+      hold_lock(pid: pid, started: STALE_START)
       _out, err, status = park('--recover')
 
       assert status.success?, err
@@ -405,7 +418,7 @@ class ParkClaudeMdTest < Minitest::Test
   end
 
   def test_recover_keeps_both_files_when_a_new_one_exists
-    hold_lock(pid: dead_pid, started: 'Thu Jan  1 00:00:00 1970')
+    hold_lock(pid: dead_pid, started: STALE_START)
     File.write(@live, "newer\n")
     _out, err, status = park('--recover')
 
@@ -416,7 +429,7 @@ class ParkClaudeMdTest < Minitest::Test
   end
 
   def test_recover_restores_a_parked_copy_that_changed
-    hold_lock(pid: dead_pid, started: 'Thu Jan  1 00:00:00 1970')
+    hold_lock(pid: dead_pid, started: STALE_START)
     File.write(File.join(@lock, 'CLAUDE.md'), "checked by hand\n")
     _out, err, status = park('--recover')
 
@@ -493,15 +506,6 @@ class ParkClaudeMdTest < Minitest::Test
     assert_equal 2, status.exitstatus
     assert_match(/could not create/, err)
     refute_match(/another session/, err)
-  end
-
-  # An environment whose ps reports no start times, as some sandboxes do.
-  def start_time_blind_env
-    shims = File.join(@tmp, 'shims')
-    FileUtils.mkdir_p(shims)
-    File.write(File.join(shims, 'ps'), "#!/bin/sh\ncase \"$*\" in *lstart*) exit 1 ;; esac\nexec /bin/ps \"$@\"\n")
-    File.chmod(0o755, File.join(shims, 'ps'))
-    env.merge('PATH' => "#{shims}:#{ENV.fetch('PATH')}")
   end
 
   def test_refuses_to_park_when_it_cannot_read_its_own_start_time
