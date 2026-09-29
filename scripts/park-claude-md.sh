@@ -183,17 +183,42 @@ finish() {
   exit "$1"
 }
 
+# Prints the process IDs of every process descended from $1.
+descendants() {
+  ps -A -o pid= -o ppid= | awk -v root="$1" '
+    { kids[$2] = kids[$2] " " $1 }
+    END {
+      queue = root
+      while (queue != "") {
+        split(queue, ids, " "); queue = ""
+        for (i in ids) {
+          n = split(kids[ids[i]], found, " ")
+          for (j = 1; j <= n; j++) { print found[j]; queue = queue " " found[j] }
+        }
+      }
+    }'
+}
+
 # The command runs in the background because bash defers a trapped
 # signal until a foreground command finishes, which would leave the
 # file parked for as long as the command ignores the signal. A
 # non-interactive shell also starts background commands with SIGINT
-# ignored, so both traps stop the command with TERM, and gives them
-# /dev/null for input unless told otherwise, hence the <&0.
+# ignored, and they pass that on to everything they start, so the traps
+# stop the whole tree under the command with TERM: a batch's arms are
+# usually its grandchildren, and one left running would read the
+# restored file. The tree is listed before any of it is signalled,
+# since a child that dies first leaves its own children unfindable.
+# Background commands also get /dev/null for input unless told
+# otherwise, hence the <&0.
 child=
 on_signal() {
-  [ -z "$child" ] || { kill -TERM "$child" 2>/dev/null; wait "$child" 2>/dev/null; }
+  if [ -n "$child" ]; then
+    for pid in "$child" $(descendants "$child"); do kill -TERM "$pid" 2>/dev/null; done
+    wait "$child" 2>/dev/null
+  fi
   finish "$1"
 }
+trap 'on_signal 129' HUP
 trap 'on_signal 130' INT
 trap 'on_signal 143' TERM
 trap restore EXIT

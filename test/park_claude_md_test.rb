@@ -182,25 +182,39 @@ class ParkClaudeMdTest < Minitest::Test
     end
   end
 
-  # Starts the script in its own process group around a long command
-  # that marks itself ready, sends it the signal once the file is
-  # parked, and returns the script's exit status.
+  # Starts the script in its own process group around a command that
+  # starts an arm of its own (the way a batch starts its claude -p runs)
+  # and marks itself ready, sends the signal once the file is parked,
+  # and returns the script's exit status and the arm's process ID.
   def interrupt_parked_run(signal, target)
     ready = File.join(@tmp, 'ready')
-    pid = Process.spawn(env, 'bash', SCRIPT, '--', 'sh', '-c', "touch '#{ready}'; exec sleep 30",
-                        pgroup: true, err: File::NULL)
+    arm = File.join(@tmp, 'arm')
+    command = "sleep 30 & echo $! > '#{arm}'; touch '#{ready}'; wait"
+    pid = Process.spawn(env, 'bash', SCRIPT, '--', 'sh', '-c', command, pgroup: true, err: File::NULL)
     wait_for { File.exist?(ready) }
     refute File.exist?(@live), 'command started before the file was parked'
     Process.kill(signal, target == :group ? -pid : pid)
     status = nil
     wait_for { (status = Process.wait2(pid, Process::WNOHANG)&.last) }
-    status
-  ensure
-    begin
-      Process.kill('KILL', -pid)
-    rescue Errno::ESRCH
-      nil
-    end
+    [status, Integer(File.read(arm))]
+  rescue StandardError, Minitest::Assertion
+    kill_group(pid)
+    raise
+  end
+
+  # Cleanup for a failed signal test only: after a clean exit the arm
+  # must have stopped on its own, and killing the group would hide it.
+  def kill_group(pid)
+    Process.kill('KILL', -pid) if pid
+  rescue Errno::ESRCH
+    nil
+  end
+
+  def running?(pid)
+    Process.kill(0, pid)
+    !`ps -o stat= -p #{pid}`.strip.start_with?('Z')
+  rescue Errno::ESRCH
+    false
   end
 
   def wait_for(seconds: 10)
@@ -211,20 +225,27 @@ class ParkClaudeMdTest < Minitest::Test
     end
   end
 
-  def test_ctrl_c_restores_the_file
-    status = interrupt_parked_run('INT', :group)
+  def assert_interrupted(signal, target, exit_status)
+    status, arm = interrupt_parked_run(signal, target)
 
-    assert_equal 130, status.exitstatus
+    assert_equal exit_status, status.exitstatus
+    wait_for(seconds: 3) { !running?(arm) }
     assert_equal ORIGINAL, File.read(@live)
     refute File.exist?(@lock)
+  ensure
+    Process.kill('KILL', arm) if arm && running?(arm)
   end
 
-  def test_term_stops_the_command_and_restores_the_file
-    status = interrupt_parked_run('TERM', :script)
+  def test_ctrl_c_stops_the_command_and_its_arms_and_restores_the_file
+    assert_interrupted('INT', :group, 130)
+  end
 
-    assert_equal 143, status.exitstatus
-    assert_equal ORIGINAL, File.read(@live)
-    refute File.exist?(@lock)
+  def test_term_stops_the_command_and_its_arms_and_restores_the_file
+    assert_interrupted('TERM', :script, 143)
+  end
+
+  def test_a_closed_terminal_stops_the_command_and_restores_the_file
+    assert_interrupted('HUP', :script, 129)
   end
 
   def test_passes_standard_input_to_the_command
