@@ -70,11 +70,12 @@ the future reader, not for insiders of the current moment.
     lowercase prose ("ABC-123, the session-expiry work") and say its
     title could not be checked.
   - Forms that tooling parses stay exactly as the tooling expects,
-    with no title or link inserted: `Closes #45` (never
-    `Closes [#45 ...](...)`), commit trailers (`Refs: ABC-123`),
-    branch names, command arguments, and the `filed as #45` and
-    `(deferred to #45)` notes a plan file keeps for scripts to read
-    back. The same follow-up mentioned in a comment or message to
+    with nothing inserted inside them: `Closes #45` (the title may
+    follow the number, as in `Closes #45 (Retry Webhook Deliveries)`,
+    but never `Closes [#45 ...](...)`), commit trailers
+    (`Refs: ABC-123`), branch names, command arguments, and the
+    `filed as #45` and `(deferred to #45)` notes a plan file keeps for
+    scripts to read back. The same follow-up mentioned in a comment or message to
     people still gets its title.
   - Commit messages are outside this rule: the `Refs:` trailer names
     the issue a commit serves, and cross-references to other issues
