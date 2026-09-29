@@ -367,6 +367,11 @@ to its settings.
 
 ### Step 1 -- Interview for the issue
 
+**When the user hands you an existing GitHub issue, read and pick it
+up (Step 2's GitHub commands) before asking anything below.** Pickup
+is not a later step: it is what tells other sessions the issue is
+taken.
+
 Ask the user:
 
 1. Is there an existing tracker issue (Linear, Shortcut, or GitHub)?
@@ -440,19 +445,23 @@ key here, where that section says to ask first.
   (`github.com/<org>/<repo>/issues/NNN`): use the `gh` CLI.
   ```bash
   gh issue view NNN --json title,body,state,labels,assignees,comments
+  # Pick the issue up now, before any research, without asking (see In-progress label):
+  gh issue edit NNN --add-assignee "@me"            # always, even where the label is declined
+  gh label list --search "in progress" --json name  # does the repository have the label?
+  gh issue edit NNN --add-label "in progress"       # only when it does and CLAUDE.md does not decline it
+  # No such label and no decline in CLAUDE.md: ask in this step's reply whether to create it.
   ```
-  **Pick the issue up right after that read, before any research** (see
-  In-progress label):
-  - **Already labeled `in progress`:** when `.claude/plans/` holds a
-    plan file carrying this issue's number, this is the user's own
-    continuing work (a follow-up plan, a second create run); carry on.
-    Otherwise stop, say another session may be working the issue, and
-    ask whether to continue. Checking and then labeling is not atomic,
-    and every session runs as the same user, so this question is the
-    tie-breaker.
-  - **Otherwise:** assign it and apply the label, as two commands and
-    without asking; when the repository lacks the label, offer it
-    instead; when the project declines it, assign only.
+  - **Already labeled `in progress` in that first read:** run none of
+    the pickup commands yet. When `.claude/plans/` holds a plan file
+    carrying this issue's number, this is the user's own continuing
+    work (a follow-up plan, a second create run); pick it up and carry
+    on. Otherwise stop, say another session may be working the issue,
+    and ask whether to continue. Checking and then labeling is not
+    atomic, and every session runs as the same user, so this question
+    is the tie-breaker.
+  - **The repository lacks the label** and CLAUDE.md does not decline
+    it: assign only, and offer to create the label in this step's
+    message.
 
   A bare `#NNN` means GitHub Issues only when the repo actually tracks
   work there -- issues enabled on the repo, the project's CLAUDE.md
@@ -1054,11 +1063,12 @@ already ran; this re-run covers a session that skipped create.
 
 ```bash
 gh issue edit NNN --add-assignee "@me"
-gh issue edit NNN --add-label "in progress"
+gh label list --search "in progress" --json name  # does the repository have the label?
+gh issue edit NNN --add-label "in progress"       # only when it does and CLAUDE.md does not decline it
 ```
 
-Nothing else: this step never offers or creates a label (the offer
-belongs to pickup), and never adds another label, moves a Projects
+Nothing else: when the label is missing, skip it without comment. This
+step never offers or creates a label (the offer belongs to pickup), and never adds another label, moves a Projects
 board, posts a comment, or edits the issue body. Those happen only
 when the user asks.
 
