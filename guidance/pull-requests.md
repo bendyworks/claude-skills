@@ -314,7 +314,10 @@ exit codes.
 
 A chain across forks, on another forge, or where `gh stack` exits 9
 ("Stacked PRs are not enabled for this repository") gets no
-server-side cascade, and the invariant is held by hand:
+server-side cascade, and the invariant is held by hand. So does one
+where the gh-stack extension is not installed and the developer has
+not agreed to install it; installing an extension on their machine is
+theirs to decide:
 
 - **Deleting the merged PR's head branch triggers the retarget; the
   merge alone does not**
@@ -344,5 +347,7 @@ server-side cascade, and the invariant is held by hand:
   commits in its diff again** until its branch is updated from the
   default branch: the squashed copy is a new commit its fork point
   predates.
-- **Arm auto-merge on the next PR only after its base has flipped**;
-  armed earlier, it is the wrong-base merge with no human in the loop.
+- **Arm auto-merge on the next PR only after its base has flipped, and
+  only where arming is authorized at all**, since arming is itself a
+  merge; armed earlier, it is the wrong-base merge with no human in
+  the loop.
