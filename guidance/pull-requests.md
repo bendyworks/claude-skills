@@ -264,16 +264,17 @@ there as a stack, using the
 - **Read `gh stack`'s output, not only its exit code.** `sync` exits 0
   after printing "Sync aborted" (the local and remote stacks diverged,
   and nothing changed) and after a failed push ("Push failed", then
-  "Stack synced"). After a hand-resolved `gh stack rebase`, `sync`'s
-  push is the one that fails; push with `gh stack push` (per-branch
-  `--force-with-lease`) instead.
-- **Carry fixes up the chain with `gh stack rebase`, never by merging a
-  lower branch into a higher one.** The stack's linear rebase drops a
-  merge commit inside a branch, and its conflict resolution has to be
-  redone by hand where the conflict first appears. `rebase` is local:
-  take a backup ref of each branch first, confirm with
-  `git range-diff <backup>...<branch>` that only the intended changes
-  moved, then push with `gh stack push`.
+  "Stack synced").
+- **Carry fixes up the chain with `gh stack rebase`, never by merging
+  a lower branch into a higher one.** The stack's linear rebase drops
+  a merge commit inside a branch, and its conflict resolution has to
+  be redone by hand where the conflict first appears. `rebase` is
+  local: take a backup ref of each branch first, confirm with
+  `git range-diff <parent-backup>..<backup> <parent>..<branch>` (the
+  parent is the layer below, or the mainline for the bottom layer)
+  that only the intended changes moved, then push with
+  `gh stack push`, per-branch `--force-with-lease`: after a
+  hand-resolved rebase, `sync`'s own push fails.
 - **While the developer's own stack is open, keep unrelated commits
   off its mainline and off every layer.** On a layer, the change rides
   into a PR under review that is not about it. Committed straight to
@@ -281,12 +282,11 @@ there as a stack, using the
   bringing them current rewrites all of them: new commit ids, a CI run
   per branch, a stale review on anything already read. Put the change
   on its own branch from the mainline, as its own PR, or hold it until
-  the stack lands. If it cannot wait, say that it forces that cascade
-  and propose running `gh stack sync` right after (after
-  `gh stack checkout` on a stack that was only linked), rather than
-  rebasing one PR, which leaves the layers above it behind. Other
-  people's PRs landing on the mainline are the ordinary course of a
-  team repository, not a breach of this rule.
+  the stack lands. If it cannot wait, say that it forces that cascade,
+  and bring the stack current with `gh stack sync` under the rule
+  above rather than rebasing one PR, which leaves the layers above it
+  behind. Other people's PRs landing on the mainline are the ordinary
+  course of a team repository, not a breach of this rule.
 
 GitHub's own agent skill for gh-stack
 ([`SKILL.md`](https://github.com/github/gh-stack/blob/main/skills/gh-stack/SKILL.md))
