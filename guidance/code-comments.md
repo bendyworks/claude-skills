@@ -67,7 +67,7 @@ the future reader, not for insiders of the current moment.
   - Look up every title with the tracker's command-line tool or `gh`,
     including for items the request already describes. A description
     is not a title, and neither is a URL slug or memory. If the lookup
-    fails, never write a Title Case title for the item: name it in
+    fails, never write anything presented as its title: name it in
     lowercase prose ("ABC-123, the session-expiry work") and say its
     title could not be checked.
   - Forms that tooling parses stay exactly as the tooling expects,
