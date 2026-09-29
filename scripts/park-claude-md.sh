@@ -54,6 +54,47 @@ refuse_existing_lock() {
   die "CLAUDE.md is parked by a session that is no longer running: $(describe_holder). Run $0 --recover to restore it."
 }
 
+sha256() {
+  if command -v sha256sum >/dev/null; then sha256sum "$1"; else shasum -a 256 "$1"; fi | cut -d' ' -f1
+}
+
+# A symlinked CLAUDE.md is compared by where it points, not by content,
+# since its target (a dotfiles checkout, say) may change while parked.
+fingerprint() {
+  if [ -L "$1" ]; then
+    echo "link:$(readlink "$1")"
+  elif [ -e "$1" ]; then
+    echo "sha256:$(sha256 "$1")"
+  fi
+}
+
+exists() { [ -e "$1" ] || [ -L "$1" ]; }
+
+# Moves the parked file back and releases the lock, or explains why
+# not and leaves both in place: a CLAUDE.md that appeared while parked
+# is never overwritten, and a parked copy that changed is kept for a
+# person to look at.
+put_back() {
+  if exists "$PARKED"; then
+    if exists "$LIVE"; then
+      echo "park-claude-md: a new $LIVE appeared while parked; kept it, and kept the parked copy at $PARKED. Compare the two, then run $0 --recover." >&2
+      return 1
+    fi
+    if [ "$(fingerprint "$PARKED")" != "$(owner_field fingerprint)" ]; then
+      echo "park-claude-md: the parked copy's checksum changed while parked; kept it at $PARKED. Check it, then run $0 --recover." >&2
+      return 1
+    fi
+    # mv -n reports a skipped move differently across platforms, so
+    # the parked file still existing is what shows it was skipped.
+    mv -n "$PARKED" "$LIVE"
+    if exists "$PARKED"; then
+      echo "park-claude-md: could not move $PARKED back to $LIVE; kept it. Run $0 --recover." >&2
+      return 1
+    fi
+  fi
+  rm -f "$OWNER" && rmdir "$LOCK"
+}
+
 checkout_root() {
   local here
   here="$(cd "$(dirname "$0")" && pwd)"
@@ -79,10 +120,11 @@ if [ -n "${CLAUDE_MD_PARK_HOLDER:-}" ] && [ -f "$OWNER" ] &&
 fi
 
 mkdir "$LOCK" 2>/dev/null || refuse_existing_lock
-printf 'checkout=%s\npid=%s\nstarted=%s\n' "$(checkout_root)" "$$" "$(start_time $$)" > "$OWNER.tmp" &&
+printf 'checkout=%s\npid=%s\nstarted=%s\nfingerprint=%s\n' \
+  "$(checkout_root)" "$$" "$(start_time $$)" "$(fingerprint "$LIVE")" > "$OWNER.tmp" &&
   mv "$OWNER.tmp" "$OWNER" || { rm -rf "$LOCK"; die "could not write $OWNER"; }
 
-if [ -e "$LIVE" ] || [ -L "$LIVE" ]; then
+if exists "$LIVE"; then
   mv "$LIVE" "$PARKED" || { rm -f "$OWNER"; rmdir "$LOCK"; die "could not park $LIVE"; }
 elif [ "$none_ok" -eq 0 ]; then
   rm -f "$OWNER"; rmdir "$LOCK"
@@ -90,13 +132,17 @@ elif [ "$none_ok" -eq 0 ]; then
 fi
 
 restored=0
+restore_failed=0
 restore() {
   [ "$restored" -eq 0 ] || return 0
   restored=1
-  if [ -e "$PARKED" ] || [ -L "$PARKED" ]; then
-    mv "$PARKED" "$LIVE" || return 1
-  fi
-  rm -f "$OWNER" && rmdir "$LOCK"
+  put_back || restore_failed=1
+}
+
+finish() {
+  restore
+  [ "$restore_failed" -eq 0 ] || exit 2
+  exit "$1"
 }
 
 # The command runs in the background because bash defers a trapped
@@ -108,8 +154,7 @@ restore() {
 child=
 on_signal() {
   [ -z "$child" ] || { kill -TERM "$child" 2>/dev/null; wait "$child" 2>/dev/null; }
-  restore
-  exit "$1"
+  finish "$1"
 }
 trap 'on_signal 130' INT
 trap 'on_signal 143' TERM
@@ -120,5 +165,4 @@ child=$!
 wait "$child"
 status=$?
 child=
-restore
-exit "$status"
+finish "$status"

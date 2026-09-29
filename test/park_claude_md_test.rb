@@ -222,6 +222,37 @@ class ParkClaudeMdTest < Minitest::Test
     assert_equal "prompt text\n", out
   end
 
+  def test_keeps_both_files_when_a_new_one_appeared_while_parked
+    _out, err, status = park('--', 'sh', '-c', "echo 'saved by another session' > '#{@live}'")
+
+    assert_equal 2, status.exitstatus
+    assert_equal "saved by another session\n", File.read(@live)
+    assert_equal ORIGINAL, File.read(File.join(@lock, 'CLAUDE.md'))
+    assert_match(/--recover/, err)
+  end
+
+  def test_keeps_the_parked_copy_when_it_changed_while_parked
+    parked = File.join(@lock, 'CLAUDE.md')
+    _out, err, status = park('--', 'sh', '-c', "echo 'edited' >> '#{parked}'")
+
+    assert_equal 2, status.exitstatus
+    refute File.exist?(@live)
+    assert_equal "#{ORIGINAL}edited\n", File.read(parked)
+    assert_match(/checksum/, err)
+  end
+
+  def test_restores_a_symlink_whose_target_changed_while_parked
+    target = File.join(@tmp, 'dotfiles-CLAUDE.md')
+    File.write(target, ORIGINAL)
+    File.delete(@live)
+    File.symlink(target, @live)
+    _out, err, status = park('--', 'sh', '-c', "echo 'pulled' >> '#{target}'")
+
+    assert status.success?, err
+    assert_equal target, File.readlink(@live)
+    refute File.exist?(@lock)
+  end
+
   def test_refuses_without_the_separator_and_parks_nothing
     _out, err, status = park('true')
 
