@@ -55,6 +55,13 @@ holder_alive() {
   [ -n "$pid" ] && [ -n "$started" ] && [ "$(start_time "$pid")" = "$started" ]
 }
 
+# Where ps reports no start times (some sandboxes), no holder can be
+# judged running or stranded, and guessing "stranded" would send the
+# user to --recover under a live batch.
+can_judge_holders() { [ -n "$(start_time $$)" ]; }
+
+UNKNOWN="cannot tell whether it is still running, because ps here reports no process start times; check from a shell where it does."
+
 describe_holder() {
   echo "checkout $(owner_field checkout), process $(owner_field pid), started $(owner_field started)"
 }
@@ -64,6 +71,7 @@ refuse_existing_lock() {
   if [ ! -f "$OWNER" ]; then
     die "$LOCK exists with no owner record; another session may be parking right now. Try again shortly."
   fi
+  can_judge_holders || die "CLAUDE.md is parked by $(describe_holder); $UNKNOWN"
   if holder_alive; then
     die "CLAUDE.md is parked by a running session: $(describe_holder). Wait for it to finish."
   fi
@@ -117,6 +125,8 @@ show_status() {
     echo "CLAUDE.md is not parked."
   elif [ ! -f "$OWNER" ]; then
     echo "$LOCK exists with no owner record: a session is parking right now, or one crashed while parking. If it persists, run $0 --recover."
+  elif ! can_judge_holders; then
+    echo "CLAUDE.md is parked by $(describe_holder); $UNKNOWN"
   elif holder_alive; then
     echo "CLAUDE.md is parked by a running session: $(describe_holder)."
   else
@@ -129,6 +139,9 @@ recover() {
   if ! exists "$LOCK"; then
     echo "CLAUDE.md is not parked; nothing to recover."
     exit 0
+  fi
+  if [ -f "$OWNER" ] && ! can_judge_holders; then
+    die "CLAUDE.md is parked by $(describe_holder); $UNKNOWN"
   fi
   if [ -f "$OWNER" ] && holder_alive; then
     die "CLAUDE.md is parked by a running session: $(describe_holder). Let it finish; its exit restores the file."

@@ -495,14 +495,18 @@ class ParkClaudeMdTest < Minitest::Test
     refute_match(/another session/, err)
   end
 
-  def test_refuses_to_park_when_it_cannot_read_its_own_start_time
+  # An environment whose ps reports no start times, as some sandboxes do.
+  def start_time_blind_env
     shims = File.join(@tmp, 'shims')
-    Dir.mkdir(shims)
+    FileUtils.mkdir_p(shims)
     File.write(File.join(shims, 'ps'), "#!/bin/sh\ncase \"$*\" in *lstart*) exit 1 ;; esac\nexec /bin/ps \"$@\"\n")
     File.chmod(0o755, File.join(shims, 'ps'))
+    env.merge('PATH' => "#{shims}:#{ENV.fetch('PATH')}")
+  end
+
+  def test_refuses_to_park_when_it_cannot_read_its_own_start_time
     probe = File.join(@tmp, 'probe')
-    _out, err, status = Open3.capture3(env.merge('PATH' => "#{shims}:#{ENV.fetch('PATH')}"),
-                                       'bash', SCRIPT, '--', 'touch', probe)
+    _out, err, status = Open3.capture3(start_time_blind_env, 'bash', SCRIPT, '--', 'touch', probe)
 
     assert_equal 2, status.exitstatus
     assert_match(/start time/, err)
@@ -525,6 +529,36 @@ class ParkClaudeMdTest < Minitest::Test
     refute File.exist?(probe)
     assert_equal ORIGINAL, File.read(@live)
     refute File.exist?(@lock)
+  end
+
+  def test_recover_refuses_where_it_cannot_tell_whether_the_holder_runs
+    live_holder do |pid|
+      hold_lock(pid: pid)
+      _out, err, status = Open3.capture3(start_time_blind_env, 'bash', SCRIPT, '--recover')
+
+      assert_equal 2, status.exitstatus
+      assert_match(/cannot tell/, err)
+      assert_equal ORIGINAL, File.read(File.join(@lock, 'CLAUDE.md'))
+      refute File.exist?(@live)
+    end
+  end
+
+  def test_status_and_refusal_do_not_call_a_holder_stranded_when_they_cannot_tell
+    live_holder do |pid|
+      hold_lock(pid: pid)
+      out, _err, status = Open3.capture3(start_time_blind_env, 'bash', SCRIPT, '--status')
+
+      assert status.success?
+      assert_match(/cannot tell/, out)
+      refute_match(/--recover/, out)
+
+      _out, err, status = Open3.capture3(start_time_blind_env.merge('CLAUDE_MD_PARK_HOLDER' => pid.to_s),
+                                         'bash', SCRIPT, '--', 'true')
+
+      assert_equal 2, status.exitstatus
+      assert_match(/cannot tell/, err)
+      refute_match(/--recover/, err)
+    end
   end
 
   def test_refuses_without_the_separator_and_parks_nothing
