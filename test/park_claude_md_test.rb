@@ -149,6 +149,27 @@ class ParkClaudeMdTest < Minitest::Test
     refute File.exist?(@lock)
   end
 
+  def test_parallel_arms_inside_a_batch_share_its_park
+    arms = %w[a b].map { |name| File.join(@tmp, "arm-#{name}") }
+    batch = arms.map { |probe| "bash '#{SCRIPT}' -- sh -c \"test ! -e '#{@live}' && touch '#{probe}'\" &" }.join(' ')
+    _out, err, status = park('--', 'sh', '-c', "#{batch} wait")
+
+    assert status.success?, err
+    arms.each { |probe| assert File.exist?(probe), "#{File.basename(probe)} did not run parked" }
+    assert_equal ORIGINAL, File.read(@live)
+    refute File.exist?(@lock)
+  end
+
+  def test_a_holder_token_from_another_park_does_not_bypass_the_lock
+    probe = File.join(@tmp, 'probe')
+    live_holder do |pid|
+      hold_lock(pid: pid)
+      _out, _err, status = Open3.capture3(env.merge('CLAUDE_MD_PARK_HOLDER' => '1'), 'bash', SCRIPT, '--', 'touch', probe)
+
+      assert_refused_leaving_lock_alone(status, probe)
+    end
+  end
+
   def test_refuses_without_the_separator_and_parks_nothing
     _out, err, status = park('true')
 

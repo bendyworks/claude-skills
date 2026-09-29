@@ -70,6 +70,14 @@ while [ "$#" -gt 0 ]; do
 done
 [ "$#" -gt 0 ] || usage
 
+# A batch that fans out parallel arms, each wrapped in this script,
+# shares the batch's park: the holder exports its process ID, and a
+# nested call that finds that same live holder runs its command as is.
+if [ -n "${CLAUDE_MD_PARK_HOLDER:-}" ] && [ -f "$OWNER" ] &&
+  [ "$(owner_field pid)" = "$CLAUDE_MD_PARK_HOLDER" ] && holder_alive; then
+  exec "$@"
+fi
+
 mkdir "$LOCK" 2>/dev/null || refuse_existing_lock
 printf 'checkout=%s\npid=%s\nstarted=%s\n' "$(checkout_root)" "$$" "$(start_time $$)" > "$OWNER.tmp" &&
   mv "$OWNER.tmp" "$OWNER" || { rm -rf "$LOCK"; die "could not write $OWNER"; }
@@ -88,7 +96,7 @@ restore() {
   rm -f "$OWNER" && rmdir "$LOCK"
 }
 
-"$@"
+CLAUDE_MD_PARK_HOLDER=$$ "$@"
 status=$?
 restore
 exit "$status"
