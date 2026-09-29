@@ -105,12 +105,14 @@ your machine shares one config directory, so the script holds a lock
 while the file is parked and refuses to start while another session
 holds it. Arms that the batch starts in parallel can each wrap
 themselves in the script too; they share the batch's park. The batch
-should `wait` for its arms before it exits: the file goes back when
-the wrapped command ends, so the script stops any arm still running
-then, with a warning, which cuts that arm's run short. Any Claude Code
-session you start while the file is parked runs without it, and if one
-of them saves a new CLAUDE.md meanwhile, the script keeps both copies
-and prints how to merge them. After a crash or `kill -9`,
+must `wait` for its arms before it exits, since the file goes back
+when the wrapped command ends. Run headless, with no controlling
+terminal as in a Claude Code session, the script stops any arm still
+running then, with a warning; from a terminal, and for an arm that
+starts its own session, it cannot find them. Any Claude Code session
+you start while the file is parked runs without it, and if one of them
+saves a new CLAUDE.md meanwhile, the script keeps both copies and
+prints how to merge them. After a crash or `kill -9`,
 `scripts/park-claude-md.sh --status` shows what is parked and
 `--recover` puts it back. Files under `~/.claude/rules/` load the same
 way and are not parked; move any that could reach an arm yourself. The

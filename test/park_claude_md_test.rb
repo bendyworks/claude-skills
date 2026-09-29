@@ -44,6 +44,13 @@ class ParkClaudeMdTest < Minitest::Test
     Open3.capture3(env, 'bash', SCRIPT, *args)
   end
 
+  # The script's argv run in a new session with no controlling
+  # terminal, the way a headless batch runs, wherever the suite itself
+  # is run from.
+  def headless(*args)
+    ['perl', '-MPOSIX', '-e', 'POSIX::setsid(); exec { $ARGV[0] } @ARGV', '--', 'bash', SCRIPT, *args]
+  end
+
   # The form the script records: fixed to the C locale and UTC, so the
   # same process reads the same from any terminal.
   def start_time(pid)
@@ -591,6 +598,7 @@ class ParkClaudeMdTest < Minitest::Test
     assert_equal 2, status.exitstatus
     assert_match(/could not remove/, err)
     assert_equal ORIGINAL, File.read(@live)
+    assert File.exist?(File.join(@lock, 'owner')), 'dropped the owner record, leaving a lock nobody can name'
   end
 
   def test_refuses_without_a_command_and_parks_nothing
@@ -643,7 +651,7 @@ class ParkClaudeMdTest < Minitest::Test
 
   def test_stops_and_reports_arms_the_command_left_running
     arm_file = File.join(@tmp, 'arm')
-    _out, err, status = park('--', 'sh', '-c', "(trap '' TERM; exec sleep 30) & echo $! > '#{arm_file}'")
+    _out, err, status = Open3.capture3(env, *headless('--', 'sh', '-c', "(trap '' TERM; exec sleep 30) & echo $! > '#{arm_file}'"))
     arm = Integer(File.read(arm_file))
 
     assert status.success?, err
@@ -663,7 +671,7 @@ class ParkClaudeMdTest < Minitest::Test
     _out, err, status = park('--', 'no-such-command-for-park-test')
 
     assert_equal 127, status.exitstatus
-    assert_match(/cannot run no-such-command-for-park-test/, err)
+    assert_match(/no-such-command-for-park-test/, err)
     assert_equal ORIGINAL, File.read(@live)
     refute File.exist?(@lock)
   end
@@ -671,7 +679,7 @@ class ParkClaudeMdTest < Minitest::Test
   def test_a_signal_while_stopping_leftovers_still_stops_them_first
     arm_file = File.join(@tmp, 'arm')
     command = "(trap '' TERM; exec sleep 30) & echo $! > '#{arm_file}'"
-    pid = Process.spawn(env, 'bash', SCRIPT, '--', 'sh', '-c', command, pgroup: true, err: File::NULL)
+    pid = Process.spawn(env, *headless('--', 'sh', '-c', command), err: File::NULL)
     wait_for { File.size?(arm_file) }
     sleep 0.5
     Process.kill('TERM', pid)
@@ -711,6 +719,7 @@ class ParkClaudeMdTest < Minitest::Test
     end
 
     assert_includes output, 'got hello'
+    assert_includes output, 'will not be stopped'
     assert_equal ORIGINAL, File.read(@live)
   end
 

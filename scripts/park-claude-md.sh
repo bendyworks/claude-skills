@@ -119,11 +119,15 @@ put_back() {
       return 1
     fi
   fi
-  rm -f "$OWNER" "$OWNER.tmp"
-  rmdir "$LOCK" 2>/dev/null || {
+  rm -f "$OWNER.tmp"
+  # The owner record stays until the lock can go, so a lock blocked by
+  # a stray file still names its holder to every other session.
+  if [ -n "$(ls -A "$LOCK" | grep -vx owner)" ]; then
     echo "park-claude-md: could not remove $LOCK; something else is in it. Check its contents, remove them, then run $0 --recover." >&2
     return 1
-  }
+  fi
+  rm -f "$OWNER"
+  rmdir "$LOCK"
 }
 
 show_status() {
@@ -351,12 +355,17 @@ fi
 # set one up, so arms it starts and leaves running can still be found
 # after it exits, when they no longer descend from anything here. A
 # command in a group of its own is stopped by the terminal if it reads
-# from it, so the group is used only when nothing here is attached to
-# a terminal: a headless batch, where arms are left running unseen.
-if command -v perl >/dev/null && ! [ -t 0 ] && ! [ -t 1 ] && ! [ -t 2 ]; then
+# from it, including through /dev/tty, so the group is used only where
+# there is no controlling terminal: a headless batch, where arms are
+# left running unseen. Attached to a terminal, the command shares this
+# script's group and arms it leaves running cannot be found.
+if command -v perl >/dev/null && ! (: </dev/tty) 2>/dev/null; then
   own_group=1
-  CLAUDE_MD_PARK_HOLDER=$$ perl -e 'setpgrp(0, 0); exec { $ARGV[0] } @ARGV or do { print STDERR "park-claude-md: cannot run $ARGV[0]: $!\n"; exit($!{ENOENT} ? 127 : 126) }' -- "$@" <&0 &
+  CLAUDE_MD_PARK_HOLDER=$$ perl -e 'setpgrp(0, 0) or warn "park-claude-md: no process group of its own ($!); arms left running will not be found\n"; exec { $ARGV[0] } @ARGV or do { print STDERR "park-claude-md: cannot run $ARGV[0]: $!\n"; exit($!{ENOENT} ? 127 : 126) }' -- "$@" <&0 &
 else
+  if (: </dev/tty) 2>/dev/null; then
+    echo "park-claude-md: attached to a terminal, so arms the command leaves running when it exits will not be stopped; have the batch wait for them." >&2
+  fi
   CLAUDE_MD_PARK_HOLDER=$$ "$@" <&0 &
 fi
 child=$!
