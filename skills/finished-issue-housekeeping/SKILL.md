@@ -322,7 +322,7 @@ An answer can also be **point-in-time state** rather than either: active work, a
 2. **A procedure** -- a skill: `~/.claude/skills/<name>/SKILL.md` (global) or `<project>/.claude/skills/<name>/SKILL.md` (project-scoped), following the same shape as the surrounding skills.
 3. **Point-in-time state** that no rule can carry -- a memory file in the project memory directory, using the standard auto-memory frontmatter, with a one-line pointer under `MEMORY.md`'s existing topic-file heading (add one when there is none). Only when the project keeps auto-memory; without one, tell the user the item has no home here rather than inventing one.
 
-- **Find the topic's existing home first.** Before writing, look for the topic among the rule and skill homes above and edit it where it already lives; never add a second copy. A rule found only in memory is promoted, not edited there (4c).
+- **Find the topic's existing home first.** Before writing, look for the topic among the rule and skill homes above and edit it where it already lives; never add a second copy. A memory that holds the same lesson counts as touched during this story, so 4c settles it once the rule has its home.
 - **Write generically for a public destination.** Before proposing a repository home, check whether it is public (`gh repo view --json visibility` for a GitHub repository). A lesson learned on one project and written somewhere public carries no client or project names, tracker IDs, or figures from that project: keep the technical substance and drop the identifying wrapper.
 - **A rule or a skill waits for the user's approval.** Show the exact text and the target file (for a skill, its name and scope as well), and write only after the user approves. A memory for state needs no approval.
 - **A shared guidance repository gets a draft, never an edit.** Draft the change as text for the user to take through that repository's own review flow: never edit or commit in that repository as part of this pass, even in a local clone, and file an issue or pull request there only when the user asks.
@@ -346,13 +346,13 @@ If the issue was in the "Active Work" section of `MEMORY.md`, remove it from the
 
 ### 4c -- Promotion check: rules must not decay in memory
 
-Auto-memory decays -- files get pruned, and recalls carry staleness warnings. For each memory written or touched during this story, or found holding a rule by 4a's search for an existing home, classify it:
+Auto-memory decays -- files get pruned, and recalls carry staleness warnings. For each memory written or touched during this story, classify it:
 
 - **State**, as 4a defines it -- stays in memory. Most memories are state.
 - **A durable rule** ("how to behave", a standing policy, a permanent fact about the codebase or environment) -- promote it to its permanent home instead, choosing from 4a's list of homes and following every 4a bullet on writing there: the public-destination check, approval, the shared-repository draft, and the rules for a write inside this repository.
 - **Already covered** by a permanent home -- delete the redundant memory.
 
-After promoting a rule, keep its memory only if the incident narrative adds value the rule can't carry, and note the promotion inside it. If a rule-shaped memory can't be promoted right now, mark its frontmatter `promote: candidate` so a later sweep finds it cheaply.
+A rule counts as promoted only once it is written to its home. When a promotion ends as a draft for a shared repository, or the user declines it, keep the memory and mark its frontmatter `promote: candidate` so a later sweep finds it cheaply. After a rule is written, keep its memory only if the incident narrative adds value the rule can't carry, and note the promotion inside it. Deleting a memory removes its `MEMORY.md` pointer too.
 
 ### 4d -- Keep `MEMORY.md` within its size budget
 
