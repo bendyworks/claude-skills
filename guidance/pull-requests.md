@@ -231,15 +231,18 @@ enable, so build every chain there as a stack, using the
   name for a title and a credit line for a body; rewrite both (per
   Lead with why) before handing the stack off. A draft layer blocks
   the merge of every layer above it.
-- **A stack merge lands every unmerged layer below its target**, all
-  or nothing (a merge queue can land them in separate groups). It is a
-  merge under Who presses Merge like any other, and its confirmation
+- **A stack merge lands every unmerged layer below its target.** It is
+  a merge under Who presses Merge like any other, and its confirmation
   lists each PR that will land, bottom to top, with the merge method. A
   confirmed merge passes both explicitly,
   `gh stack merge <number> --yes --squash`: a bare `gh stack merge` in
   a non-interactive shell merges the whole stack, and without a method
-  flag it reuses whichever method ran last. Arming auto-merge on any
-  layer is a stack merge with a delay.
+  flag it reuses whichever method ran last. Without a merge queue the
+  merge is all or nothing. Where the mainline uses a merge queue, the
+  stack joins the queue instead: the queue's own method applies and
+  the tool ignores the flag, and the layers may land in separate
+  groups, so the confirmation names the queue rather than a method.
+  Auto-merge armed on any layer lands every layer below it too.
 - **After a layer merges, bring local branches current before any
   other work.** The server-side rebase rewrote every branch above the
   merge. On a tracked stack, `gh stack sync` rebases each local branch
