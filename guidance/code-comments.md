@@ -52,14 +52,15 @@ the future reader, not for insiders of the current moment.
   InventoryAdjustmentReport is not). Spell domain terms out in code comments, commit messages, PR
   descriptions, and issues. This applies to what you author; quoted
   text may keep its author's acronyms.
-- **Never refer to an issue or pull request by its ID alone, in a PR,
-  an issue, a tracker comment, a plan, or chat: look up its title and
-  put it beside the ID on first mention.** A reader who does not
-  remember "ABC-123" or "#45" has to click through and back to learn
-  what it is, while the writer almost always has the title in hand. In
-  prose that reads "ABC-123 (Expire Stale Sessions)"; in a link the
-  title goes in the link text, "[ABC-123 Expire Stale Sessions](...)"
-  or "[#45 Retry Webhook Deliveries](...)", never "[ABC-123](...)" or
+- **Never refer to a tracker item (an issue, story, or epic) or a pull
+  request by its ID alone, in a PR, an issue, a tracker comment, a
+  plan, a message to a teammate, or chat: look up its title and put it
+  beside the ID on first mention.** A reader who does not remember
+  "ABC-123" or "#45" has to click through and back to learn what it
+  is, while the writer almost always has the title in hand. In prose
+  that reads "ABC-123 (Expire Stale Sessions)"; in a link the title
+  goes in the link text, "[ABC-123 Expire Stale Sessions](...)" or
+  "[#45 Retry Webhook Deliveries](...)", never "[ABC-123](...)" or
   "[PR #45](...)". First mention means the first in each message or
   document, a heading included; later mentions may use the bare ID.
   When a title already begins with its ID, write the ID once.
