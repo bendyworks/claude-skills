@@ -193,10 +193,11 @@ direction rule in force.
 ## Merging stacked pull requests
 
 A stacked chain (each PR based on the previous PR's branch) lands in
-order, and one invariant protects every step: **never merge a PR whose
-base is not the branch its work should land on.** Once every layer
-below a PR is merged, its base must be the mainline (the repo's
-default branch).
+order, and one invariant protects every step: **a PR's work lands only
+on the branch it belongs on**, which for every layer is ultimately the
+mainline (the repo's default branch). A native stack merge holds it by
+landing every layer up to its target on the mainline at once; on the
+manual path, a PR's base must be the mainline before it merges.
 
 ### Native stacks (the default on GitHub)
 
