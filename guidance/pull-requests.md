@@ -207,8 +207,8 @@ GitHub's
 [stacked pull requests](https://docs.github.com/en/pull-requests/get-started/about-stacked-prs)
 maintain the invariant themselves: merging a layer retargets the layer
 above it to the mainline and rebases every branch above the merge on
-the server. They work on every github.com repository with nothing to
-enable, so build every chain there as a stack, using the
+the server. They are available on every github.com repository, so
+build every chain there as a stack, using the
 [`github/gh-stack`](https://github.com/github/gh-stack) CLI extension:
 
 - **Check for a stack before merging a PR, working on its branch, or
@@ -216,10 +216,12 @@ enable, so build every chain there as a stack, using the
   stack layer. GitHub's `stack` field on a pull request says which
   native stack it belongs to, whether or not anyone tracks it locally:
   `gh api graphql -f query='{ repository(owner:"<owner>", name:"<repo>")
-  { pullRequests(states: OPEN, first: 100) { nodes { number stack { number } } } } }'`
-  lists every open PR with its stack. `gh stack view --json` reads
-  local tracking only, so on the mainline, or on a layer nobody
-  imported, it reports no stack even while one is open.
+  { pullRequest(number: <pr-number>) { stack { number } } } }'`
+  answers for one PR, and before committing to the mainline, ask it of
+  each of the developer's own open PRs (`gh pr list --author @me`).
+  `gh stack view --json` reads local tracking only, so on the
+  mainline, or on a layer nobody imported, it reports no stack even
+  while one is open.
 - **Create the stack before anyone reviews it.** `gh stack init` names
   the branches and `gh stack submit --auto` opens every PR as a draft.
   For PRs that already exist, `gh stack link <bottom> ... <top>` joins
