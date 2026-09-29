@@ -116,12 +116,13 @@ automated one:
 
 Merging into the default branch -- or into any shared branch a team
 merges into -- is a human action by default. A session takes the pull
-request as far as it can alone: green, current with the default
-branch, and marked ready for review (where a team requires the
-developer to approve text posted under their name, only once the
-developer has read the current title and body; see A draft is its own
-review above). Then it hands off and says what
-the PR is waiting on; finishing that preparation is the deliverable.
+request as far as it can alone: green, current with its base branch
+(for most PRs the default branch; for a stack layer, the layer below
+it), and marked ready for review (where a team requires the developer
+to approve text posted under their name, only once the developer has
+read the current title and body; see A draft is its own review above).
+Then it hands off and says what the PR is waiting on; finishing that
+preparation is the deliverable.
 
 Arming auto-merge is merging with a delay. `gh pr merge --auto` still
 causes the merge with no human in the loop, so it falls under this
@@ -281,12 +282,13 @@ there as a stack, using the
   the mainline, it puts every branch in the chain behind at once, and
   bringing them current rewrites all of them: new commit ids, a CI run
   per branch, a stale review on anything already read. Put the change
-  on its own branch from the mainline, as its own PR, or hold it until
-  the stack lands. If it cannot wait, say that it forces that cascade,
-  and bring the stack current with `gh stack sync` under the rule
-  above rather than rebasing one PR, which leaves the layers above it
-  behind. Other people's PRs landing on the mainline are the ordinary
-  course of a team repository, not a breach of this rule.
+  on its own branch, as its own PR, cut from the branch it belongs on,
+  or hold it until the stack lands. If it cannot wait, say that it
+  forces that cascade, and bring the stack current with
+  `gh stack sync` under the rule above rather than rebasing one PR,
+  which leaves the layers above it behind. Other people's PRs landing
+  on the mainline are the ordinary course of a team repository, not a
+  breach of this rule.
 
 GitHub's own agent skill for gh-stack
 ([`SKILL.md`](https://github.com/github/gh-stack/blob/main/skills/gh-stack/SKILL.md))
@@ -339,8 +341,10 @@ theirs to decide:
   default, and required checks are named in the target branch's
   protection rules, so a retargeted PR whose runs never reported a
   newly required or renamed check waits on it forever, marked
-  "Expected". A stale branch also runs outdated workflow files. Update
-  each branch from the mainline before merging it, which fixes both.
+  "Expected". A stale branch also runs outdated workflow files. Once a
+  layer's base is the mainline, update its branch from the mainline
+  before merging it, which fixes both; until then it stays current
+  with the layer below.
 - **On a squash-merge repo, a retargeted PR shows the merged layer's
   commits in its diff again** until its branch is updated from the
   mainline: the squashed copy is a new commit its fork point predates.
