@@ -273,11 +273,10 @@ enable, so build every chain there as a stack, using the
   (after `gh stack checkout` on a stack that was only linked), rather
   than rebasing one PR, which leaves the layers above it behind.
 
-GitHub's own agent skill,
-[`skills/gh-stack/SKILL.md`](https://github.com/github/gh-stack/blob/main/skills/gh-stack/SKILL.md)
-in that repository, covers the command mechanics: non-interactive
-flags, `--json` output, exit codes. Its merge steps run under Who
-presses Merge like any other merge.
+GitHub's own agent skill for gh-stack
+([`SKILL.md`](https://github.com/github/gh-stack/blob/main/skills/gh-stack/SKILL.md))
+covers the command mechanics: non-interactive flags, `--json` output,
+exit codes.
 
 ### On both paths
 
