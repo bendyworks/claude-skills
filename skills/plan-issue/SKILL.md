@@ -227,7 +227,9 @@ declaration present:
   declaration keeps its `NNN-title-slug`: the checklist section is
   keyed on the plan's basename, and a renamed plan would start a
   second one.
-- **Prose:** chat and plan text say `PRJ-NNN`, and a GitHub issue's
+- **Prose:** chat and plan text say `PRJ-NNN`, with the issue's
+  title beside it on first mention (the code-comments guidance's
+  plain-language rule, where the team imports it), and a GitHub issue's
   pull request title reads `PRJ-NNN <Title>` -- unless the title
   becomes the commit subject on the default branch. Where squash is
   the only merge method (`gh repo view --json
@@ -678,7 +680,8 @@ Draft a plan with:
       repos,
       put `Closes #NNN` (or `Fixes #NNN`) in the PR body when this PR
       fully resolves the issue; when the issue outlives the PR (a
-      multi-PR epic), use a plain `#NNN` reference instead. Two traps:
+      multi-PR epic), use a plain reference with no closing keyword
+      instead (`#NNN` followed by the issue's title). Two traps:
       auto-close fires at merge to the default branch, which on a
       project outside Deploy-on-Merge Mode is BEFORE any production
       deploy; and a plain reference is NOT enough to prevent it when

@@ -50,8 +50,8 @@ sentence by sentence.
 - **Anchor the side to the change, never to a relative day.** In a
   commit or pull request, "now", "before this change" and "previously"
   read the same a year later. Elsewhere, name the change or give an
-  absolute date ("before #123 merged", "before the 2026-09-12
-  deploy"). "Today", "currently" and "at present" name the day of
+  absolute date ("before #123 (Keep Blank Rows in Exports) merged",
+  "before the 2026-09-12 deploy"). "Today", "currently" and "at present" name the day of
   writing, which the reader of an undated artifact cannot recover:
   "every signed-in user can see every repository today" reads after
   the merge as a live hole. Bare "still" expires the same way; anchor
