@@ -60,9 +60,11 @@ team requires.
 
 Open every PR description with a short Why paragraph: the
 user-visible outcome or the reason the change exists, before any What
-or mechanism content. A tracker-reference line (an issue link, or
-`Closes #NNN` when the PR fully resolves the issue) may sit above it,
-but the first prose paragraph is the Why. This is the same why-first
+or mechanism content. A tracker-reference line (an issue link with
+the issue's title in its link text, or `Closes #NNN` when the PR
+fully resolves the issue, never wrapped in a link, since GitHub reads
+the keyword only when the issue reference follows it directly) may
+sit above it, but the first prose paragraph is the Why. This is the same why-first
 principle commit titles follow in the commit-messages guidance:
 motivation first, mechanism second. For a change that remedies
 something, the strongest Why names the concrete cost of leaving
@@ -78,6 +80,16 @@ When a PR description mentions an outside resource -- a spec, a
 library's docs, a standard, an article -- turn its first mention into
 a link. Readers unfamiliar with the resource get the source; familiar
 readers get the convenience of a click.
+
+Issues and pull requests get the same care: look up each one's title
+and put it beside the ID on first mention, in the link text when
+linked -- "[ABC-123 Expire Stale Sessions](...)", "[#45 Retry Webhook
+Deliveries](...)", never "[ABC-123](...)" alone. A reviewer does not
+remember what a bare number was. Never invent a title the lookup did
+not return; name the item in lowercase prose instead. `Closes #NNN`
+stays exactly that, never `Closes [#NNN ...](...)`, since GitHub
+parses it. The Plain language section of the code-comments guidance
+carries the full rule, including the other forms that stay bare.
 
 ## A PR owns the bugs it introduces
 
