@@ -465,7 +465,9 @@ Report concisely what was done, one line per item:
 - Branch: `<name>` deleted (or "kept -- <reason>" / "no local branch").
 - Branch sweep: N deleted, M kept (or "skipped -- <why>").
 - Tracker: `<ID>` (<title>) moved to Done (or "no tracker issue").
-- Saved: N rules (naming each home: guidance file, project CLAUDE.md or rules file, global CLAUDE.md), counting any promoted from memory in 4c; N skills created; N state memories (or "nothing to save"). Name each file written inside this repository as left uncommitted (an ignored one as local only), and each draft for a shared guidance repository with where it stands (drafted, or filed at the user's request).
+- Saved: N rules (naming each home: project CLAUDE.md or rules file, global CLAUDE.md), counting any promoted from memory in 4c; N skills created; N state memories (or "nothing to save").
+- Drafted: N changes for a shared guidance repository, each drafted or filed at the user's request (or "none").
+- Uncommitted: each file written inside this repository (an ignored one as local only), or "none".
 - Memory: Done entry added; MEMORY.md pruned (now <size> KB, under budget) (or "skipped -- no auto-memory").
 - Sibling-audit: N follow-ups verified; M dropped (filed now / TODO).
 - Dev server: stopped (or "none was running").
