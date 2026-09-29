@@ -239,14 +239,18 @@ build every chain there as a stack, using the
   a merge under Who presses Merge like any other, and its confirmation
   lists each PR that will land, bottom to top, with the merge method. A
   confirmed merge passes both explicitly,
-  `gh stack merge <number> --yes --squash`: a bare `gh stack merge` in
+  `gh stack merge <pr-number> --yes --squash`, naming the top PR to
+  land: a stack number merges every layer, a bare `gh stack merge` in
   a non-interactive shell merges the whole stack, and without a method
-  flag it reuses whichever method ran last. Without a merge queue the
+  flag it reuses whichever method ran last. Merge a native-stack layer
+  with `gh stack merge`, never `gh pr merge`, which cannot merge a
+  stack. Without a merge queue the
   merge is all or nothing. Where the mainline uses a merge queue, the
   stack joins the queue instead: the queue's own method applies and
   the tool ignores the flag, and the layers may land in separate
   groups, so the confirmation names the queue rather than a method.
-  Auto-merge armed on any layer lands every layer below it too.
+  Treat auto-merge armed on any layer as a stack merge of every layer
+  below it.
 - **After a layer merges, bring local branches current before any
   other work, since the server-side rebase rewrote every branch above
   it.** `gh stack sync` rebases each local branch onto its new parent,
