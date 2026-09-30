@@ -1,4 +1,4 @@
-# parallel-checkouts template v1 (bendyworks/claude-skills)
+# parallel-checkouts template v1 (bendyworks/rules-that-bend)
 #
 # Refuses to boot development or test when this shell's parallel-checkout
 # identity does not belong to this checkout. Database names, Redis

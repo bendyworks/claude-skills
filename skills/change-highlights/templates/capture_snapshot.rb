@@ -1,4 +1,4 @@
-# change-highlights template v1 (bendyworks/claude-skills)
+# change-highlights template v1 (bendyworks/rules-that-bend)
 # frozen_string_literal: true
 
 # Capture strategy 1: data snapshot, for numeric and report changes.

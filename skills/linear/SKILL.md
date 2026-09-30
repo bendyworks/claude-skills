@@ -112,6 +112,6 @@ a dash needs care:
 
 ## Don't
 
-- Don't fall back to raw `curl` against `api.linear.app/graphql`. If the CLI is missing a subcommand you need, propose adding it via a PR to the plugin repo (github.com/bendyworks/claude-skills) rather than working around it.
+- Don't fall back to raw `curl` against `api.linear.app/graphql`. If the CLI is missing a subcommand you need, propose adding it via a PR to the plugin repo (github.com/bendyworks/rules-that-bend) rather than working around it.
 - Don't reach for the Linear MCP -- prefer this CLI over the Linear MCP or raw GraphQL curl.
 - Don't pass long descriptions inline on the command line. Write them to a file and use `--description-file`.

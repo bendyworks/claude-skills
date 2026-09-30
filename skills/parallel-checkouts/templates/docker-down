@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# parallel-checkouts template v1 (bendyworks/claude-skills)
+# parallel-checkouts template v1 (bendyworks/rules-that-bend)
 #
 # Stop this checkout's stack and remove its containers. It finds its
 # checkout from its own location, so it is safe to run from any directory

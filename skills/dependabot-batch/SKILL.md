@@ -66,7 +66,7 @@ shipped unattended should leave `deploy_after_batch` at `ask` and know that
 the merge dial alone already deploys. Whether one dial should stand between
 a green batch and production is open in
 [#83 Deploying unattended needs more than a
-dial](https://github.com/bendyworks/claude-skills/issues/83).
+dial](https://github.com/bendyworks/rules-that-bend/issues/83).
 
 ## Hard veto (policy, not a dial)
 

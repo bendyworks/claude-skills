@@ -35,9 +35,13 @@ Clone the repo and symlink it to the canonical location, so import
 lines are identical across machines and copy-pasteable from docs:
 
 ```bash
-git clone https://github.com/bendyworks/claude-skills.git
-ln -s "$PWD/claude-skills" ~/.claude/bendyworks-guidance
+git clone https://github.com/bendyworks/rules-that-bend.git
+ln -s "$PWD/rules-that-bend" ~/.claude/bendyworks-guidance
 ```
+
+The link keeps the name `bendyworks-guidance` whatever the clone's
+folder is called, so an existing clone made under the repository's
+former name keeps working with the same import lines.
 
 Then import from your personal `~/.claude/CLAUDE.md` (user-level
 imports are not gated by any approval prompt):

@@ -55,7 +55,7 @@ needs:
 
 ```bash
 cd path/to/target-project
-claude --plugin-dir path/to/claude-skills \
+claude --plugin-dir path/to/rules-that-bend \
   -p "Invoke the <name> skill from the bendyworks plugin on the current
       branch, following it exactly. Report what it produces." \
   --allowedTools "Bash,Read,Grep,Glob"
@@ -255,12 +255,16 @@ project's runtime, not this repository's: the parallel-checkouts
 stack scripts are bash 3.2 (macOS's `/bin/bash`), because the project
 receiving them may have no Ruby on the host, and its teammates run
 them without this plugin installed. Each script template carries a
-`<skill> template v<N> (bendyworks/claude-skills)` comment on its
+`<skill> template v<N> (bendyworks/rules-that-bend)` comment on its
 first line (after any shebang), so a later session can tell a copied
-file from its template. Test a template from a file under `test/`,
-the way the receiving project uses it: a script copied into a
-throwaway directory and run there, or code a framework loads
-evaluated against a stand-in for that framework.
+file from its template. Copies made before the repository's rename
+name it by its former slug, `bendyworks/claude-skills`; a header naming
+either slug marks the same template, and only `v<N>` tracks content.
+`test/repository_name_test.rb` checks every template's header. Test a
+template from a file under `test/`, the way the receiving project
+uses it: a script copied into a throwaway directory and run there, or
+code a framework loads evaluated against a stand-in for that
+framework.
 
 Coverage measurement is opt-in and test-only; the stdlib-only posture
 above is about the CLIs' runtime and is unaffected. Requiring

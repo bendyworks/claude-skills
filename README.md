@@ -1,30 +1,50 @@
-# Bendyworks Claude Skills
+# Rules That Bend
 
-A collection of [Claude Code](https://code.claude.com) skills we use every
-day at [Bendyworks](https://bendyworks.com), packaged as a plugin
-marketplace so you can install them with one command and pick up
-improvements as we ship them.
+Working agreements, engineering guidance, and skills for developing with
+[Claude Code](https://code.claude.com), from
+[Bendyworks](https://bendyworks.com). They grew out of many sessions of
+day-to-day work with Claude across many projects.
 
-These skills are evolving. They work for us, but expect rough edges --
+Every rule here bends: each guidance file is a shared default, and your
+project's own rules win wherever the two disagree. Take what fits: import a
+single guidance file, copy one skill, or install the whole plugin.
+
+It all keeps evolving. It works for us, but expect rough edges --
 issues and pull requests are welcome (see [CONTRIBUTING](CONTRIBUTING.md)).
+
+This repository was formerly `bendyworks/claude-skills`. GitHub
+redirects the old name here only while no other repository takes it, so
+that name stays retired.
 
 ## Install
 
-From inside Claude Code:
+The skills install as a Claude Code plugin. From inside Claude Code:
 
 ```
-/plugin marketplace add bendyworks/claude-skills
+/plugin marketplace add bendyworks/rules-that-bend
 /plugin install bendyworks@bendyworks
 ```
 
-Installed skills are namespaced: invoke them as `/bendyworks:<skill>`, e.g.
-`/bendyworks:gauntlet`. Claude also triggers them automatically when a task
-matches a skill's description.
+The repository name is only where the marketplace is fetched from: the
+marketplace and its plugin both register as `bendyworks`, which is the
+name you type from then on. Installed skills are namespaced: invoke them
+as `/bendyworks:<skill>`, e.g. `/bendyworks:gauntlet`. Claude also
+triggers them automatically when a task matches a skill's description.
 
 To pick up updates later:
 
 ```
 /plugin marketplace update bendyworks
+```
+
+If you added the marketplace under its former name, everything keeps
+working through GitHub's redirect. To point it at the new name instead,
+remove it and install again:
+
+```
+/plugin marketplace remove bendyworks
+/plugin marketplace add bendyworks/rules-that-bend
+/plugin install bendyworks@bendyworks
 ```
 
 ## Skills

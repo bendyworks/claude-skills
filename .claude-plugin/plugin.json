@@ -4,8 +4,8 @@
   "author": {
     "name": "Bendyworks"
   },
-  "homepage": "https://github.com/bendyworks/claude-skills",
-  "repository": "https://github.com/bendyworks/claude-skills",
+  "homepage": "https://github.com/bendyworks/rules-that-bend",
+  "repository": "https://github.com/bendyworks/rules-that-bend",
   "license": "MIT",
   "keywords": ["rails", "workflow", "code-quality", "linear", "planning"]
 }
