@@ -273,6 +273,13 @@ there as a stack, using the
   remote instead (`git reset --hard <remote>/<branch>`) discards any
   unpushed commit, so check `git log <remote>/<branch>..<branch>` and
   take a backup ref before one.
+  The same holds after GitHub's stack-wide rebase control, which
+  rewrites every layer on the server without any merge. The local
+  commits `git log <remote>/<branch>..<branch>` then lists are usually
+  the old copies of commits the server rebased: `git cherry
+  <remote>/<branch> <branch>` marks each one `-` when an equivalent
+  commit is on the remote and `+` when none is, so a branch whose
+  lines are all `-` resets to its remote without losing work.
 - **Read `gh stack`'s output, not only its exit code.** `sync` exits 0
   after printing "Sync aborted" (the local and remote stacks diverged,
   and nothing changed) and after a failed push ("Push failed", then
