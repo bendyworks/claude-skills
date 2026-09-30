@@ -372,14 +372,24 @@ already has.
 
 GitHub marks the issue at pickup, while Linear and Shortcut move in
 record Step 5, because two sessions can collide while planning too and
-the label is the only claim GitHub shows. The moves run without
-permission prompts only where the team's settings allow them. Rules
-such as `Bash(gh issue edit * --add-assignee "@me")`,
-`Bash(gh issue edit * --add-label "in progress")`,
-`Bash(gh issue edit * --remove-label "in progress")`, and
-`Bash(gh label list *)`, and `Bash(gh api user --jq .login)` cover them; the leading wildcard still admits
-other flags placed before the matched ones, so a team that wants a
-tighter rule names its repository in each.
+the label is the only claim GitHub shows.
+
+The moves run without permission prompts only where the team's
+settings allow them, with rules such as:
+
+```
+Bash(gh issue edit * --add-assignee "@me")
+Bash(gh issue edit * --add-label "in progress")
+Bash(gh issue edit * --remove-label "in progress")
+Bash(gh label list *)
+Bash(gh api user --jq .login)
+```
+
+The wildcard in the three edit rules admits any other `gh issue edit`
+flag placed before the matched one, including a body or title
+rewrite, so each auto-approves more than the move it names. A team
+that wants only the exact moves leaves them prompted, or checks the
+full command in a hook.
 
 ---
 
@@ -844,8 +854,8 @@ Draft a plan with:
       rather than proceeding on no evidence.
       (GitHub Issues has no such state. The `in progress` label stays
       on through review, and the linked PR going ready-for-review is
-      the visible signal, so there is nothing extra to do (see
-      In-progress label).)
+      the visible signal, so there is nothing extra to do; see
+      In-progress label.)
    5. **Stakeholder change-highlights (conditional).** When the change
       alters something a client stakeholder visibly relies on -- a
       report, receipt, statement, mailer, or screen -- and the project
