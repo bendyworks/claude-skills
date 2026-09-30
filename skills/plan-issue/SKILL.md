@@ -1086,6 +1086,10 @@ via the Skill tool. It will:
   (`gh-issue-sync reconcile`) so the public surface does not end
   stale.
 - Delete the local working branch with `-d` safety.
+- Ask whether anything is worth saving as a rule or a skill, and
+  save each in the home its kind calls for once the user approves
+  the text (a shared guidance repository gets a draft; memory only
+  for point-in-time state).
 - Add a Done entry to `MEMORY.md` and remove the issue from Active
   Work if it was there.
 - Move the tracker issue to its terminal Done state (on GitHub,
@@ -1093,8 +1097,6 @@ via the Skill tool. It will:
   Mode the manual close happens here; in the mode the auto-close at
   merge has usually already done it, so this is normally a
   verification).
-- Ask whether anything is worth saving as a tech-note memory or
-  a new skill, and create it if so.
 - Verify sibling-audit follow-ups got filed.
 - Clear completed tasks from the conversation task list.
 - Run a permission-prompt sweep (via the /fewer-permission-prompts
