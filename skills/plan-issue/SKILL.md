@@ -368,9 +368,10 @@ to its settings.
 ### Step 1 -- Interview for the issue
 
 **When the user hands you an existing GitHub issue, read and pick it
-up (Step 2's GitHub commands) before asking anything below.** Pickup
-is not a later step: it is what tells other sessions the issue is
-taken.
+up (Step 2's GitHub commands) before asking anything below.** That
+means a GitHub issue URL, or an ID Step 2 routes to GitHub Issues; a
+bare `#NNN` on a project that could have two trackers waits for Step
+2's question first.
 
 Ask the user:
 
