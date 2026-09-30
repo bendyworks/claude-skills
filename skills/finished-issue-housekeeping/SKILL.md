@@ -1,6 +1,6 @@
 ---
 name: finished-issue-housekeeping
-description: Post-ship cleanup for a story that has shipped -- merged AND live in production, or merged alone on a project in Deploy-on-Merge Mode. Finalizes the plan file, sweeps stale local git branches repo-wide with the just-finished story's among them, updates auto-memory (Done entry + any new tech-note or skill worth saving) and prunes MEMORY.md back within its size budget, verifies sibling-audit follow-ups got filed, stops any dev server started for verification, clears completed tasks from the conversation task list, and ends with an approval-gated permission-prompt sweep (via the /fewer-permission-prompts built-in, when available). Use when the user says "finish up the plan", "we shipped X, clean it up", "post-ship cleanup", "we're done with X", "housekeeping for <issue>", or invokes the finished-issue-housekeeping skill. Also invoked at the end of `plan-issue`'s `finish` phase.
+description: Post-ship cleanup for a story that has shipped -- merged AND live in production, or merged alone on a project in Deploy-on-Merge Mode. Finalizes the plan file, sweeps stale local git branches repo-wide with the just-finished story's among them, saves the story's lessons as rules or skills, updates auto-memory with a Done entry and prunes MEMORY.md back within its size budget, verifies sibling-audit follow-ups got filed, stops any dev server started for verification, clears completed tasks from the conversation task list, and ends with an approval-gated permission-prompt sweep (via the /fewer-permission-prompts built-in, when available). Use when the user says "finish up the plan", "we shipped X, clean it up", "post-ship cleanup", "we're done with X", "housekeeping for <issue>", or invokes the finished-issue-housekeeping skill. Also invoked at the end of `plan-issue`'s `finish` phase.
 ---
 
 # Finished issue housekeeping
@@ -293,11 +293,45 @@ reports `protected:default` and never `protected:long-lived`. A project's own se
 ordinary candidates, so scan the report for this project's own before
 approving anything.
 
-## Step 4 -- Update auto-memory
+## Step 4 -- Save what the story taught
 
-Only run if you maintain an auto-memory for this project. Indicator: a `MEMORY.md` file under the project's memory directory (the system prompt's "auto memory" section names the directory). If the project has no auto-memory set up, skip the whole step.
+4a runs on every project. 4b to 4d update auto-memory and run only if you maintain one for this project. Indicator: a `MEMORY.md` file under the project's memory directory (the system prompt's "auto memory" section names the directory). Without one, skip 4b to 4d.
 
-### 4a -- Done entry in `MEMORY.md`
+### 4a -- New rule or skill opportunity
+
+Ask the user **literally**: "Did anything surprising or non-obvious come up during this story that's worth saving as a rule or a skill for the next time we work in this area?"
+
+Examples of what qualifies as a **rule** -- a standing fact, or how to behave, that the next session working in this area has to know before it acts:
+- A hidden invariant or timing/ordering constraint in the code.
+- A library or framework gotcha whose reasoning would not be obvious from reading the code.
+- A non-obvious workaround that future-you will not be able to derive from current-you's commit message alone.
+
+Examples of what qualifies as a **skill**:
+- A repeated multi-step workflow that you executed ad-hoc this time and would benefit from running deterministically next time.
+- A check-and-cleanup pattern that came together late and worth promoting from "we did it once" to "we do it every time."
+- Something the user *asked* you to do that you had to figure out from scratch -- and might have to re-figure-out from scratch next time without the skill.
+
+An answer can also be **point-in-time state** rather than either: active work, an incident record, a reference, a note tied to code that is expected to change, work paused until someone else finishes theirs. Only state belongs in memory. For an item tied to specific code, ask whether it stays true as long as that code does (a rule) or expires when something planned happens (state).
+
+**If yes, propose each item for the home its kind calls for, and write a rule or skill only after the user approves its exact text and target file:**
+
+1. **A rule or standing fact** -- the home whose readers need it:
+   - a guidance file the team already shares, if any, for a team-neutral rule that holds across projects;
+   - the project's checked-in CLAUDE.md or a rules file under `.claude/rules/`, for a fact about this repository (client-visible, so domain invariants yes, opinions about people or billing never);
+   - the user's global CLAUDE.md, for a personal rule, even when a team guidance file exists: a preference of the user's own, or a rule about this project that must not be client-visible.
+2. **A procedure** -- a skill: `~/.claude/skills/<name>/SKILL.md` (global) or `<project>/.claude/skills/<name>/SKILL.md` (project-scoped), following the same shape as the surrounding skills.
+3. **Point-in-time state** that no rule can carry -- a memory file in the project memory directory, using the standard auto-memory frontmatter, with a one-line pointer under `MEMORY.md`'s existing topic-file heading (add one when there is none). Only when the project keeps auto-memory; without one, tell the user the item has no home here rather than inventing one.
+
+- **Find the topic's existing home first.** Before writing, look for the topic among the rule and skill homes above and edit it where it already lives; never add a second copy. A memory that holds the same lesson counts as touched during this story, so 4c settles it once the rule has its home.
+- **Write generically for a public destination.** Before proposing a repository home, check whether it is public (`gh repo view --json visibility` for a GitHub repository). A lesson learned on one project and written somewhere public carries no client or project names, tracker IDs, or figures from that project: keep the technical substance and drop the identifying wrapper.
+- **A rule or a skill waits for the user's approval.** Show the exact text and the target file (for a skill, its name and scope as well), and write only after the user approves. A memory for state needs no approval.
+- **A rule for another repository's shared guidance gets a draft, never an edit.** When the rule's home is a guidance file the team shares from a repository other than this project, draft the change as text for the user to take through that repository's own review flow: never edit or commit in that repository as part of this pass, even in a local clone, and file an issue or pull request there only when the user asks.
+- **Check that a repository home reaches its readers.** A file in this repository reaches teammates only when git does not ignore it, and many projects ignore `.claude/`, some their CLAUDE.md too. Check the path with `git check-ignore` before choosing it; for an ignored path, prefer a home git tracks, or tell the user the file will stay on this machine.
+- **A rule or skill written inside this project's repository is left uncommitted and named.** Every such file git does not ignore can ride into the next commit on whatever Step 3 checked out (usually `main`, sometimes a detached HEAD). Committing stays with the user, through the project's normal flow; never commit or push it as part of this pass. Name each such file in the Step 10 summary as uncommitted, so it does not ride into the next story's first commit unnoticed, and name an ignored one as local only.
+
+**If no -- skip.** Do NOT fabricate to fill the slot. Empty is the right answer most of the time, and bloating the rules, the skills list, or memory with low-signal entries makes the high-signal ones harder to find later.
+
+### 4b -- Done entry in `MEMORY.md`
 
 Add the finished issue under a "Done" cluster. Match the existing project convention -- copy the cluster-header format from the most recent Done cluster already in the file, rather than inventing a new one.
 
@@ -310,51 +344,31 @@ Brief entry per issue:
 
 If the issue was in the "Active Work" section of `MEMORY.md`, remove it from there at the same time so the active section stays focused on what is actually still in flight.
 
-### 4b -- New tech-note or skill opportunity
-
-Ask the user **literally**: "Did anything surprising or non-obvious come up during this story that's worth saving as a tech-note memory or creating a skill for the next time we work in this area?"
-
-Examples of what qualifies as a **tech-note**:
-- Hidden invariants or timing/ordering quirks discovered.
-- Library or framework gotchas whose reasoning would not be obvious from reading the code.
-- Non-obvious workarounds that future-you will not be able to derive from current-you's commit message alone.
-
-Examples of what qualifies as a **skill**:
-- A repeated multi-step workflow that you executed ad-hoc this time and would benefit from running deterministically next time.
-- A check-and-cleanup pattern that came together late and worth promoting from "we did it once" to "we do it every time."
-- Something the user *asked* you to do that you had to figure out from scratch -- and might have to re-figure-out from scratch next time without the skill.
-
-If yes:
-- Tech-note: write the memory file in the project memory directory using the standard auto-memory frontmatter, and add a one-line pointer under `MEMORY.md`'s "Technical Notes" section.
-- Skill: propose a skill name and rough scope to the user, then write `~/.claude/skills/<name>/SKILL.md` (global) or `<project>/.claude/skills/<name>/SKILL.md` (project-scoped) following the same shape as the surrounding skills.
-
-**If no -- skip.** Do NOT fabricate to fill the slot. Empty is the right answer most of the time, and bloating memory or the skills list with low-signal entries makes the high-signal ones harder to find later.
-
 ### 4c -- Promotion check: rules must not decay in memory
 
-Auto-memory decays -- files get pruned, and recalls carry staleness warnings. For each memory written or touched during this story (including a tech-note just added in 4b), classify it:
+Auto-memory decays -- files get pruned, and recalls carry staleness warnings. For each memory written or touched during this story, classify it:
 
-- **State** (active work, incident records, references, notes tied to code that may change) -- stays in memory. Most memories are state.
-- **A durable rule** ("how to behave", a standing policy, a permanent fact about the codebase or environment) -- promote it to a permanent home instead: the user's global CLAUDE.md (cross-project behavior), the project's checked-in CLAUDE.md (repo-permanent facts -- client-visible, so domain invariants yes, opinions about people or billing never), or a skill (procedures).
+- **State**, as 4a defines it -- stays in memory. Most memories are state.
+- **A durable rule** ("how to behave", a standing policy, a permanent fact about the codebase or environment) -- promote it to its permanent home instead, choosing from 4a's list of homes and following every 4a bullet on writing there: the public-destination check, approval, the shared-repository draft, and the rules for a write inside this repository.
 - **Already covered** by a permanent home -- delete the redundant memory.
 
-After promoting a rule, keep its memory only if the incident narrative adds value the rule can't carry, and note the promotion inside it. If a rule-shaped memory can't be promoted right now, mark its frontmatter `promote: candidate` so a later sweep finds it cheaply.
+A rule counts as promoted only once it is written to its home. When a promotion ends as a draft for a shared repository, or the user declines it, keep the memory and mark its frontmatter `promote: candidate` so a later sweep finds it cheaply. After a rule is written, keep its memory only if the incident narrative adds value the rule can't carry, and note the promotion inside it. Deleting a memory removes its `MEMORY.md` pointer too.
 
 ### 4d -- Keep `MEMORY.md` within its size budget
 
-Adding a Done entry (4a) grows `MEMORY.md` -- and that file is the index loaded into context *every* session, so it must stay lean. After the Done entry is in, prune the file back under budget. This runs every time an issue concludes, so the file can never silently drift over the limit.
+Adding a Done entry (4b) grows `MEMORY.md` -- and that file is the index loaded into context *every* session, so it must stay lean. After the Done entry is in, prune the file back under budget. This runs every time an issue concludes, so the file can never silently drift over the limit.
 
 - **Budget signal.** The auto-memory system surfaces a system-reminder when `MEMORY.md` exceeds its size limit (it reports current-vs-limit KB). Being at or over the limit is a hard prompt to prune *now*; even when under, opportunistically tighten while you are already here.
 - **What to prune, in priority order:**
   1. **Old "Done" entries** -- the fastest-accreting section. A shipped issue's detail lives permanently in its plan file, git history, the PR, and any topic-memory it spawned, so its `MEMORY.md` entry only needs to be a findable pointer. Compress every Done entry except the most recent few to a single line: `**ID** Title -- shipped YYYY-MM-DD (<release or merge commit>); plan <path>`. Drop entirely any entry whose context is fully superseded (e.g. a fix later reverted or replaced by later work).
   2. **Multi-paragraph entries that are no longer in-flight.** Any entry that has grown to several sentences but is not *currently active* work should be reduced to a one-line pointer, with detail pushed into a topic-memory file per the auto-memory convention.
-  3. **Stale "Active Work."** Anything already shipped should have moved to Done in 4a -- double-check none lingers.
+  3. **Stale "Active Work."** Anything already shipped should have moved to Done in 4b -- double-check none lingers.
 - **Never prune:** Critical Workflow Rules, References, Project Conventions, topic-file pointers, or genuinely-current Active Work. Those are the high-signal, still-true index.
 - **Confirm** the file is back under budget before finishing. If getting under budget would require removing something whose continued relevance you are unsure about, surface it to the user rather than deleting it.
 
 ## Step 5 -- Move the issue to its terminal Done state in the tracker
 
-Recording the Done entry in `MEMORY.md` (Step 4a) closes the loop for *us*; it does NOT move the issue on the project's board. Close that loop too: transition the tracker issue (Linear, Shortcut, Jira, etc.) to its terminal **Done** state.
+Recording the Done entry in `MEMORY.md` (Step 4b) closes the loop for *us*; it does NOT move the issue on the project's board. Close that loop too: transition the tracker issue (Linear, Shortcut, Jira, etc.) to its terminal **Done** state.
 
 - **Mind intermediate post-merge states.** Many boards have a staging state between "in review" and "Done" -- e.g. **Deploy Queue**, "Awaiting Deploy", "On Staging", "Ready to Release". A shipped issue often sits in one of these, and "merged" or "deployed" does NOT mean the board already says Done. Check the current state and advance it the rest of the way.
 - **A declared GitHub issue key is not a Linear ID.** When the project's CLAUDE.md (or a rules file every session loads) declares an issue key ("GitHub issues here are called PRJ-NNN: PRJ-NNN is issue #NNN"; the plan-issue skill, bundled in this plugin, defines the declaration), `PRJ-NNN` is GitHub issue #NNN: follow the GitHub bullet below with the bare number, not `linear`.
@@ -430,7 +444,7 @@ skill (a Claude Code built-in, not part of this plugin).
   project's `.claude/settings.json`; if that file is gitignored,
   `git status` will not show it -- fall back to the built-in's own
   report of what it wrote). `git status` will also show the plan-file
-  and any `MEMORY.md` edits from earlier steps, so name the settings
+  edits and any rule or skill file 4a or 4c wrote inside this repository that git does not ignore, so name the settings
   diff specifically. This step can end the pass with an uncommitted
   settings diff, so say so plainly in the Step 10 summary. Committing
   stays with the user, through the project's normal flow -- possibly
@@ -452,7 +466,10 @@ Report concisely what was done, one line per item:
 - Branch: `<name>` deleted (or "kept -- <reason>" / "no local branch").
 - Branch sweep: N deleted, M kept (or "skipped -- <why>").
 - Tracker: `<ID>` (<title>) moved to Done (or "no tracker issue").
-- Memory: Done entry added; N new tech-notes saved; N new skills created; N rules promoted to permanent homes; MEMORY.md pruned (now <size> KB, under budget).
+- Saved: N rules (naming each home: project CLAUDE.md or rules file, global CLAUDE.md), counting any promoted from memory in 4c; N skills created; N state memories (or "nothing to save").
+- Drafted: N changes for a shared guidance repository, each drafted or filed at the user's request (or "none").
+- Uncommitted: each rule or skill file 4a or 4c wrote inside this repository (an ignored one as local only), or "none".
+- Memory: Done entry added; MEMORY.md pruned (now <size> KB, under budget) (or "skipped -- no auto-memory").
 - Sibling-audit: N follow-ups verified; M dropped (filed now / TODO).
 - Dev server: stopped (or "none was running").
 - Task list: N completed tasks cleared.

@@ -84,11 +84,40 @@ Deploy-on-Merge declaration, and a session started anywhere picks up
 your personal global one. Both can hand the run an answer the skill
 under test was supposed to supply, which quietly turns a test into a
 tautology. Run each arm from a throwaway project directory that carries
-exactly the rules that arm is meant to have, and pass
-`--setting-sources project` so the global file stays out. The related
-trap when writing a project declaration for an arm: state the *fact*
-the project is asserting, never the behavior you expect the skill to
-produce, or the session will simply follow your wording.
+exactly the rules that arm is meant to have. The related trap when
+writing a project declaration for an arm: state the *fact* the project
+is asserting, never the behavior you expect the skill to produce, or
+the session will simply follow your wording.
+
+No command-line flag keeps the personal global file out:
+`--setting-sources project` governs settings files, not CLAUDE.md, and
+pointing `CLAUDE_CONFIG_DIR` or `HOME` elsewhere leaves the run logged
+out. Park the file instead, by wrapping the whole batch in
+`scripts/park-claude-md.sh`:
+
+```bash
+scripts/park-claude-md.sh -- ./run-arms.sh
+```
+
+It moves the file aside, runs the command, and moves it back on exit,
+Ctrl-C, `kill`, or a closed terminal. Every checkout of this repo on
+your machine shares one config directory, so the script holds a lock
+while the file is parked and refuses to start while another session
+holds it. Arms that the batch starts in parallel can each wrap
+themselves in the script too; they share the batch's park. The batch
+must `wait` for its arms before it exits, since the file goes back
+when the wrapped command ends. Run headless, with no controlling
+terminal as in a Claude Code session, the script stops any arm still
+running then, with a warning; from a terminal, and for an arm that
+starts its own session, it cannot find them. Any Claude Code session
+you start while the file is parked runs without it, and if one of them
+saves a new CLAUDE.md meanwhile, the script keeps both copies and
+prints how to merge them. After a crash or `kill -9`,
+`scripts/park-claude-md.sh --status` shows what is parked and
+`--recover` puts it back. Files under `~/.claude/rules/` load the same
+way and are not parked; move any that could reach an arm yourself. The
+tell for a contaminated run is an arm citing a rule only your global
+file carries.
 
 **Trigger injection.** To force a specific code path (an escalation
 rule, an edge case), plant an untracked dummy file that matches the
@@ -106,6 +135,31 @@ hypothetical diff ("pretend the branch diff were exactly: ..."), tell it
 to substitute real files when a stipulated one does not exist and say
 so, and require the full decision output. This validates heuristics in
 one pass without paying for their execution.
+
+**Plant the memory directory for memory behavior.** A headless session
+gets an auto-memory directory derived from its working directory:
+`~/.claude/projects/<path>/memory/`, where `<path>` is the absolute
+working directory with every character other than a letter or digit
+turned into `-`. To test how a skill handles memory, plant the
+`MEMORY.md` an arm needs at that path before the run, and remove the
+whole `~/.claude/projects/<path>` directory after it. An arm about a
+project with no auto-memory needs no `MEMORY.md` there. Give each arm
+its own working directory, so each gets its own memory directory.
+
+**Put a stopping rule in a bold lead, and re-test it on the weakest
+model.** A rule that makes a session stop and ask gets skipped when it
+sits among trailing bullets. In one skill, an approval rule placed third
+of six bullets after the list it governed let Haiku pick a destination
+from the list and write without asking in one run of three; moving the
+rule into the list's bold lead made it wait in three of three. After
+any rewording of such a rule, re-run the weakest model's arms.
+
+**Read an arm the grader failed before counting it.** A grader that
+looks for approval-seeking wording ("approve", "should I", a closing
+question mark) misses phrasings like "Does that text work for you? If
+so, I'll write it." When an arm is graded as not waiting but wrote
+nothing, read its final message before scoring it, and widen the
+pattern rather than correcting the score by hand.
 
 ## Writing a new skill
 
