@@ -369,8 +369,14 @@ else
   CLAUDE_MD_PARK_HOLDER=$$ "$@" <&0 &
 fi
 child=$!
-wait "$child"
+# bash's own report of a command killed by a signal quotes the whole
+# launch line, perl wrapper included, so it is silenced and replaced
+# with one that names the command.
+wait "$child" 2>/dev/null
 status=$?
+if [ "$status" -gt 128 ] && signal="$(kill -l $((status - 128)) 2>/dev/null)"; then
+  echo "park-claude-md: $1 ended by signal $signal" >&2
+fi
 command_done=1
 stop_leftovers
 child=

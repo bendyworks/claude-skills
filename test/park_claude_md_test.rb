@@ -806,6 +806,15 @@ class ParkClaudeMdTest < Minitest::Test
     assert_equal ORIGINAL, File.read(@live)
   end
 
+  def test_a_command_killed_by_a_signal_is_reported_by_name
+    _out, err, status = park('--', 'sh', '-c', 'kill -9 $$')
+
+    assert_equal 137, status.exitstatus
+    assert_match(/park-claude-md: sh ended by signal KILL/, err)
+    refute_match(/perl -e/, err)
+    assert_equal ORIGINAL, File.read(@live)
+  end
+
   def test_refuses_without_the_separator_and_parks_nothing
     _out, err, status = park('true')
 
