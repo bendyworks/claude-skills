@@ -154,12 +154,33 @@ from the list and write without asking in one run of three; moving the
 rule into the list's bold lead made it wait in three of three. After
 any rewording of such a rule, re-run the weakest model's arms.
 
+**Put a step's prohibition beside its own commands.** When one step
+points back at another for its rules, a weaker model copies commands
+from the section it was pointed at, including ones the pointing step
+must never run. In one skill, a step that pointed back at an earlier
+step's rules led Haiku to run that step's `gh label create` in two runs
+of six; a comment in the later step's own code block ("never run gh
+label create here") made it six of six. A command a step must not run
+belongs in that step's block, not only in prose elsewhere.
+
 **Read an arm the grader failed before counting it.** A grader that
 looks for approval-seeking wording ("approve", "should I", a closing
 question mark) misses phrasings like "Does that text work for you? If
 so, I'll write it." When an arm is graded as not waiting but wrote
 nothing, read its final message before scoring it, and widen the
 pattern rather than correcting the score by hand.
+The same miss applies to any behavior a grader recognizes by its
+wording: an offer phrased "I can create it if you want", or a stop
+phrased "someone else may already be working on it", reads as absent
+until the pattern learns it.
+
+**Stub a CLI on the same words the real one dispatches on.** A stub
+`gh` that switched on its first two arguments sent `gh api user` to its
+"unsupported" branch instead of its `api` handler, and a strong model
+then correctly reported that the login lookup had failed: a harness
+fault that read as a finding. Match subcommands the way the real tool
+parses them, and run each command the skill under test newly relies on
+once through the stub before the batch.
 
 ## Writing a new skill
 
@@ -184,6 +205,14 @@ to invoke the skill, so spend your effort there. Name the trigger phrases
 users actually say. Skills that reference each other should say "the
 <name> skill (bundled in this plugin)" rather than a bare `/name`, so the
 reference survives plugin namespacing.
+
+A skill whose steps all act on the checkout's own repository (its
+branches, `gh-issue-sync`, a closing keyword) should refuse work that
+names another repository, with a question to the user, rather than
+thread `--repo` through each step. Threading it covers only the steps
+someone remembered to update: one attempt carried `--repo` to three
+writes and missed three more, and `gh api` rejects the flag outright.
+A refusal at the first step stays correct as steps are added.
 
 Executables go in `bin/` (added to PATH when the plugin is enabled) and
 must not require configuration beyond documented environment variables.
