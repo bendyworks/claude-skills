@@ -4,12 +4,12 @@
     "name": "Bendyworks",
     "email": "info@bendyworks.com"
   },
-  "description": "Claude Code skills we use every day at Bendyworks",
+  "description": "Working agreements, engineering guidance, and skills for developing with Claude, from Bendyworks. Take what fits; every rule bends to your project's own.",
   "plugins": [
     {
       "name": "bendyworks",
       "source": "./",
-      "description": "Story planning, branch-quality gauntlet, Linear workflow, and project-ops skills"
+      "description": "Story planning, branch-quality gauntlet, Linear workflow, and project-ops skills from Bendyworks"
     }
   ]
 }

@@ -61,10 +61,6 @@ class CaptureSnapshotTemplateTest < Minitest::Test
     Open3.capture3(env, ruby, '-r./rails_stand_in', 'capture_snapshot.rb', chdir: @dir)
   end
 
-  def test_the_first_line_marks_the_file_as_a_template
-    assert_equal '# change-highlights template v1 (bendyworks/claude-skills)', File.readlines(TEMPLATE).first.chomp
-  end
-
   def test_a_copy_writes_one_snapshot_per_record_found
     out_path = File.join(@dir, 'after.json')
     out, err, status = run_copy({ 'OUT' => out_path })

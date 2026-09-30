@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# parallel-checkouts template v1 (bendyworks/claude-skills)
+# parallel-checkouts template v1 (bendyworks/rules-that-bend)
 #
 # Run a command in this checkout's app container. Compose finds the
 # container by its project and service labels, so no container name is

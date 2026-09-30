@@ -1,4 +1,4 @@
-# claude-skills
+# rules-that-bend
 
 This repo is the `bendyworks` Claude Code plugin marketplace: the skills,
 guidance files, and CLIs other people install and run. Contributor mechanics
@@ -6,6 +6,11 @@ guidance files, and CLIs other people install and run. Contributor mechanics
 dry-run a skill -- live in [CONTRIBUTING.md](CONTRIBUTING.md). Read it before
 opening a PR; this file carries only what a session working here needs in
 order to behave correctly.
+
+It was formerly `bendyworks/claude-skills`. Never create a repository by
+that name in the bendyworks org: GitHub redirects it here only while the
+name is free, and existing installers fetch the marketplace through that
+redirect.
 
 ## Deploy-on-Merge Mode
 

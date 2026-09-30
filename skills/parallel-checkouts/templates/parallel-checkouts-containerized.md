@@ -1,4 +1,4 @@
-<!-- parallel-checkouts template v1 (bendyworks/claude-skills). Replace every
+<!-- parallel-checkouts template v1 (bendyworks/rules-that-bend). Replace every
 <angle-bracket> placeholder and PRJ prefix, delete rows that do not apply,
 and remove this comment. -->
 
