@@ -407,3 +407,23 @@ class BuildHighlightsPdfTest < Minitest::Test
     assert_empty chrome_args
   end
 end
+
+class SampleManifestTest < Minitest::Test
+  SAMPLE = File.expand_path('../skills/change-highlights/examples/sample_manifest.json', __dir__)
+
+  RENDERER = File.expand_path('../skills/change-highlights/render_highlights.rb', __dir__)
+
+  # Through the renderer's CLI, which is where the missing-allow note and a
+  # missing-deny refusal come from.
+  def test_the_sample_renders_without_warnings_and_passes_its_own_segregation_check
+    Dir.mktmpdir do |dir|
+      copy = File.join(dir, 'sample.json')
+      FileUtils.cp(SAMPLE, copy)
+      _out, err, status = Open3.capture3('ruby', RENDERER, copy)
+
+      assert_predicate status, :success?, err
+      assert_empty err
+      assert_includes File.read(File.join(dir, 'sample.html')), '<tr class="totals"><th>Invoice total</th><td>$450.00</td></tr>'
+    end
+  end
+end
