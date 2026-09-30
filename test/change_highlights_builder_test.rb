@@ -1,8 +1,9 @@
 #!/usr/bin/env ruby
 # frozen_string_literal: true
 
-# Tests for the change-highlights skill's shell scripts: find_chrome.sh
-# (the sourced browser-discovery helper) and build_highlights_pdf.sh.
+# Tests for the change-highlights skill's shell scripts -- find_chrome.sh
+# (the sourced browser-discovery helper), build_highlights_pdf.sh, and
+# capture_screenshot.sh -- and for its sample manifest.
 # Candidate browsers are passed explicitly or placed on PATH as fakes,
 # so the results never depend on which browsers the machine has.
 # Coverage records nothing here: the project measures only bin/*.
@@ -425,5 +426,128 @@ class SampleManifestTest < Minitest::Test
       assert_empty err
       assert_includes File.read(File.join(dir, 'sample.html')), '<tr class="totals"><th>Invoice total</th><td>$450.00</td></tr>'
     end
+  end
+end
+
+class CaptureScreenshotTest < Minitest::Test
+  SCRIPT = File.expand_path('../skills/change-highlights/capture_screenshot.sh', __dir__)
+  # Logs each run's arguments after a "== run" line and writes the
+  # screenshot, unless FAKE_SHOT says to write nothing ("missing"), an empty
+  # file ("empty"), or to fail ("fail"), or to fail the --headless=new run
+  # ("new") so the script retries.
+  FAKE_CHROME = <<~'SH'
+    #!/bin/sh
+    { echo '== run'; printf '%s\n' "$@"; } >> "$FAKE_CHROME_LOG"
+    [ "$FAKE_SHOT" = fail ] && exit 1
+    for arg in "$@"; do
+      [ "$FAKE_SHOT" = new ] && [ "$arg" = --headless=new ] && exit 1
+      case "$arg" in --screenshot=*) out="${arg#--screenshot=}" ;; esac
+    done
+    [ "$FAKE_SHOT" = missing ] && exit 0
+    [ "$FAKE_SHOT" = empty ] && { : > "$out"; exit 0; }
+    printf 'png' > "$out"
+  SH
+
+  def setup
+    @dir = Dir.mktmpdir
+    @chrome = File.join(@dir, 'fake-chrome')
+    File.write(@chrome, FAKE_CHROME)
+    File.chmod(0o755, @chrome)
+    @log = File.join(@dir, 'chrome.log')
+  end
+
+  def teardown
+    FileUtils.rm_rf(@dir)
+  end
+
+  def capture(*args, env: {})
+    Open3.capture3({ 'CHROME' => @chrome, 'FAKE_CHROME_LOG' => @log, 'FAKE_SHOT' => nil, 'PROFILE' => nil,
+                     'WIDTH' => nil }.merge(env),
+                   'bash', SCRIPT, *args)
+  end
+
+  def shot = File.join(@dir, 'shot.png')
+
+  def test_without_two_arguments_prints_only_the_header_as_usage_to_stderr
+    out, err, status = capture('http://localhost/only-url')
+
+    assert_equal 2, status.exitstatus
+    assert_empty out
+    assert_match(/capture_screenshot\.sh URL OUT\.png/, err)
+    refute_match(/shellcheck/, err)
+  end
+
+  def test_a_browser_that_writes_no_image_fails_even_with_an_old_image_present
+    File.write(shot, 'png from an earlier run')
+    _out, err, status = capture('http://localhost:3000/page', shot, env: { 'FAKE_SHOT' => 'missing' })
+
+    refute_predicate status, :success?
+    assert_match(/shot\.png was not written/, err)
+    refute_path_exists shot
+  end
+
+  def test_a_browser_that_fails_says_so
+    _out, err, status = capture('http://localhost:3000/page', shot, env: { 'FAKE_SHOT' => 'fail' })
+
+    refute_predicate status, :success?
+    assert_match(/shot\.png was not written/, err)
+    refute_path_exists shot
+  end
+
+  def test_a_browser_that_writes_an_empty_image_fails_and_leaves_no_file
+    _out, err, status = capture('http://localhost:3000/page', shot, env: { 'FAKE_SHOT' => 'empty' })
+
+    refute_predicate status, :success?
+    assert_match(/shot\.png was not written/, err)
+    refute_path_exists shot
+  end
+
+  def test_a_failed_first_run_is_retried_with_plain_headless_and_the_same_arguments
+    _out, err, status = capture('http://localhost:3000/page', shot, env: { 'FAKE_SHOT' => 'new', 'PROFILE' => '/tmp/profile' })
+
+    assert_predicate status, :success?, err
+    first, retry_run = File.read(@log).split("== run\n").reject(&:empty?).map { |run| run.split("\n") }
+    assert_equal ['--headless=new'], first.grep(/\A--headless/)
+    assert_equal ['--headless'], retry_run.grep(/\A--headless/)
+    assert_equal first.grep_v(/\A--headless/), retry_run.grep_v(/\A--headless/)
+    assert_includes first, '--user-data-dir=/tmp/profile'
+    assert_equal 'http://localhost:3000/page', first.last
+    assert_path_exists shot
+  end
+
+  def test_a_scheme_in_capitals_is_accepted
+    _out, err, status = capture('HTTP://localhost:3000/page', shot)
+
+    assert_predicate status, :success?, err
+  end
+
+  def test_a_url_without_a_web_or_file_scheme_is_refused
+    ['--renderer-cmd-prefix=touch', 'localhost:3000/page', 'javascript:alert(1)'].each do |url|
+      _out, err, status = capture(url, shot)
+
+      assert_equal 2, status.exitstatus, url
+      assert_match(%r{URL must start with file://, http://, or https://}, err)
+      refute_path_exists @log
+    end
+  end
+
+  def test_screenshots_the_url_at_the_default_width
+    _out, err, status = capture('http://localhost:3000/page', shot)
+
+    assert_predicate status, :success?, err
+    args = File.readlines(@log, chomp: true)
+    assert_includes args, "--screenshot=#{shot}"
+    assert_includes args, '--window-size=1200,2400'
+    assert_equal 'http://localhost:3000/page', args.last
+    refute(args.any? { |arg| arg.start_with?('--user-data-dir') })
+  end
+
+  def test_width_and_profile_come_from_the_environment
+    _out, err, status = capture('file:///tmp/page.html', shot, env: { 'WIDTH' => '800', 'PROFILE' => '/tmp/profile' })
+
+    assert_predicate status, :success?, err
+    args = File.readlines(@log, chomp: true)
+    assert_includes args, '--window-size=800,2400'
+    assert_includes args, '--user-data-dir=/tmp/profile'
   end
 end
