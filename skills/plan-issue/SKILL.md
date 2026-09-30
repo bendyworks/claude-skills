@@ -1086,14 +1086,15 @@ only open or closed. **On GitHub this step is exactly the pickup's
 commands again, run without asking: the assignment, then the
 `in progress` label when the repository has it and the project has not
 declined it (see In-progress label).** Both are no-ops when pickup
-already ran; this re-run covers a session that skipped create, so it
-first reads the issue and applies pickup's closed and claim rules
-(create Step 2). When the user chose at pickup not to take the issue,
-or the claim question has no answer yet, make no write here.
+already ran. When this session ran pickup, re-apply only: the label
+is its own, and the claim question, if asked, has its answer -- make
+no write here when the user chose not to take the issue, or has not
+answered yet. A session that skipped create first reads the issue and
+applies create Step 2's Closed and Already-claimed rules.
 
 ```bash
-gh issue view NNN --json state,labels,assignees   # pickup's closed and claim rules first
-gh api user --jq .login
+gh issue view NNN --json state,labels,assignees   # only in a session that skipped create
+gh api user --jq .login                           # likewise
 gh issue edit NNN --add-assignee "@me"
 gh label list --search "in progress" --json name  # a hit counts only if its name is exactly "in progress"
 gh issue edit NNN --add-label "in progress"       # only when it exists and the checked-in rules do not decline it
