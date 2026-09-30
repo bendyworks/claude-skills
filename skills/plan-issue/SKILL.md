@@ -339,12 +339,17 @@ closed issue wherever the issue carries it.)
 - **Otherwise, neither:** at pickup, offer once to create the label,
   in the same message as the rest of the Step 2 findings. On yes, run
   `gh label create "in progress" --color FBCA04 --description "Someone is working this issue"`
-  and apply it. On no, record the decline right away through its own
-  small pull request: a branch cut from the default branch that adds
-  only the decline sentence to CLAUDE.md, opened under the project's
-  pull-request rules. Never put it on the story's branch, where an
-  abandoned story would lose the decision. Until that pull request
-  merges, sessions on other branches can offer again; point them at it.
+  and apply it. A no can mean "not now", so ask whether it declines
+  the label for the whole project, unless the answer already said so.
+  Short of a project-wide decline, skip the label for this session and
+  write nothing. On a project-wide decline, record it through its own
+  small pull request: fetch, cut a branch from the default branch in a
+  separate worktree (`git worktree add`), so the checkout the user is
+  working in never moves, add only the decline sentence to CLAUDE.md,
+  and open it under the project's pull-request rules. Never put it on
+  the story's branch, where an abandoned story would lose the decision.
+  Until that pull request merges, sessions on other branches can offer
+  again; point them at it.
 
 Pickup is the assignment and then the label, as separate commands so a
 failure names its own step; create Step 2 shows them with their
