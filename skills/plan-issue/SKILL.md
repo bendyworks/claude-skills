@@ -314,8 +314,10 @@ anyway.
 
 Whether the project uses the label is settled at every site that acts
 on it -- pickup (the commands at the top of create Step 2), record
-Step 5, and the housekeeping skill's Step 2 reopen and Step 5 close --
-from the checked-in files and the repository, never from conversation:
+Step 5, and the housekeeping skill's Step 2 reopen -- from the
+checked-in files and the repository, never from conversation. (The
+housekeeping skill's Step 5 needs neither: it removes the label from a
+closed issue wherever the issue carries it.)
 
 - **The project declines it** in its checked-in CLAUDE.md (or a rules
   file every session loads), in wording like:
