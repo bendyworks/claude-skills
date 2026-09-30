@@ -864,11 +864,11 @@ Draft a plan with:
       In-progress label.)
    5. **Stakeholder change-highlights (conditional).** When the change
       alters something a client stakeholder visibly relies on -- a
-      report, receipt, statement, mailer, or screen -- and the project
-      provides a change-highlights-style skill for stakeholder-facing
-      before/after summaries, add a step to build one and communicate it
-      to the stakeholder so they can review each change visually with
-      a clear, explained example. Skip only for purely internal changes
+      report, receipt, statement, mailer, or screen -- add a step to
+      build a before/after summary with the change-highlights skill
+      (bundled in this plugin) and communicate it to the stakeholder so
+      they can review each change visually with a clear, explained
+      example. Skip only for purely internal changes
       with no stakeholder-visible surface (refactors, infra, dev tooling).
    6. **Confirm shipped (PR merged, live in production).** The finish
       phase's entry gate, listed as its own to-do so post-ship work is
@@ -999,9 +999,9 @@ toggleable view of progress (Ctrl-T) alongside the markdown plan file.
   run-housekeeping task in progress when it starts, completes it last,
   and returns it to pending if it stops short (confirm-shipped too, when
   the stop comes before its plan-file box is ticked). When the change is stakeholder-visible (a report,
-  receipt, statement, mailer, or screen a client stakeholder relies on) and
-  the project provides a change-highlights-style skill, add a further own
-  task for the before/after summary and its communication to the
+  receipt, statement, mailer, or screen a client stakeholder relies on),
+  add a further own task for the before/after summary (the
+  change-highlights skill, bundled in this plugin) and its communication to the
   stakeholder, ordered before the finish-tail items as in the ship tail.
 - **The task list updates per to-do, never per group.** The markdown
   plan file remains the source of truth for the *why* and the approach;

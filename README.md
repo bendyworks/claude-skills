@@ -36,6 +36,7 @@ To pick up updates later:
 | `finished-issue-housekeeping` | Post-ship cleanup once a story is merged and deployed (just merged, on a project in Deploy-on-Merge Mode): finalize the plan file, move the issue to Done (on GitHub, close it and remove its `in progress` label), prune branches, save the story's lessons as rules or skills, tidy memory and task lists, and run an approval-gated permission-prompt sweep that can propose additions to the project's `.claude/settings.json`. |
 | `architecture-survey` | Identify the biggest improvement opportunities in your application - prioritizing the largest and most daunting pain points you've been paying a large maintenance tax on already. Domain-first architectural-simplification survey of a mature codebase, producing a ranked, tracker-ready refactoring backlog. Can create an epic of fixes in your story tracker of choice. |
 | `markdown-to-pdf` | Convert Markdown files to clean, print-styled PDFs. |
+| `change-highlights` | Show a client what a change does to something they rely on, in a before/after PDF per recipient that leads with the fix they care about, including one that only affects future records. Refuses to write a PDF whose text names another tenant on its deny list, and lists every image to check by eye. Capture templates are Rails-first. |
 | `linear` | Read and write Linear issues via a bundled CLI (create, comment, search, transition) instead of raw GraphQL. Requires Ruby and a `LINEAR_API_TOKEN` env var. |
 | `dependabot-batch` | Triage, verify, and (behind opt-in dials) merge and deploy a batch of open Dependabot PRs. |
 | `bug-cluster-ledger` | Mine a time window of tracker issues and cluster them upward to root causes per subsystem, with prevention analysis. Used by architecture-survey. |
@@ -83,6 +84,8 @@ overriding, and troubleshooting.
   resolving a repo's default branch.
 - `markdown-to-pdf` needs a Chromium-based browser or wkhtmltopdf, plus a
   markdown converter (kramdown gem, pandoc, or python-markdown).
+- `change-highlights` needs Ruby 2.6 or newer (the macOS system Ruby works)
+  and a Chromium-based browser (Chrome, Chromium, Brave, or Edge).
 
 ## Upgrading Rails?
 

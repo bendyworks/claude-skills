@@ -1,0 +1,51 @@
+{
+  "title": "Northwind Supply invoices: what's changing",
+  "intro": [
+    "You reported that a credit applied partway through a month was charged again on the next invoice. **I have a fix ready.** It will take effect the next time a mid-month credit is applied, so nothing on your past invoices will change, and it will not refund the one duplicate charge from March: I have credited that separately.",
+    "The same release will also correct how discounts are labeled. That change is cosmetic; every total will stay the same."
+  ],
+  "preview_caveat": "Preview: the relabeled invoice below is your April invoice run through the new labels. Your invoices will show them from the next one issued.",
+  "currency_symbol": "$",
+  "segregation": {
+    "allow": ["Northwind"],
+    "deny": ["Contoso", "Fabrikam"]
+  },
+  "examples": [
+    {
+      "heading": "The fix: a mid-month credit will be charged once",
+      "explanation": "**Example only.** Your existing invoices will not change. This shows how the next invoice after a mid-month credit will be calculated, using one of your own April orders as the starting point.",
+      "blocks": [
+        {
+          "type": "comparison_table",
+          "title": "Next invoice after a $120.00 mid-month credit",
+          "row_header": "Line",
+          "before_label": "Before the fix",
+          "after_label": "After the fix",
+          "rows": [
+            { "label": "Subscription", "before_cents": 50000, "after_cents": 50000 },
+            { "label": "Credit charged again", "before_cents": 12000, "after_cents": 0 },
+            { "label": "Amount due", "before_cents": 62000, "after_cents": 50000 }
+          ]
+        }
+      ]
+    },
+    {
+      "heading": "Also in this release: discount labels",
+      "explanation": "Discounts will show the promotion they came from, in place of the single word \"Discount\". Amounts and totals will stay the same.",
+      "blocks": [
+        {
+          "type": "amount_table",
+          "title": "Your April invoice, relabeled",
+          "label_header": "Line",
+          "amount_header": "Amount",
+          "total_label": "Invoice total",
+          "rows": [
+            { "label": "Subscription", "amount_cents": 50000 },
+            { "label": "Spring promotion discount", "amount_cents": -5000, "info": "was \"Discount\"" },
+            { "label": "Shipping", "amount_cents": 0, "info": "waived, shown for reference" }
+          ]
+        }
+      ]
+    }
+  ]
+}

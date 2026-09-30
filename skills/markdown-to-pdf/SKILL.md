@@ -87,3 +87,10 @@ side (driver uses Letter + 16mm; Chrome uses the HTML's `@page` if present).
 Common asks: force a page break before a section (`page-break-before: always`),
 shrink a wide `<pre>` (drop its font-size), or add a title/date header (prepend
 to the body). Keep everything inline and offline.
+
+## Related
+
+The change-highlights skill (bundled in this plugin) builds a before/after PDF
+for a specific client recipient from captured material, with a gate against
+other tenants' data. Use it instead of this skill for a "here is what
+changed" document for a client built from captured before/after material.
