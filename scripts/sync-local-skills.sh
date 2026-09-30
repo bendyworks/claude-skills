@@ -11,6 +11,12 @@
 #   scripts/sync-local-skills.sh --check   # show drift, change nothing
 #   scripts/sync-local-skills.sh           # copy repo -> ~/.claude/skills
 #
+# A skill new to this repo is installed on the next sync. When a project
+# keeps its own copy of that skill under the same name (the usual starting
+# point for a skill extracted from a project), remove the project's copy
+# before syncing, so sessions in that project never see two skills with
+# one name.
+#
 # Also updates $HOME/.claude/bin/<name> from each bin/ executable that
 # already exists locally (created the first time you opt in by copying
 # it yourself; a bin file you never copied is never synced).
