@@ -467,11 +467,14 @@ key here, where that section says to ask first.
   # No such label and no decline in the checked-in rules: ask in this step's reply whether to create it.
   ```
   With a URL, add its `--repo <owner>/<repo>` to each command.
-  **Already claimed in that first read** -- labeled `in progress`, or
-  assigned to anyone but the login above: run none of the pickup
-  commands yet. When the checked-out branch belongs to this issue (its
-  name starts with the issue's `NNN-` or `prj-NNN-` slug prefix), this
-  is the user's own continuing work; pick it up and carry on. Otherwise
+  **Closed in that first read:** run no pickup command; ask whether to
+  reopen it or plan a follow-up.
+  **Already claimed in that first read** -- a label named `in progress`
+  in any case, or an assignee other than the login above: run none of
+  the pickup commands yet. When the only claim is the label (no other
+  assignee) and the checked-out branch belongs to this issue (its name
+  starts with the issue's `NNN-` or `prj-NNN-` slug prefix), this is
+  the user's own continuing work; pick it up and carry on. Otherwise
   stop, say who or what holds the issue, and ask whether to continue.
   Checking and then labeling is not atomic, and parallel sessions run
   as the same user and can share one plans directory, so this question
@@ -1072,9 +1075,14 @@ only open or closed. **On GitHub this step is exactly the pickup's
 commands again, run without asking: the assignment, then the
 `in progress` label when the repository has it and the project has not
 declined it (see In-progress label).** Both are no-ops when pickup
-already ran; this re-run covers a session that skipped create.
+already ran; this re-run covers a session that skipped create, so it
+first reads the issue and applies pickup's closed and claim rules
+(create Step 2). When the user chose at pickup not to take the issue,
+or the claim question has no answer yet, make no write here.
 
 ```bash
+gh issue view NNN --json state,labels,assignees   # pickup's closed and claim rules first
+gh api user --jq .login
 gh issue edit NNN --add-assignee "@me"
 gh label list --search "in progress" --json name  # a hit counts only if its name is exactly "in progress"
 gh issue edit NNN --add-label "in progress"       # only when it exists and the checked-in rules do not decline it
