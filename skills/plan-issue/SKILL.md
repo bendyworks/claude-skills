@@ -1112,6 +1112,7 @@ gh api user --jq .login                           # likewise
 gh issue edit NNN --add-assignee "@me"
 gh label list --search "in progress" --json name  # a hit counts only if its name is exactly "in progress"
 gh issue edit NNN --add-label "in progress"       # only when it exists and the checked-in rules do not decline it
+# No such label: skip it. Never run gh label create here; the offer belongs to pickup.
 ```
 
 Nothing else: when the label is missing, skip it without comment. This
