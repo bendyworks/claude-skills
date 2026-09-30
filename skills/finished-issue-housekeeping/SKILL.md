@@ -348,7 +348,7 @@ If the issue was in the "Active Work" section of `MEMORY.md`, remove it from the
 Auto-memory decays -- files get pruned, and recalls carry staleness warnings. For each memory written or touched during this story, classify it:
 
 - **State**, as 4a defines it -- stays in memory. Most memories are state.
-- **A durable rule** ("how to behave", a standing policy, a permanent fact about the codebase or environment) -- promote it to its permanent home instead, choosing from 4a's list of homes and with 4a's approval before writing.
+- **A durable rule** ("how to behave", a standing policy, a permanent fact about the codebase or environment) -- promote it to its permanent home instead, choosing from 4a's list of homes, with 4a's approval before writing and 4a's rules for a write inside this repository.
 - **Already covered** by a permanent home -- delete the redundant memory.
 
 After promoting a rule, keep its memory only if the incident narrative adds value the rule can't carry, and note the promotion inside it. If a rule-shaped memory can't be promoted right now, mark its frontmatter `promote: candidate` so a later sweep finds it cheaply.
@@ -442,7 +442,7 @@ skill (a Claude Code built-in, not part of this plugin).
   project's `.claude/settings.json`; if that file is gitignored,
   `git status` will not show it -- fall back to the built-in's own
   report of what it wrote). `git status` will also show the plan-file
-  edits and any checked-in rule or skill 4a saved, so name the settings
+  edits and any checked-in rule or skill 4a or 4c saved, so name the settings
   diff specifically. This step can end the pass with an uncommitted
   settings diff, so say so plainly in the Step 10 summary. Committing
   stays with the user, through the project's normal flow -- possibly
