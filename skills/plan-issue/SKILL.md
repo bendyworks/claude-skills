@@ -1093,18 +1093,21 @@ update if one is available; otherwise ask the user to move and assign
 the story in the Shortcut UI.
 
 For GitHub Issues there is no started state to move to -- an issue is
-only open or closed. **On GitHub this step is exactly the pickup's
-commands again, run without asking: the assignment, then the
+only open or closed. **On GitHub this step repeats pickup, without
+asking and only where pickup would write: the assignment, then the
 `in progress` label when the repository has it and the project has not
-declined it (see In-progress label).** Both are no-ops when pickup
-already ran. When this session ran pickup, re-apply only: the label
-is its own, and the claim question, if asked, has its answer -- make
-no write here when the user chose not to take the issue, or has not
-answered yet. A session that skipped create first reads the issue and
-applies create Step 2's Closed and Already-claimed rules.
+declined it (see In-progress label).** What else happens depends on
+what this session's create Step 2 did. When it ran the pickup
+commands, run them again; both are no-ops. When it stopped instead --
+at the Closed rule, the Already-claimed question, or the refusal for
+another repository's issue -- write nothing unless the user has since
+said to take the issue, and ask a claim question still unanswered
+again here, before Step 6 starts. A session that skipped create, or
+cannot tell what its create step did (after a compaction, say), first
+reads the issue and applies create Step 2's rules.
 
 ```bash
-gh issue view NNN --json state,labels,assignees   # only in a session that skipped create
+gh issue view NNN --json state,labels,assignees   # only when create Step 2 did not run here, or it is unclear
 gh api user --jq .login                           # likewise
 gh issue edit NNN --add-assignee "@me"
 gh label list --search "in progress" --json name  # a hit counts only if its name is exactly "in progress"
