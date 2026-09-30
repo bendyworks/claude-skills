@@ -136,6 +136,31 @@ to substitute real files when a stipulated one does not exist and say
 so, and require the full decision output. This validates heuristics in
 one pass without paying for their execution.
 
+**Plant the memory directory for memory behavior.** A headless session
+gets an auto-memory directory derived from its working directory:
+`~/.claude/projects/<path>/memory/`, where `<path>` is the absolute
+working directory with every character other than a letter or digit
+turned into `-`. To test how a skill handles memory, plant the
+`MEMORY.md` an arm needs at that path before the run, and remove the
+whole `~/.claude/projects/<path>` directory after it. An arm about a
+project with no auto-memory needs no `MEMORY.md` there. Give each arm
+its own working directory, so each gets its own memory directory.
+
+**Put a stopping rule in a bold lead, and re-test it on the weakest
+model.** A rule that makes a session stop and ask gets skipped when it
+sits among trailing bullets. In one skill, an approval rule placed third
+of six bullets after the list it governed let Haiku pick a destination
+from the list and write without asking in one run of three; moving the
+rule into the list's bold lead made it wait in three of three. After
+any rewording of such a rule, re-run the weakest model's arms.
+
+**Read an arm the grader failed before counting it.** A grader that
+looks for approval-seeking wording ("approve", "should I", a closing
+question mark) misses phrasings like "Does that text work for you? If
+so, I'll write it." When an arm is graded as not waiting but wrote
+nothing, read its final message before scoring it, and widen the
+pattern rather than correcting the score by hand.
+
 ## Writing a new skill
 
 A skill is a folder under `skills/<name>/` with a `SKILL.md` and any
