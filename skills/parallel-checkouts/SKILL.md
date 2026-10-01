@@ -813,8 +813,8 @@ siblings. Machine-local: nothing is committed.
 
 A checkout reached through a symlink (`~/dev/app` linking to another
 volume) is moved as the directory its `realpath` names, as remove mode
-does. Add its user-facing link to Step 1's list by hand, since the
-search there runs from the `realpath` side; in Step 6, rename the link
+does. Make sure Step 1's list holds its user-facing link; in Step 6,
+rename the link
 to the new spelling as well as repointing it, so the old spelling is
 gone too. Claude Code may have keyed sessions under either spelling,
 so in Steps 4 and 8 apply the key rule to both and move whichever
@@ -836,49 +836,58 @@ move is reversed after Step 3 changed it), in a scratch file outside
 the checkouts. That list is how an interrupted move is resumed or
 reversed.
 
-Then, while the old paths still exist, find the symlinks that point
-into a checkout and would break when it moves, and add them to the
-list. Both searches below use each checkout's `realpath` as its old
-path.
-
-**From outside.** Search the Claude Code config directory, the
-user's bin directories, and the checkouts' parent directory, each
-given by its `realpath` too, so a directory reached through a link
-does not defeat the skip below. `OLDS` holds the old paths, one per
-line:
+Then, while the old paths still exist, find the symlinks the move
+would break, and add them to the list. `OLDS` holds each checkout's
+`realpath`, one per line; the check below resolves every link with
+`realpath`, so a target spelled through another link (a symlinked
+checkout's user-facing path, `/tmp` for `/private/tmp`) still counts,
+and it matches an old path whole or followed by `/`, so a sibling such
+as `app-admin` is not taken for `app`:
 
 ```bash
-OLDS='<old-path>
-<old-path2>' find <dirs> -maxdepth 3 -type l -exec sh -c '
+check='
 nl="
 "
 for l; do
   [ -e "$l" ] || continue
-  t=$(realpath "$l"); inside=; hit=
+  t=$(realpath "$l"); r=$(readlink "$l"); inside=; hit=
   set -f; IFS=$nl
   for old in $OLDS; do
     case "$l" in "$old"/*) inside=1 ;; esac
     case "$t" in "$old"|"$old"/*) hit=1 ;; esac
   done
   unset IFS; set +f
-  [ -n "$hit" ] && [ -z "$inside" ] && echo "$l -> $(readlink "$l")"
-done' _ {} +
+  case "$inside,$hit,$r" in
+    ,1,*|1,1,/*|1,,[!/]*) echo "$l -> $r" ;;
+  esac
+done'
+export OLDS='<old-path>
+<old-path2>'
+find <dirs> -maxdepth 3 -type l -exec sh -c "$check" _ {} +
+find <old-path> -path '*/node_modules' -prune -o -type l -exec sh -c "$check" _ {} +
 ```
 
-A link inside any moving checkout is skipped (Step 5 handles the add
-mode's links between checkouts), a link already broken is left alone,
-and matching an old path whole, or followed by `/`, keeps a sibling
-such as `app-admin` out of the list for `app`. Resolving with
-`realpath` catches relative targets (`../app/bin/x`) and links that
-reach a checkout through another link.
+Run the first `find` once, with `<dirs>` the Claude Code config
+directory, the user's bin directories, and the checkouts' parent
+directory, each by its `realpath`; run the second once per checkout.
+It lists three kinds of link, each of which breaks:
 
-**Inside.** A link within a checkout whose target is written as an
-absolute path into any moving checkout breaks too. For each checkout,
-and for each old path `<other>` (its own included), this lists them,
-pruning any dependency directory too large to walk:
-`find <old-path> -path <old-path>/node_modules -prune -o -type l -lname '<other>/*' -print`.
-Record each by the path it will have after the move: it moves with
-its checkout.
+- a link outside every checkout whose target is in one;
+- a link inside a checkout whose target is written as an absolute
+  path into any moving checkout;
+- a link inside a checkout whose relative target leaves every
+  checkout (`.env -> ../../shared/app.env`), which breaks when the
+  checkouts move to a different depth; skip these when the parent
+  directory stays the same.
+
+A relative link from one checkout into another (add mode's) is Step
+5's, and a link already broken is left alone. A symlinked checkout's
+user-facing link shows up when it sits in one of `<dirs>`; add it by
+hand when it does not.
+
+Record each link at the path it will have after the move: a link
+inside a checkout or under a moving project folder moves with it, and
+a symlinked checkout's user-facing link is renamed in Step 6.
 
 ### Step 2 -- Check it is safe to move
 
