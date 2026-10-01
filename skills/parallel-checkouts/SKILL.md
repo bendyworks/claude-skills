@@ -987,8 +987,11 @@ Then search for text that names an old path, listing file names only
   Step 8 moves: a per-project MCP server's arguments can name the path.
 
 Update the references that drive behavior, editing a secrets file
-with `sed` on the matching lines only, and leave historical records
-(logs, past timings, transcripts, finished plans) as they were. A
+with `sed` on the matching lines only. Replace an old path only where
+it stands whole, followed by `/`, a quote, or the end of the value,
+so a sibling path such as `<old-path>-admin` is left alone. Leave
+historical records (logs, past timings, transcripts, finished plans)
+as they were. A
 value inside a `~/.claude.json` entry is rewritten in Step 8, as part
 of that file's single rewrite.
 
