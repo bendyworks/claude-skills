@@ -813,8 +813,8 @@ siblings. Machine-local: nothing is committed.
 
 A checkout reached through a symlink (`~/dev/app` linking to another
 volume) is moved as the directory its `realpath` names, as remove mode
-does; the user-facing link is one of the links Step 1 lists, and is
-repointed in Step 6.
+does. Add its user-facing link to Step 1's list by hand, since the
+search there runs from the `realpath` side, and repoint it in Step 6.
 
 **Run it from a session outside every checkout being moved** (their
 parent directory works). A session inside one loses its working
@@ -868,9 +868,12 @@ such as `app-admin` out of the list for `app`. Resolving with
 reach a checkout through another link.
 
 **Inside.** A link within a checkout whose target is written as an
-absolute path into that checkout breaks too. For each checkout,
-`find <old-path> -path <old-path>/node_modules -prune -o -type l -lname '<old-path>/*' -print`
-lists them, pruning any dependency directory too large to walk.
+absolute path into any moving checkout breaks too. For each checkout,
+and for each old path `<other>` (its own included), this lists them,
+pruning any dependency directory too large to walk:
+`find <old-path> -path <old-path>/node_modules -prune -o -type l -lname '<other>/*' -print`.
+Record each by the path it will have after the move: it moves with
+its checkout.
 
 ### Step 2 -- Check it is safe to move
 
@@ -973,8 +976,7 @@ move.
 ### Step 6 -- Repoint other links and caches
 
 Show the user the links Step 1 listed, then repoint each to the new
-path, keeping a relative link relative. A link from the inside search
-moved with its checkout, so repoint it at its new location.
+path, keeping a relative link relative.
 
 Then search for text that names an old path, listing file names only
 (`grep -rlF <old-path> ...`) so no secret is printed:
@@ -1047,10 +1049,8 @@ then start it again.
 
 - No old path exists, and every new one is a git checkout on the
   branch it was on, with the same `origin` URL as the primary.
-- Every link Step 1 listed resolves (`test -e <link>`). (A broader
-  `find -L <dirs> -type l`, which lists every broken link, also turns
-  up stale links that have nothing to do with the move; judge only the
-  ones Step 1 listed.)
+- Every link Step 1 listed resolves (`test -e <link>`, at the path
+  Step 1 recorded for it).
 - Each parallel checkout's `memory` resolves to the primary's, and its
   `.claude/` links resolve.
 - *(services)* `direnv exec <checkout> printenv PRJ_CHECKOUT_ROOT`
