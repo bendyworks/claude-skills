@@ -917,9 +917,11 @@ move.
 
 - **Memory.** Each parallel checkout's project folder holds `memory`
   as a relative link into the primary's folder by its old key.
-  Replace each with a link to the new key:
-  `ln -sfn ../<new-primary-key>/memory <new-key-N>/memory`. Check
-  first that it is a link (`test -L`), never a real directory.
+  Replace each with a link to the new key, from inside
+  `~/.claude/projects/` so the relative target resolves:
+  `cd ~/.claude/projects && ln -sfn ../<new-primary-key>/memory <new-key>/memory`,
+  where `<new-key>` is that parallel checkout's. Check first that it
+  is a link (`test -L`), never a real directory.
 - **The project's `.claude/` entries.** Each parallel checkout links
   untracked entries of the primary's `.claude/` by relative paths
   naming the primary's old directory. Recreate each link with the new
