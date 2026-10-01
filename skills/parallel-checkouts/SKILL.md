@@ -1001,8 +1001,11 @@ unsure): direnv ties its approval to the file's path as spelled and
 to its contents, and the `.envrc` of each parallel checkout (and of a
 containerized primary) sets `PRJ_CHECKOUT_ROOT` from the directory it
 loads in. A shell that loaded the identity before the move holds the
-old root; open a new one. *(containerized)* The direnv load rewrites
-the identity lines of `.devcontainer/.env`; then `bin/docker-up`.
+old root; open a new one. *(containerized)* `direnv allow` approves
+the file without loading it, so start the stack with
+`cd <checkout> && direnv exec . bin/docker-up`: the load rewrites the
+identity lines of `.devcontainer/.env` with the new root before the
+stack starts.
 
 ### Step 8 -- Move the path-keyed entries in Claude Code's own files
 
@@ -1047,8 +1050,8 @@ then start it again.
 - *(services)* `direnv exec <checkout> printenv PRJ_CHECKOUT_ROOT`
   prints the new path in each parallel checkout; a native primary
   leaves it unset, so it prints nothing there, as before the move.
-  *(containerized)* `bin/check-parallel-dev` passes in every checkout,
-  the primary included.
+  *(containerized)* `cd <checkout> && direnv exec . bin/check-parallel-dev`
+  passes in every checkout, the primary included.
 - `claude --resume` from the moved primary lists its earlier sessions.
 
 ## Caveats to pass on
