@@ -883,6 +883,11 @@ in it reconnects it. `git worktree list` then shows no worktree as
 prunable. Check `git config --get core.worktree` too, and repoint it
 if set.
 
+When the move follows a repository rename, set every checkout's
+`origin` (and `upstream`, in a fork) to the new URL together, with
+`git remote set-url`: remove mode refuses a checkout whose `origin`
+differs from the primary's, and add mode clones from the primary's.
+
 ### Step 4 -- Move the Claude Code project folders
 
 For each checkout, rename `~/.claude/projects/<old-key>` to
@@ -987,7 +992,7 @@ then start it again.
 ### Step 9 -- Verify
 
 - No old path exists, and every new one is a git checkout on the
-  branch it was on.
+  branch it was on, with the same `origin` URL as the primary.
 - Every link Step 1 listed resolves (`test -e <link>`). (A broader
   `find -L <dirs> -type l`, which lists every broken link, also turns
   up stale links that have nothing to do with the move; judge only the
