@@ -826,6 +826,8 @@ interrupted move is resumed or reversed.
 
 - Nothing runs inside any checkout: no Claude Code session, dev
   server, suite, or shell with a job in it.
+  `lsof -a -d cwd -Fn | grep -F <old-path>` lists processes whose
+  working directory is inside one, and must print nothing.
 - No new path exists yet, and no new project key exists as a
   directory under `~/.claude/projects/`. A new key that already exists
   means a session ran there before; stop and ask, since merging two
@@ -850,7 +852,10 @@ worktree records its checkout's absolute path. Check
 ### Step 4 -- Move the Claude Code project folders
 
 For each checkout, rename `~/.claude/projects/<old-key>` to
-`<new-key>`. That carries its memory and its session history.
+`<new-key>`. That carries its memory and its session history: Claude
+Code finds a project's transcripts by its folder, so they resume from
+the new path even though each still records the old working
+directory.
 
 Folders for paths inside the checkout (its worktrees, a subdirectory
 a session started in) are keyed `<old-key>-...`; rename each to
@@ -864,6 +869,10 @@ a session started in) are keyed `<old-key>-...`; rename each to
   (`grep -m1 -ho '"cwd":"[^"]*"' <folder>/*.jsonl`) and requiring it
   to start with the old checkout path followed by `/`. A folder with
   no transcript is shown to the user, not guessed at.
+
+Rename a confirmed folder even when it looks abandoned: its directory
+is often still on disk, and deleting session history is not part of a
+move.
 
 ### Step 5 -- Repoint the links the add mode made
 
@@ -886,13 +895,16 @@ old path, and show the list before changing any:
 `find <dirs> -maxdepth 3 -type l -exec sh -c 'for l; do case "$(readlink "$l")" in *<old-path>*) echo "$l";; esac; done' _ {} +`.
 Repoint each to the new path. Then search the Claude Code config
 directory for text that names an old path (a skill's per-project
-cache, a settings file) and update the references that drive behavior,
-leaving historical records (logs, past timings) as they were.
+cache, a settings file, a memory file under the moved project folders
+that gives a command with the path in it) and update the references
+that drive behavior, leaving historical records (logs, past timings,
+transcripts) as they were.
 
 ### Step 7 -- Reload each checkout's environment
 
-Run `direnv allow` in each moved checkout: direnv records its approval
-by path, and `.envrc` sets `PRJ_CHECKOUT_ROOT` from the directory it
+Run `direnv allow` in each moved checkout, and again after any edit to
+its `.envrc`: direnv ties its approval to the file's path and
+contents, and `.envrc` sets `PRJ_CHECKOUT_ROOT` from the directory it
 loads in. A shell that loaded the identity before the move holds the
 old root; open a new one. *(containerized)* The direnv load rewrites
 the identity lines of `.devcontainer/.env`; then `bin/docker-up`.
@@ -923,9 +935,10 @@ the entry survived.
 
 - No old path exists, and every new one is a git checkout on the
   branch it was on.
-- No broken links remain where Step 6 searched:
-  `find -L <dirs> -maxdepth 3 -type l` lists links whose target is
-  missing.
+- Step 6's symlink search, rerun, prints nothing. (A broader
+  `find -L <dirs> -type l`, which lists every broken link, also turns
+  up stale links that have nothing to do with the move; judge only the
+  ones naming an old path.)
 - Each parallel checkout's `memory` resolves to the primary's, and its
   `.claude/` links resolve.
 - `direnv exec <checkout> printenv PRJ_CHECKOUT_ROOT` prints the new
