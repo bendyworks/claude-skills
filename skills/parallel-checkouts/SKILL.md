@@ -948,7 +948,8 @@ of that file's single rewrite.
 
 Run `direnv allow` in each moved checkout, and again after any edit to
 its `.envrc`: direnv ties its approval to the file's path and
-contents, and `.envrc` sets `PRJ_CHECKOUT_ROOT` from the directory it
+contents, and the `.envrc` of each parallel checkout (and of a
+containerized primary) sets `PRJ_CHECKOUT_ROOT` from the directory it
 loads in. A shell that loaded the identity before the move holds the
 old root; open a new one. *(containerized)* The direnv load rewrites
 the identity lines of `.devcontainer/.env`; then `bin/docker-up`.
@@ -993,9 +994,11 @@ then start it again.
   ones Step 1 listed.)
 - Each parallel checkout's `memory` resolves to the primary's, and its
   `.claude/` links resolve.
-- `direnv exec <checkout> printenv PRJ_CHECKOUT_ROOT` prints the new
-  path *(services)*, and `bin/check-parallel-dev` passes
-  *(containerized)*.
+- *(services)* `direnv exec <checkout> printenv PRJ_CHECKOUT_ROOT`
+  prints the new path in each parallel checkout; a native primary
+  leaves it unset, so it prints nothing there, as before the move.
+  *(containerized)* `bin/check-parallel-dev` passes in every checkout,
+  the primary included.
 - `claude --resume` from the moved primary lists its earlier sessions.
 
 ## Caveats to pass on
