@@ -950,7 +950,11 @@ clones per repository) and `~/.claude/history.jsonl` (the prompt
 history the up arrow walks, one line per prompt, with a `project`
 field).
 
-Do this step last. For each file: copy it to a backup, write the
+Do this step last, with every other Claude Code session closed, in
+any project: a session holds its own copy of `~/.claude.json` and can
+write it back over the rewrite, and a prompt typed between the read
+and the write would be lost from `history.jsonl`. For each file: copy
+it to a backup, write the
 rewritten version to a temporary file beside it, and `mv` that into
 place. In `~/.claude.json`, rename every `projects` key equal to an
 old path or starting with the old path and `/`, carrying the whole
@@ -958,9 +962,12 @@ entry, and replace the old paths in `githubRepoPaths` (renaming its
 key too when the repository itself was renamed). In `history.jsonl`,
 rewrite `project` fields the same way. Parse each line as JSON rather
 than substituting text, so a prompt that happens to quote a path is
-left alone. After the moving session exits, check `~/.claude.json`
-again from a new session in the moved primary: no trust dialog means
-the entry survived.
+left alone. The moving session itself writes `~/.claude.json` when it
+exits, so check it again from a new session in the moved primary: no
+trust dialog means the entry survived. If the dialog appears, close
+that session and rerun the `projects` and `githubRepoPaths` rewrite
+from outside Claude Code (the same script works from a terminal),
+then start it again.
 
 ### Step 9 -- Verify
 
