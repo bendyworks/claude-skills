@@ -847,9 +847,15 @@ uncommitted work moves with the directory.
 ### Step 3 -- Move the directories
 
 `mv` each checkout to its new path, all of them before any repair
-below. Then, in each moved checkout, run `git worktree repair`: a
-worktree records its checkout's absolute path. Check
-`git config --get core.worktree` too, and repoint it if set.
+below. Then repair each moved checkout's worktrees, which record
+absolute paths in both directions. A worktree inside the checkout
+(such as `.claude/worktrees/<name>`) moved with it, and a bare repair
+cannot find it: from the moved checkout, run
+`git worktree repair <new-path-of-each-such-worktree>`. A worktree
+outside the checkout stayed put, and a bare `git worktree repair` run
+in it reconnects it. `git worktree list` then shows no worktree as
+prunable. Check `git config --get core.worktree` too, and repoint it
+if set.
 
 ### Step 4 -- Move the Claude Code project folders
 
