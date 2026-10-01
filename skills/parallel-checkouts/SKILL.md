@@ -805,10 +805,16 @@ mode made into the old path breaks.
 Move the primary and all its parallel checkouts together, keeping each
 parallel checkout named `<new-primary-basename>N`: add and remove both
 find checkouts by that name, so moving one parallel checkout alone
-would hide it from both; offer to move them all instead. A project
-with no parallel checkouts is a move of one, and skips the steps about
-siblings. Machine-local: nothing
-is committed.
+would hide it from both; offer to move them all instead. Keep the
+moved checkouts siblings in one directory too: add mode's links
+between them are relative (`../../<primary>/...`). A project with no
+parallel checkouts is a move of one, and skips the steps about
+siblings. Machine-local: nothing is committed.
+
+A checkout reached through a symlink (`~/dev/app` linking to another
+volume) is moved as the directory its `realpath` names, as remove mode
+does; the user-facing link is one of the links Step 1 lists, and is
+repointed in Step 6.
 
 **Run it from a session outside every checkout being moved** (their
 parent directory works). A session inside one loses its working
@@ -904,7 +910,7 @@ uncommitted work moves with the directory.
 
 ### Step 3 -- Move the directories
 
-`mv` each checkout to its new path, all of them before any repair
+`mv` each checkout's `realpath` to its new path, all of them before any repair
 below. Then repair each moved checkout's worktrees, which record
 absolute paths in both directions. From the moved checkout, run
 `git worktree repair`, passing the new path of every worktree that
@@ -988,9 +994,11 @@ of that file's single rewrite.
 
 ### Step 7 -- Reload each checkout's environment
 
-Run `direnv allow` in each moved checkout, and again after any edit to
-its `.envrc`: direnv ties its approval to the file's path and
-contents, and the `.envrc` of each parallel checkout (and of a
+Run `direnv allow` in each moved checkout that has an `.envrc`, and
+again after any edit to it, on the path the user's shell will use
+(the symlink's, for a checkout reached through one; both when
+unsure): direnv ties its approval to the file's path as spelled and
+to its contents, and the `.envrc` of each parallel checkout (and of a
 containerized primary) sets `PRJ_CHECKOUT_ROOT` from the directory it
 loads in. A shell that loaded the identity before the move holds the
 old root; open a new one. *(containerized)* The direnv load rewrites
