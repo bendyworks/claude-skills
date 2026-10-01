@@ -824,6 +824,29 @@ new Claude Code project keys (the add mode's Step 6 gives the key
 rule), in a scratch file outside the checkouts. That list is how an
 interrupted move is resumed or reversed.
 
+Then, while the old paths still exist, find the symlinks that point
+into a checkout from outside it, and add them to the list. Search the
+Claude Code config directory, the user's bin directories, and the
+checkouts' parent directory (`<dirs>`), once per checkout, with
+`<old-path>` that checkout's `realpath`, since `realpath` is what each
+link resolves to:
+
+```bash
+find <dirs> -maxdepth 3 -type l -exec sh -c '
+  old=$1; shift
+  for l; do
+    case "$l" in "$old"/*) continue ;; esac
+    t=$(realpath "$l" 2>/dev/null) || continue
+    case "$t" in "$old"|"$old"/*) echo "$l -> $(readlink "$l")" ;; esac
+  done' _ "<old-path>" {} +
+```
+
+Resolving each link with `realpath` before the move catches relative
+targets (`../app/bin/x`) and links that reach a checkout through
+another link, and matching the old path whole, or followed by `/`,
+keeps a sibling such as `app-admin` out of the list for `app`. A link
+already broken before the move resolves to nothing and is left alone.
+
 ### Step 2 -- Check it is safe to move
 
 - Nothing runs inside any checkout: no Claude Code session, dev
@@ -897,11 +920,8 @@ move.
 
 ### Step 6 -- Repoint other links and caches
 
-Search the Claude Code config directory, the user's bin directories,
-and the checkouts' parent directory for symlinks whose target names an
-old path, and show the list before changing any:
-`find <dirs> -maxdepth 3 -type l -exec sh -c 'for l; do case "$(readlink "$l")" in *<old-path>*) echo "$l";; esac; done' _ {} +`.
-Repoint each to the new path. Then search the Claude Code config
+Show the user the links Step 1 listed, then repoint each to the new
+path, keeping a relative link relative. Then search the Claude Code config
 directory for text that names an old path (a skill's per-project
 cache, a settings file, a memory file under the moved project folders
 that gives a command with the path in it) and update the references
@@ -943,10 +963,10 @@ the entry survived.
 
 - No old path exists, and every new one is a git checkout on the
   branch it was on.
-- Step 6's symlink search, rerun, prints nothing. (A broader
+- Every link Step 1 listed resolves (`test -e <link>`). (A broader
   `find -L <dirs> -type l`, which lists every broken link, also turns
   up stale links that have nothing to do with the move; judge only the
-  ones naming an old path.)
+  ones Step 1 listed.)
 - Each parallel checkout's `memory` resolves to the primary's, and its
   `.claude/` links resolve.
 - `direnv exec <checkout> printenv PRJ_CHECKOUT_ROOT` prints the new
