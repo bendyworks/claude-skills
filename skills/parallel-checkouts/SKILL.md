@@ -812,7 +812,7 @@ is committed.
 
 **Run it from a session outside every checkout being moved** (their
 parent directory works). A session inside one loses its working
-directory partway through, and so does any other process inside them.
+directory partway through.
 
 Never print secrets: the add mode's rule applies to `.envrc` and its
 kin here too.
@@ -850,9 +850,12 @@ already broken before the move resolves to nothing and is left alone.
 ### Step 2 -- Check it is safe to move
 
 - Nothing runs inside any checkout: no Claude Code session, dev
-  server, suite, or shell with a job in it.
-  `lsof -a -d cwd -Fn | grep -F <old-path>` lists processes whose
-  working directory is inside one, and must print nothing.
+  server, suite, or shell with a job in it, and no editor or file
+  watcher with it open, since those keep writing to the old path from
+  elsewhere. For each checkout, `lsof -d cwd -Fn | grep -F <realpath>`
+  (the checkout's `realpath`, which is what `lsof` reports) lists
+  processes working inside it, and `lsof +D <realpath>` lists any
+  holding a file in it open; both must print nothing.
 - No new path exists yet, and no new project key exists as a
   directory under `~/.claude/projects/`. A new key that already exists
   means a session ran there before; stop and ask, since merging two
