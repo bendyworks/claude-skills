@@ -867,23 +867,37 @@ lists them, pruning any dependency directory too large to walk.
 
 ### Step 2 -- Check it is safe to move
 
-- Nothing runs inside any checkout: no Claude Code session, dev
-  server, suite, or shell with a job in it, and no editor or file
-  watcher with it open, since those keep writing to the old path from
-  elsewhere. For each checkout, `lsof -d cwd -Fn | grep -F <realpath>`
-  (the checkout's `realpath`, which is what `lsof` reports) lists
-  processes working inside it, and `lsof +D <realpath>` lists any
-  holding a file in it open; both must print nothing.
-- No new path exists yet, and no new project key exists as a
-  directory under `~/.claude/projects/`. A new key that already exists
-  means a session ran there before; stop and ask, since merging two
-  memories is the user's call.
-- *(containerized)* Find the project name the stack scripts resolve
-  (as remove Step 3 does). If it comes from the directory name rather
-  than the identity, a move would strand the containers and volumes
-  under the old name: stop and ask. Otherwise stop the stack with
-  `bin/docker-down`, without `--volumes`: its bind mounts name the
-  old path.
+Check these in order:
+
+1. *(containerized)* Find the project name the stack scripts resolve
+   (as remove Step 3 does). If it comes from the directory name rather
+   than the identity, a move would strand the containers and volumes
+   under the old name: stop and ask. Otherwise stop the stack with
+   `cd <checkout> && direnv exec . bin/docker-down`, without
+   `--volumes`: its bind mounts name the old path, and the file
+   sharing behind them can hold files open, which the next check would
+   report.
+2. Nothing runs inside any checkout: no Claude Code session, dev
+   server, suite, or shell with a job in it, and no editor or file
+   watcher with it open, since those keep writing to the old path from
+   elsewhere. For each checkout, with `<realpath>` its `realpath`
+   (what `lsof` reports), these list processes working inside it and
+   processes holding a file in it open; both must print nothing on
+   standard output (`lsof +D` can warn on standard error about mounts
+   it skips):
+
+   ```bash
+   lsof -d cwd -Fn | awk -v p="<realpath>" '$0 == "n" p || index($0, "n" p "/") == 1'
+   lsof +D "<realpath>"
+   ```
+
+   The `awk` match takes the path whole or followed by `/`, so a
+   session in a sibling such as `app-admin` or `app2` does not count.
+3. No new path exists yet. No new project key exists as a directory
+   under `~/.claude/projects/` or as a `projects` key in
+   `~/.claude.json`: either one means a session ran there before (a
+   trust answer can exist with no folder), so stop and ask, since
+   merging two projects' state is the user's call.
 
 A clean working tree is not required: a move deletes nothing, and
 uncommitted work moves with the directory.
