@@ -1,6 +1,6 @@
 ---
 name: parallel-checkouts
-description: Set up a project so several full, independent working copies of it (`<project>2`, `<project>3`, ...) can each run their own dev server and full lint+test suite at the same time on one machine, with no shared ports, databases, Redis databases, or containers between them. Works for projects whose Postgres and Redis run natively and for Docker Compose projects (each checkout gets its own Compose project and host ports). Three modes -- prepare a project (a one-time pull request that makes its ports, database names, or Compose project follow a per-checkout identity), add checkout N (clone, identity, databases or stack, shared Claude Code state), and remove checkout N. Rails-first. Use when the user says "set up parallel checkouts", "make a <project>2", "add another checkout of this project", "second working copy", "second copy of a devcontainer project", "run two suites in parallel", "remove <project>3", or invokes the parallel-checkouts skill.
+description: Set up a project so several full, independent working copies of it (`<project>2`, `<project>3`, ...) can each run a dev server and full lint+test suite at once on one machine, sharing no ports, databases, Redis databases, or containers. Works for projects whose Postgres and Redis run natively and for Docker Compose projects (each checkout gets its own Compose project and ports). Four modes -- prepare a project (a one-time pull request giving its ports, database names, or Compose project a per-checkout identity), add checkout N (clone, identity, databases or stack, shared Claude Code state), remove checkout N, and move all of a project's checkouts on disk with their Claude Code state. Rails-first. Use when the user says "set up parallel checkouts", "make a <project>2", "add another checkout of this project", "second working copy", "second copy of a devcontainer project", "run two suites in parallel", "remove <project>3", "rename this project's checkouts", or invokes the parallel-checkouts skill.
 ---
 
 # Parallel checkouts
@@ -36,6 +36,9 @@ gets, so preparing a project never changes how the primary behaves.
   below) and the user wants checkout N. Machine-local: nothing is
   committed.
 - **remove** -- tear down checkout N. Machine-local and destructive.
+- **move** -- rename or relocate a project's checkouts on disk, the
+  primary and its parallel checkouts together, carrying Claude Code's
+  memory, session history, and links along. Machine-local.
 
 If the user asks for a new checkout of an unprepared project, run
 **prepare** first, then **add** from the preparation branch; the add
@@ -789,6 +792,292 @@ removes the checkout rather than only the link.
    (`test -L <dir>/memory`), so the primary's memory is untouched.
 5. Delete the checkout: `rm -rf -- "<realpath>"`, then any symlink
    that pointed at it.
+
+## Mode: move checkouts
+
+Rename or relocate a project's checkouts on disk -- after a repository
+rename, say -- without losing what Claude Code keeps about them.
+Claude Code keys each project's memory, session history, trust answer,
+and prompt history on the checkout's absolute path, so a bare `mv`
+leaves the moved checkout with an empty memory, and every link the add
+mode made into the old path breaks.
+
+Move the primary and all its parallel checkouts together, keeping each
+parallel checkout named `<new-primary-basename>N`: add and remove both
+find checkouts by that name, so moving one parallel checkout alone
+would hide it from both; offer to move them all instead. Keep the
+moved checkouts siblings in one directory too: add mode's links
+between them are relative (`../../<primary>/...`). A project with no
+parallel checkouts is a move of one, and skips the steps about
+siblings. Machine-local: nothing is committed.
+
+A checkout reached through a symlink (`~/dev/app` linking to another
+volume) is moved as the directory its `realpath` names, as remove mode
+does. Make sure Step 1's list holds its user-facing link; in Step 6,
+rename the link
+to the new spelling as well as repointing it, so the old spelling is
+gone too. Claude Code may have keyed sessions under either spelling,
+so in Steps 4 and 8 apply the key rule to both and move whichever
+exist.
+
+**Run it from a session outside every checkout being moved** (their
+parent directory works). A session inside one loses its working
+directory partway through.
+
+Never print secrets: the add mode's rule applies to `.envrc` and its
+kin here too.
+
+### Step 1 -- Write down the move
+
+For each checkout, record its old path, its new path, the old and new
+Claude Code project keys (the add mode's Step 6 gives the key rule),
+its checked-out branch, and its `origin` URL (to restore it if the
+move is reversed after Step 3 changed it), in a scratch file outside
+the checkouts. That list is how an interrupted move is resumed or
+reversed.
+
+Then, while the old paths still exist, find the symlinks the move
+would break, and add them to the list. `OLDS` holds each checkout's
+`realpath`, one per line; the check below resolves every link with
+`realpath`, so a target spelled through another link (a symlinked
+checkout's user-facing path, `/tmp` for `/private/tmp`) still counts,
+and it matches an old path whole or followed by `/`, so a sibling such
+as `app-admin` is not taken for `app`:
+
+```bash
+check='
+nl="
+"
+for l; do
+  [ -e "$l" ] || continue
+  t=$(realpath "$l"); r=$(readlink "$l"); inside=; hit=
+  set -f; IFS=$nl
+  for old in $OLDS; do
+    case "$l" in "$old"/*) inside=1 ;; esac
+    case "$t" in "$old"|"$old"/*) hit=1 ;; esac
+  done
+  unset IFS; set +f
+  case "$inside,$hit,$r" in
+    ,1,*|1,1,/*|1,,[!/]*) echo "$l -> $r" ;;
+  esac
+done'
+export OLDS='<old-path>
+<old-path2>'
+find <dirs> -maxdepth 3 -type l -exec sh -c "$check" _ {} +
+find <old-path> -path '*/node_modules' -prune -o -type l -exec sh -c "$check" _ {} +
+```
+
+Run the first `find` once, with `<dirs>` the Claude Code config
+directory, the user's bin directories, and the checkouts' parent
+directory, each by its `realpath`; run the second once per checkout.
+It lists three kinds of link, each of which breaks:
+
+- a link outside every checkout whose target is in one;
+- a link inside a checkout whose target is written as an absolute
+  path into any moving checkout;
+- a link inside a checkout whose relative target leaves every
+  checkout (`.env -> ../../shared/app.env`), which breaks when the
+  checkouts move to a different depth; skip these when the parent
+  directory stays the same.
+
+A relative link from one checkout into another (add mode's) is Step
+5's, and a link already broken is left alone. A symlinked checkout's
+user-facing link shows up when it sits in one of `<dirs>`; add it by
+hand when it does not.
+
+Record each link at the path it will have after the move: a link
+inside a checkout or under a moving project folder moves with it, and
+a symlinked checkout's user-facing link is renamed in Step 6.
+
+### Step 2 -- Check it is safe to move
+
+Check these in order, with `<old-path>` each checkout's `realpath` as
+in Step 1:
+
+1. No new path exists yet, nor the new spelling of a symlinked
+   checkout's user-facing link. No new project key, for either
+   spelling of a symlinked checkout, exists as a directory under
+   `~/.claude/projects/` or as a `projects` key in `~/.claude.json`: either one means a session ran there before (a
+   trust answer can exist with no folder), so stop and ask, since
+   merging two projects' state is the user's call.
+2. *(containerized)* Find the project name the stack scripts resolve
+   (as remove Step 3 does). If it comes from the directory name rather
+   than the identity, a move would strand the containers and volumes
+   under the old name: stop and ask. Otherwise stop the stack with
+   `cd <checkout> && direnv exec . bin/docker-down`, without
+   `--volumes`: its bind mounts name the old path, and the file
+   sharing behind them can hold files open, which the next check would
+   report.
+3. Nothing runs inside any checkout: no Claude Code session, dev
+   server, suite, or shell with a job in it, and no editor or file
+   watcher with it open, since those keep writing to the old path from
+   elsewhere. For each checkout, these list processes working inside
+   it (`lsof` reports the `realpath`) and processes holding a file in
+   it open; both must print nothing on standard output (`lsof +D` can
+   warn on standard error about mounts it skips):
+
+   ```bash
+   lsof -d cwd -Fn | awk -v p="<old-path>" '$0 == "n" p || index($0, "n" p "/") == 1'
+   lsof +D "<old-path>"
+   ```
+
+   The `awk` match takes the path whole or followed by `/`, so a
+   session in a sibling such as `app-admin` or `app2` does not count.
+
+A clean working tree is not required: a move deletes nothing, and
+uncommitted work moves with the directory.
+
+### Step 3 -- Move the directories
+
+`mv` each checkout's `realpath` to its new path, all of them before any repair
+below. Then repair each moved checkout's worktrees, which record
+absolute paths in both directions. From the moved checkout, run
+`git worktree repair`, passing the new path of every worktree that
+lives inside the checkout (such as `.claude/worktrees/<name>`), or no
+arguments when none does: a worktree that moved with the checkout
+cannot be found without its path, and the same command also fixes the
+`.git` file of every worktree outside the checkout, which still names
+the old path. Then confirm each worktree `git worktree list` shows
+answers `git -C <worktree> status`; a broken one is not always marked
+prunable. Check `git config --get core.worktree` too, and repoint it
+if set.
+
+When the move follows a repository rename, set every checkout's
+`origin` (and `upstream`, in a fork) to the new URL together, with
+`git remote set-url`: remove mode refuses a checkout whose `origin`
+differs from the primary's, and add mode clones from the primary's.
+
+### Step 4 -- Move the Claude Code project folders
+
+For each checkout, rename `~/.claude/projects/<old-key>` to
+`<new-key>`, skipping a checkout that has no folder (no session ever
+ran in it). That carries its memory and its session history: Claude
+Code finds a project's transcripts by its folder, so they resume from
+the new path even though each still records the old working
+directory.
+
+Folders for paths inside the checkout (its worktrees, a subdirectory
+a session started in) are keyed `<old-key>-...`; rename each to
+`<new-key>-...` with the same tail. Two traps in matching them:
+
+- Never match `<old-key>` followed by a digit: that is a sibling
+  checkout's folder (`-app` is a prefix of `-app2`).
+- A key is lossy, so `<old-key>-admin` may belong to a different
+  project (a sibling directory named `app-admin`). Confirm each
+  candidate by reading the `cwd` of one of its transcripts
+  (`grep -m1 -ho '"cwd":"[^"]*"' <folder>/*.jsonl`) and requiring it
+  to start with the old checkout path followed by `/`. A folder with
+  no transcript is shown to the user, not guessed at.
+
+Rename a confirmed folder even when it looks abandoned: its directory
+is often still on disk, and deleting session history is not part of a
+move.
+
+### Step 5 -- Repoint the links the add mode made
+
+- **Memory.** Each parallel checkout's project folder holds `memory`
+  as a relative link into the primary's folder by its old key.
+  Replace each with a link to the new key, from inside
+  `~/.claude/projects/` so the relative target resolves:
+  `cd ~/.claude/projects && ln -sfn ../<new-primary-key>/memory <new-key>/memory`,
+  where `<new-key>` is that parallel checkout's. Check first that it
+  is a link (`test -L`), never a real directory.
+- **The project's `.claude/` entries.** Each parallel checkout links
+  untracked entries of the primary's `.claude/` by relative paths
+  naming the primary's old directory. Recreate each link with the new
+  name. A link's path in `.git/info/exclude` is relative to the
+  checkout, so the excludes stay as they are.
+
+### Step 6 -- Repoint other links and caches
+
+Show the user the links Step 1 listed, then repoint each to the new
+path, keeping a relative link relative.
+
+Then search for text that names an old path, listing file names only
+(`grep -rlF <old-path> ...`) so no secret is printed:
+
+- the Claude Code config directory: a skill's per-project cache, a
+  settings file, a memory file under the moved project folders that
+  gives a command with the path in it (`~/.claude.json` and
+  `history.jsonl` are Step 8's);
+- each checkout's untracked configuration: `.claude/settings.local.json`
+  (a permission rule such as `Bash(<old-path>/bin/rails:*)`), `.envrc`
+  and `.envrc.local`, and *(containerized)* `.devcontainer/.env`.
+
+Update the references that drive behavior, editing a secrets file
+with `sed` on the matching lines only. Replace an old path only where
+it stands whole, followed by `/`, a quote, or the end of the value,
+so a sibling path such as `<old-path>-admin` is left alone. Leave
+historical records (logs, past timings, transcripts, finished plans)
+as they were.
+
+### Step 7 -- Reload each checkout's environment
+
+Run `direnv allow` in each moved checkout that has an `.envrc`, and
+again after any edit to it, on the path the user's shell will use
+(the symlink's, for a checkout reached through one; both when
+unsure): direnv ties its approval to the file's path as spelled and
+to its contents, and the `.envrc` of each parallel checkout (and of a
+containerized primary) sets `PRJ_CHECKOUT_ROOT` from the directory it
+loads in. A shell that loaded the identity before the move holds the
+old root; open a new one. *(containerized)* `direnv allow` approves
+the file without loading it, so start the stack with
+`cd <checkout> && direnv exec . bin/docker-up`: the load rewrites the
+identity lines of `.devcontainer/.env` with the new root before the
+stack starts.
+
+### Step 8 -- Move the path-keyed entries in Claude Code's own files
+
+Two files key entries on a project path, and every running Claude Code
+process rewrites them, including the session doing the move:
+`~/.claude.json` (each project's trust answer and per-project
+settings under `projects`, plus the `githubRepoPaths` list of local
+clones per repository) and `~/.claude/history.jsonl` (the prompt
+history the up arrow walks, one line per prompt, with a `project`
+field).
+
+Do this step last, with every other Claude Code session closed, in
+any project: a session holds its own copy of `~/.claude.json` and can
+write it back over the rewrite, and a prompt typed between the read
+and the write would be lost from `history.jsonl`. Write the rewrite
+as a script saved beside Step 1's list, since it may need a second
+run. For each file it copies the file to a backup, writes the
+rewritten version to a temporary file beside it, and `mv`s that into
+place.
+
+In `~/.claude.json`, rename every `projects` key equal to an old path
+or starting with the old path and `/`, carrying the whole entry, and
+replace old paths inside each moved entry's values too (a per-project
+MCP server's arguments can name one), matching a whole path as
+Step 6 does. Replace the old paths in `githubRepoPaths`, renaming its
+key too when the repository itself was renamed. In `history.jsonl`,
+rewrite `project` fields the same way. Parse each line as JSON rather
+than substituting text, so a prompt that happens to quote a path is
+left alone, and copy a line that does not parse (a truncated last
+line) through unchanged.
+
+The moving session itself writes `~/.claude.json` when it exits, so
+check it again from a new session in the moved primary: no trust
+dialog means the entry survived. If the dialog appears, close that
+session, run the saved script again from a terminal with no Claude
+Code session open, then start it again.
+
+### Step 9 -- Verify
+
+- No old path exists, and every new one is a git checkout on the
+  branch it was on, with the same `origin` URL as the primary.
+- Every link Step 1 listed resolves (`test -e <link>`, at the path
+  Step 1 recorded for it).
+- Each parallel checkout's `memory` resolves to the primary's, and its
+  `.claude/` links resolve.
+- *(services)* `direnv exec <checkout> printenv PRJ_CHECKOUT_ROOT`
+  prints the new path in each parallel checkout; a native primary
+  leaves it unset, so it prints nothing there, as before the move.
+  *(containerized)* `cd <checkout> && direnv exec . bin/check-parallel-dev`
+  passes in every checkout, the primary included.
+- The user, not the session, runs `claude --resume` in the moved
+  primary and sees its earlier sessions listed: the picker is
+  interactive, and a session running it through a shell waits forever.
 
 ## Caveats to pass on
 
