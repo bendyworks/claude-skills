@@ -825,27 +825,45 @@ rule), in a scratch file outside the checkouts. That list is how an
 interrupted move is resumed or reversed.
 
 Then, while the old paths still exist, find the symlinks that point
-into a checkout from outside it, and add them to the list. Search the
-Claude Code config directory, the user's bin directories, and the
-checkouts' parent directory (`<dirs>`), once per checkout, with
-`<old-path>` that checkout's `realpath`, since `realpath` is what each
-link resolves to:
+into a checkout and would break when it moves, and add them to the
+list. Both searches below use each checkout's `realpath` as its old
+path.
+
+**From outside.** Search the Claude Code config directory, the
+user's bin directories, and the checkouts' parent directory, each
+given by its `realpath` too, so a directory reached through a link
+does not defeat the skip below. `OLDS` holds the old paths, one per
+line:
 
 ```bash
-find <dirs> -maxdepth 3 -type l -exec sh -c '
-  old=$1; shift
-  for l; do
-    case "$l" in "$old"/*) continue ;; esac
-    t=$(realpath "$l" 2>/dev/null) || continue
-    case "$t" in "$old"|"$old"/*) echo "$l -> $(readlink "$l")" ;; esac
-  done' _ "<old-path>" {} +
+OLDS='<old-path>
+<old-path2>' find <dirs> -maxdepth 3 -type l -exec sh -c '
+nl="
+"
+for l; do
+  [ -e "$l" ] || continue
+  t=$(realpath "$l"); inside=; hit=
+  set -f; IFS=$nl
+  for old in $OLDS; do
+    case "$l" in "$old"/*) inside=1 ;; esac
+    case "$t" in "$old"|"$old"/*) hit=1 ;; esac
+  done
+  unset IFS; set +f
+  [ -n "$hit" ] && [ -z "$inside" ] && echo "$l -> $(readlink "$l")"
+done' _ {} +
 ```
 
-Resolving each link with `realpath` before the move catches relative
-targets (`../app/bin/x`) and links that reach a checkout through
-another link, and matching the old path whole, or followed by `/`,
-keeps a sibling such as `app-admin` out of the list for `app`. A link
-already broken before the move resolves to nothing and is left alone.
+A link inside any moving checkout is skipped (Step 5 handles the add
+mode's links between checkouts), a link already broken is left alone,
+and matching an old path whole, or followed by `/`, keeps a sibling
+such as `app-admin` out of the list for `app`. Resolving with
+`realpath` catches relative targets (`../app/bin/x`) and links that
+reach a checkout through another link.
+
+**Inside.** A link within a checkout whose target is written as an
+absolute path into that checkout breaks too. For each checkout,
+`find <old-path> -path <old-path>/node_modules -prune -o -type l -lname '<old-path>/*' -print`
+lists them, pruning any dependency directory too large to walk.
 
 ### Step 2 -- Check it is safe to move
 
@@ -933,7 +951,8 @@ move.
 ### Step 6 -- Repoint other links and caches
 
 Show the user the links Step 1 listed, then repoint each to the new
-path, keeping a relative link relative.
+path, keeping a relative link relative. A link from the inside search
+moved with its checkout, so repoint it at its new location.
 
 Then search for text that names an old path, listing file names only
 (`grep -rlF <old-path> ...`) so no secret is printed:
