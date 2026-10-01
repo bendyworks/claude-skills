@@ -924,12 +924,25 @@ move.
 ### Step 6 -- Repoint other links and caches
 
 Show the user the links Step 1 listed, then repoint each to the new
-path, keeping a relative link relative. Then search the Claude Code config
-directory for text that names an old path (a skill's per-project
-cache, a settings file, a memory file under the moved project folders
-that gives a command with the path in it) and update the references
-that drive behavior, leaving historical records (logs, past timings,
-transcripts) as they were.
+path, keeping a relative link relative.
+
+Then search for text that names an old path, listing file names only
+(`grep -rlF <old-path> ...`) so no secret is printed:
+
+- the Claude Code config directory: a skill's per-project cache, a
+  settings file, a memory file under the moved project folders that
+  gives a command with the path in it;
+- each checkout's untracked configuration: `.claude/settings.local.json`
+  (a permission rule such as `Bash(<old-path>/bin/rails:*)`), `.envrc`
+  and `.envrc.local`, and *(containerized)* `.devcontainer/.env`;
+- the values, not only the keys, of the `~/.claude.json` entries
+  Step 8 moves: a per-project MCP server's arguments can name the path.
+
+Update the references that drive behavior, editing a secrets file
+with `sed` on the matching lines only, and leave historical records
+(logs, past timings, transcripts, finished plans) as they were. A
+value inside a `~/.claude.json` entry is rewritten in Step 8, as part
+of that file's single rewrite.
 
 ### Step 7 -- Reload each checkout's environment
 
@@ -962,7 +975,8 @@ entry, and replace the old paths in `githubRepoPaths` (renaming its
 key too when the repository itself was renamed). In `history.jsonl`,
 rewrite `project` fields the same way. Parse each line as JSON rather
 than substituting text, so a prompt that happens to quote a path is
-left alone. The moving session itself writes `~/.claude.json` when it
+left alone. Rewrite any old path Step 6 found inside a moved entry's
+values in the same pass. The moving session itself writes `~/.claude.json` when it
 exits, so check it again from a new session in the moved primary: no
 trust dialog means the entry survived. If the dialog appears, close
 that session and rerun the `projects` and `githubRepoPaths` rewrite
