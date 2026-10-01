@@ -894,9 +894,10 @@ a symlinked checkout's user-facing link is renamed in Step 6.
 Check these in order, with `<old-path>` each checkout's `realpath` as
 in Step 1:
 
-1. No new path exists yet. No new project key exists as a directory
-   under `~/.claude/projects/` or as a `projects` key in
-   `~/.claude.json`: either one means a session ran there before (a
+1. No new path exists yet, nor the new spelling of a symlinked
+   checkout's user-facing link. No new project key, for either
+   spelling of a symlinked checkout, exists as a directory under
+   `~/.claude/projects/` or as a `projects` key in `~/.claude.json`: either one means a session ran there before (a
    trust answer can exist with no folder), so stop and ask, since
    merging two projects' state is the user's call.
 2. *(containerized)* Find the project name the stack scripts resolve
