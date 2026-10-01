@@ -877,9 +877,15 @@ its checkout.
 
 ### Step 2 -- Check it is safe to move
 
-Check these in order:
+Check these in order, with `<old-path>` each checkout's `realpath` as
+in Step 1:
 
-1. *(containerized)* Find the project name the stack scripts resolve
+1. No new path exists yet. No new project key exists as a directory
+   under `~/.claude/projects/` or as a `projects` key in
+   `~/.claude.json`: either one means a session ran there before (a
+   trust answer can exist with no folder), so stop and ask, since
+   merging two projects' state is the user's call.
+2. *(containerized)* Find the project name the stack scripts resolve
    (as remove Step 3 does). If it comes from the directory name rather
    than the identity, a move would strand the containers and volumes
    under the old name: stop and ask. Otherwise stop the stack with
@@ -887,27 +893,21 @@ Check these in order:
    `--volumes`: its bind mounts name the old path, and the file
    sharing behind them can hold files open, which the next check would
    report.
-2. Nothing runs inside any checkout: no Claude Code session, dev
+3. Nothing runs inside any checkout: no Claude Code session, dev
    server, suite, or shell with a job in it, and no editor or file
    watcher with it open, since those keep writing to the old path from
-   elsewhere. For each checkout, with `<realpath>` its `realpath`
-   (what `lsof` reports), these list processes working inside it and
-   processes holding a file in it open; both must print nothing on
-   standard output (`lsof +D` can warn on standard error about mounts
-   it skips):
+   elsewhere. For each checkout, these list processes working inside
+   it (`lsof` reports the `realpath`) and processes holding a file in
+   it open; both must print nothing on standard output (`lsof +D` can
+   warn on standard error about mounts it skips):
 
    ```bash
-   lsof -d cwd -Fn | awk -v p="<realpath>" '$0 == "n" p || index($0, "n" p "/") == 1'
-   lsof +D "<realpath>"
+   lsof -d cwd -Fn | awk -v p="<old-path>" '$0 == "n" p || index($0, "n" p "/") == 1'
+   lsof +D "<old-path>"
    ```
 
    The `awk` match takes the path whole or followed by `/`, so a
    session in a sibling such as `app-admin` or `app2` does not count.
-3. No new path exists yet. No new project key exists as a directory
-   under `~/.claude/projects/` or as a `projects` key in
-   `~/.claude.json`: either one means a session ran there before (a
-   trust answer can exist with no folder), so stop and ask, since
-   merging two projects' state is the user's call.
 
 A clean working tree is not required: a move deletes nothing, and
 uncommitted work moves with the directory.
