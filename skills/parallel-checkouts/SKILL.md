@@ -827,9 +827,10 @@ kin here too.
 
 For each checkout, record its old path, its new path, the old and new
 Claude Code project keys (the add mode's Step 6 gives the key rule),
-its checked-out branch, and its `origin` URL, in a scratch file
-outside the checkouts. That list is how an
-interrupted move is resumed or reversed.
+its checked-out branch, and its `origin` URL (to restore it if the
+move is reversed after Step 3 changed it), in a scratch file outside
+the checkouts. That list is how an interrupted move is resumed or
+reversed.
 
 Then, while the old paths still exist, find the symlinks that point
 into a checkout and would break when it moves, and add them to the
@@ -983,21 +984,18 @@ Then search for text that names an old path, listing file names only
 
 - the Claude Code config directory: a skill's per-project cache, a
   settings file, a memory file under the moved project folders that
-  gives a command with the path in it;
+  gives a command with the path in it (`~/.claude.json` and
+  `history.jsonl` are Step 8's);
 - each checkout's untracked configuration: `.claude/settings.local.json`
   (a permission rule such as `Bash(<old-path>/bin/rails:*)`), `.envrc`
-  and `.envrc.local`, and *(containerized)* `.devcontainer/.env`;
-- the values, not only the keys, of the `~/.claude.json` entries
-  Step 8 moves: a per-project MCP server's arguments can name the path.
+  and `.envrc.local`, and *(containerized)* `.devcontainer/.env`.
 
 Update the references that drive behavior, editing a secrets file
 with `sed` on the matching lines only. Replace an old path only where
 it stands whole, followed by `/`, a quote, or the end of the value,
 so a sibling path such as `<old-path>-admin` is left alone. Leave
 historical records (logs, past timings, transcripts, finished plans)
-as they were. A
-value inside a `~/.claude.json` entry is rewritten in Step 8, as part
-of that file's single rewrite.
+as they were.
 
 ### Step 7 -- Reload each checkout's environment
 
@@ -1027,23 +1025,28 @@ field).
 Do this step last, with every other Claude Code session closed, in
 any project: a session holds its own copy of `~/.claude.json` and can
 write it back over the rewrite, and a prompt typed between the read
-and the write would be lost from `history.jsonl`. For each file: copy
-it to a backup, write the
-rewritten version to a temporary file beside it, and `mv` that into
-place. In `~/.claude.json`, rename every `projects` key equal to an
-old path or starting with the old path and `/`, carrying the whole
-entry, and replace the old paths in `githubRepoPaths` (renaming its
-key too when the repository itself was renamed). In `history.jsonl`,
+and the write would be lost from `history.jsonl`. Write the rewrite
+as a script saved beside Step 1's list, since it may need a second
+run. For each file it copies the file to a backup, writes the
+rewritten version to a temporary file beside it, and `mv`s that into
+place.
+
+In `~/.claude.json`, rename every `projects` key equal to an old path
+or starting with the old path and `/`, carrying the whole entry, and
+replace old paths inside each moved entry's values too (a per-project
+MCP server's arguments can name one), matching a whole path as
+Step 6 does. Replace the old paths in `githubRepoPaths`, renaming its
+key too when the repository itself was renamed. In `history.jsonl`,
 rewrite `project` fields the same way. Parse each line as JSON rather
 than substituting text, so a prompt that happens to quote a path is
 left alone, and copy a line that does not parse (a truncated last
-line) through unchanged. Rewrite any old path Step 6 found inside a moved entry's
-values in the same pass. The moving session itself writes `~/.claude.json` when it
-exits, so check it again from a new session in the moved primary: no
-trust dialog means the entry survived. If the dialog appears, close
-that session and rerun the `projects` and `githubRepoPaths` rewrite
-from outside Claude Code (the same script works from a terminal),
-then start it again.
+line) through unchanged.
+
+The moving session itself writes `~/.claude.json` when it exits, so
+check it again from a new session in the moved primary: no trust
+dialog means the entry survived. If the dialog appears, close that
+session, run the saved script again from a terminal with no Claude
+Code session open, then start it again.
 
 ### Step 9 -- Verify
 
