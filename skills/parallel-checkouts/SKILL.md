@@ -874,12 +874,14 @@ uncommitted work moves with the directory.
 
 `mv` each checkout to its new path, all of them before any repair
 below. Then repair each moved checkout's worktrees, which record
-absolute paths in both directions. A worktree inside the checkout
-(such as `.claude/worktrees/<name>`) moved with it, and a bare repair
-cannot find it: from the moved checkout, run
-`git worktree repair <new-path-of-each-such-worktree>`. A worktree
-outside the checkout stayed put, and a bare `git worktree repair` run
-in it reconnects it. `git worktree list` then shows no worktree as
+absolute paths in both directions. From the moved checkout, run
+`git worktree repair`, passing the new path of every worktree that
+lives inside the checkout (such as `.claude/worktrees/<name>`), or no
+arguments when none does: a worktree that moved with the checkout
+cannot be found without its path, and the same command also fixes the
+`.git` file of every worktree outside the checkout, which still names
+the old path. Then confirm each worktree `git worktree list` shows
+answers `git -C <worktree> status`; a broken one is not always marked
 prunable. Check `git config --get core.worktree` too, and repoint it
 if set.
 
