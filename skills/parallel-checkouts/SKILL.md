@@ -814,7 +814,11 @@ siblings. Machine-local: nothing is committed.
 A checkout reached through a symlink (`~/dev/app` linking to another
 volume) is moved as the directory its `realpath` names, as remove mode
 does. Add its user-facing link to Step 1's list by hand, since the
-search there runs from the `realpath` side, and repoint it in Step 6.
+search there runs from the `realpath` side; in Step 6, rename the link
+to the new spelling as well as repointing it, so the old spelling is
+gone too. Claude Code may have keyed sessions under either spelling,
+so in Steps 4 and 8 apply the key rule to both and move whichever
+exist.
 
 **Run it from a session outside every checkout being moved** (their
 parent directory works). A session inside one loses its working
