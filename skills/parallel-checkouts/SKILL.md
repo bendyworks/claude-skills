@@ -825,9 +825,10 @@ kin here too.
 
 ### Step 1 -- Write down the move
 
-For each checkout, record its old path, its new path, and the old and
-new Claude Code project keys (the add mode's Step 6 gives the key
-rule), in a scratch file outside the checkouts. That list is how an
+For each checkout, record its old path, its new path, the old and new
+Claude Code project keys (the add mode's Step 6 gives the key rule),
+its checked-out branch, and its `origin` URL, in a scratch file
+outside the checkouts. That list is how an
 interrupted move is resumed or reversed.
 
 Then, while the old paths still exist, find the symlinks that point
@@ -931,7 +932,8 @@ differs from the primary's, and add mode clones from the primary's.
 ### Step 4 -- Move the Claude Code project folders
 
 For each checkout, rename `~/.claude/projects/<old-key>` to
-`<new-key>`. That carries its memory and its session history: Claude
+`<new-key>`, skipping a checkout that has no folder (no session ever
+ran in it). That carries its memory and its session history: Claude
 Code finds a project's transcripts by its folder, so they resume from
 the new path even though each still records the old working
 directory.
@@ -1032,7 +1034,8 @@ entry, and replace the old paths in `githubRepoPaths` (renaming its
 key too when the repository itself was renamed). In `history.jsonl`,
 rewrite `project` fields the same way. Parse each line as JSON rather
 than substituting text, so a prompt that happens to quote a path is
-left alone. Rewrite any old path Step 6 found inside a moved entry's
+left alone, and copy a line that does not parse (a truncated last
+line) through unchanged. Rewrite any old path Step 6 found inside a moved entry's
 values in the same pass. The moving session itself writes `~/.claude.json` when it
 exits, so check it again from a new session in the moved primary: no
 trust dialog means the entry survived. If the dialog appears, close
@@ -1055,7 +1058,9 @@ then start it again.
   leaves it unset, so it prints nothing there, as before the move.
   *(containerized)* `cd <checkout> && direnv exec . bin/check-parallel-dev`
   passes in every checkout, the primary included.
-- `claude --resume` from the moved primary lists its earlier sessions.
+- The user, not the session, runs `claude --resume` in the moved
+  primary and sees its earlier sessions listed: the picker is
+  interactive, and a session running it through a shell waits forever.
 
 ## Caveats to pass on
 
