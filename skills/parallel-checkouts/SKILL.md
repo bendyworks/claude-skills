@@ -1,6 +1,6 @@
 ---
 name: parallel-checkouts
-description: Set up a project so several full, independent working copies of it (`<project>2`, `<project>3`, ...) can each run their own dev server and full lint+test suite at the same time on one machine, with no shared ports, databases, Redis databases, or containers between them. Works for projects whose Postgres and Redis run natively and for Docker Compose projects (each checkout gets its own Compose project and host ports). Four modes -- prepare a project (a one-time pull request that makes its ports, database names, or Compose project follow a per-checkout identity), add checkout N (clone, identity, databases or stack, shared Claude Code state), remove checkout N, and move checkouts (rename or relocate them on disk, carrying Claude Code memory, session history, and links along). Rails-first. Use when the user says "set up parallel checkouts", "make a <project>2", "add another checkout of this project", "second working copy", "second copy of a devcontainer project", "run two suites in parallel", "remove <project>3", "rename my checkouts", "move this checkout to a new folder", or invokes the parallel-checkouts skill.
+description: Set up a project so several full, independent working copies of it (`<project>2`, `<project>3`, ...) can each run a dev server and full lint+test suite at once on one machine, sharing no ports, databases, Redis databases, or containers. Works for projects whose Postgres and Redis run natively and for Docker Compose projects (each checkout gets its own Compose project and ports). Four modes -- prepare a project (a one-time pull request giving its ports, database names, or Compose project a per-checkout identity), add checkout N (clone, identity, databases or stack, shared Claude Code state), remove checkout N, and move all of a project's checkouts on disk with their Claude Code state. Rails-first. Use when the user says "set up parallel checkouts", "make a <project>2", "add another checkout of this project", "second working copy", "second copy of a devcontainer project", "run two suites in parallel", "remove <project>3", "rename this project's checkouts", or invokes the parallel-checkouts skill.
 ---
 
 # Parallel checkouts
@@ -804,8 +804,10 @@ mode made into the old path breaks.
 
 Move the primary and all its parallel checkouts together, keeping each
 parallel checkout named `<new-primary-basename>N`: add and remove both
-find checkouts by that name. A project with no parallel checkouts is a
-move of one, and skips the steps about siblings. Machine-local: nothing
+find checkouts by that name, so moving one parallel checkout alone
+would hide it from both; offer to move them all instead. A project
+with no parallel checkouts is a move of one, and skips the steps about
+siblings. Machine-local: nothing
 is committed.
 
 **Run it from a session outside every checkout being moved** (their
