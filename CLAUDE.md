@@ -37,11 +37,10 @@ GitHub Issues is this repo's tracker of record. GitHub issues here are called
 RTB-NNN: RTB-NNN is issue #NNN.
 
 Older references say CS-NNN, the key from when this repo was named
-claude-skills. CS-NNN is GitHub issue #NNN, never a Linear ID. Nothing new is
-named with CS, whatever the issue's number: new branches, plan files, and pull
-request titles use RTB. An issue that already has a `cs-NNN-` plan file keeps
-that file, and a branch reopened for it takes the same name; a follow-up plan
-is a new file and uses `rtb-`.
+claude-skills. CS-NNN is GitHub issue #NNN, never a Linear ID. Names that
+already say CS keep it. Nothing new is named with CS, whatever the issue's
+number: new branches, plan files, and pull request titles use RTB, and so does
+new work on an issue that shipped under CS.
 
 ## Everything here is public
 
