@@ -82,7 +82,9 @@ Style/AccessModifierDeclarations:
 out of the order above, including a private method above public ones.
 `AllowModifiersOnSymbols: false` flags a trailing `private :name`.
 RuboCop's defaults already flag an inline `private def` and a
-`private` above `def self.name`.
+`private` above `def self.name`. Where the bundle includes RuboCop,
+run each command below through `bundle exec`, so it uses the version
+and plugins the project pins.
 
 - `rubocop -A --only Layout/ClassStructure,Style/AccessModifierDeclarations <file>`
   does most of a reorder, on a file no to-do list excludes: a listed
@@ -103,5 +105,10 @@ RuboCop's defaults already flag an inline `private def` and a
   entries and review the rest of the diff; adding `--only` instead
   drops every other cop's entries. When you next change a listed
   file, remove it from the list, then reorder it as above.
-- No cop checks that a helper sits below its caller, or that a new
-  method could be private. Those stay yours to check.
+- A to-do file that already sets `EnforcedStyle: inline` on
+  `Style/AccessModifierDeclarations` makes lint fail the `private`
+  section this file asks for. Delete that entry, then regenerate with
+  the command above so the offending files are listed instead.
+- No cop checks that a helper sits below its caller, that a new
+  method could be private, or a `private_class_method :name`. Those
+  stay yours to check.
