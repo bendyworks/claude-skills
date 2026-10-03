@@ -8,10 +8,7 @@
 
 **Write a class so it reads downward: the public interface first, then
 one `private` keyword with every private method beneath it, and each
-helper defined below the method that calls it. Before your first edit
-to a Ruby file, check its layout against this; when it fails, reorder
-the whole file first, in a commit of its own (see "Bring the whole file
-along"), even when the task is a one-line fix.** A reader who meets a
+helper defined below the first method that calls it.** A reader who meets a
 call can find the definition further down or skip it, and never has to
 scroll up to learn what a method does or whether it is private.
 
@@ -57,8 +54,7 @@ half in the new order reads worse than either. The reorder commit:
   had: moving a public method under `private` breaks its callers;
 - keeps order-sensitive lines in order, such as an `alias_method`
   below the method it aliases;
-- is separate from the commit with the real change, so a reviewer can
-  skip the moves and read the change.
+- lets a reviewer skip the moves and read the real change on its own.
 
 **Ask before reordering when the moves alone would carry the pull
 request past its size threshold, or when the change is a hotfix or a
