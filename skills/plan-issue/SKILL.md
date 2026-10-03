@@ -1231,8 +1231,8 @@ via the Skill tool. It will:
 - Delete the local working branch with `-d` safety.
 - Ask whether anything is worth saving as a rule or a skill, and
   save each in the home its kind calls for once the user approves
-  the text (a shared guidance repository gets a draft; memory only
-  for point-in-time state).
+  the text (a rule or skill bound for another repository's shared
+  home gets a draft; memory only for point-in-time state).
 - Add a Done entry to `MEMORY.md` and remove the issue from Active
   Work if it was there.
 - Move the tracker issue to its terminal Done state (on GitHub,
