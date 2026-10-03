@@ -6,11 +6,12 @@
 
 ## Lay out a file top to bottom
 
-**Write a class so it reads downward: the public interface first, then
-one `private` keyword with every private method beneath it, and each
-helper defined below the first method that calls it.** A reader who meets a
-call can find the definition further down or skip it, and never has to
-scroll up to learn what a method does or whether it is private.
+**Write a class so it reads downward: the public interface first,
+then one `private` keyword with every private method beneath it, and
+each helper defined below the first method that calls it.** A reader
+who meets a call can find the definition further down or skip it, and
+never has to scroll up to learn what a method does or whether it is
+private.
 
 The order:
 
@@ -36,9 +37,7 @@ The order:
   nothing, and `private_class_method :name` is the trailing form
   again. **A project whose own style declares private methods inline
   (`private def`), in its CLAUDE.md or its own `.rubocop.yml`, keeps
-  that style: follow it, and do not convert its files.** A setting
-  RuboCop wrote into a generated `.rubocop_todo.yml` is not a stated
-  style.
+  that style: follow it, and do not convert its files.**
 - **A method you add is private unless something outside the class
   calls it.** Framework entry points (a controller action, a job's
   `perform`, a policy's `update?`) are called from outside and stay
@@ -107,8 +106,8 @@ and plugins the project pins.
   file, remove it from the list, then reorder it as above.
 - A to-do file that already sets `EnforcedStyle: inline` on
   `Style/AccessModifierDeclarations` makes lint fail the `private`
-  section this file asks for. Delete that entry, then regenerate with
-  the command above so the offending files are listed instead.
-- No cop checks that a helper sits below its caller, that a new
-  method could be private, or a `private_class_method :name`. Those
-  stay yours to check.
+  section this file asks for. Regenerate with the command above, which
+  replaces that entry with a list of the offending files.
+- No cop checks that a helper sits below its caller or that a new
+  method could be private, and none flags a
+  `private_class_method :name`. Those stay yours to check.
