@@ -85,17 +85,23 @@ RuboCop's defaults already flag an inline `private def` and a
 `private` above `def self.name`.
 
 - `rubocop -A --only Layout/ClassStructure,Style/AccessModifierDeclarations <file>`
-  does most of a reorder. Its correction is marked unsafe, so check
-  the result, and finish by hand what it leaves: a `public` keyword
-  that reopens the public section, a constant at the bottom of the
-  class, and helper order.
+  does most of a reorder, on a file no to-do list excludes: a listed
+  file reports no offenses and is left as it is. The correction is
+  marked unsafe, so check the result, run
+  `rubocop -a --only Layout <file>` to repair the spacing and
+  indentation it leaves, and finish by hand what it can leave out of
+  order: a `public` keyword that reopens the public section, a
+  constant below the methods, and helper order.
 - On an existing codebase, generate a to-do file that lists each
   offending file instead of switching the rule off:
   `rubocop --auto-gen-config --auto-gen-only-exclude --no-exclude-limit --no-auto-gen-enforced-style`.
   Without the last two flags, RuboCop disables `Layout/ClassStructure`
   once more than 15 files offend, and can rewrite
-  `AccessModifierDeclarations` to allow the inline style. Removing a
-  file from the list is the reorder above, done when you next change
-  that file.
+  `AccessModifierDeclarations` to allow the inline style. The command
+  regenerates the whole `.rubocop_todo.yml` with those flags applied
+  to every cop, so where one already exists, keep the two cops' new
+  entries and review the rest of the diff; adding `--only` instead
+  drops every other cop's entries. When you next change a listed
+  file, remove it from the list, then reorder it as above.
 - No cop checks that a helper sits below its caller, or that a new
   method could be private. Those stay yours to check.
