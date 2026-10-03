@@ -16,7 +16,7 @@ This skill orchestrates that pass in six phases:
 5. **Phase 4** -- a fresh-eyes "find the bug" sub-agent on the final state; runs on its own when its triggers fire and is offered otherwise (see "When Phase 4 runs")
 6. **Phase 5** -- fresh sub-agents re-audit the code the fixes changed, and check commit bodies, the pull request description, and follow-up drafts against the final code (see "When Phase 5 runs")
 
-The main agent's job is orchestration: dispatch sub-agents in parallel, merge their reports, dedupe, rank by severity, and build a single coherent list to act on. Sub-agents do not make code changes. Fixes happen in the main agent, from Phase 3 on, with full cross-cutting context.
+The main agent's job is orchestration: dispatch sub-agents in parallel, merge their reports, dedupe, rank by severity, and build a single coherent list to act on. Sub-agents never write to the working tree (see "Never write to the tree to find something out"). Fixes happen in the main agent, from Phase 3 on, with full cross-cutting context.
 
 ## Standing pre-approval -- do NOT prompt for component steps
 
@@ -33,6 +33,57 @@ Do not pad sub-agent prompts with rules that already live in:
 - **`/security-review` (built-in)** -- a general security review of pending changes. The gauntlet's security agent should *invoke* `/security-review` and incorporate its findings, not redo that work from scratch.
 
 Each sub-agent should *read* the relevant CLAUDE.md(s) to inform its findings. The briefs below assume that and don't re-list the rules.
+
+## Never write to the tree to find something out
+
+**No sub-agent this skill dispatches writes to the working tree, in any phase, not even a change it means to undo. Every sub-agent prompt carries the no-write block below, word for word.** A sub-agent sees only its prompt, never this skill, so a rule left out of the prompt does not exist for it. Nobody is watching the tree while an audit runs, and a change an agent leaves behind reads as the developer's own edit in the next commit.
+
+### The no-write block
+
+The block is two paragraphs every prompt carries, then one of two endings.
+
+> **Never write to the working tree, not even a change you intend to undo.** An undo that depends on you finishing normally is not an undo. Run `git rev-parse --show-toplevel` first: that directory is the main checkout. Inside it, do not edit, create, move, or delete any file, and do not run `git stash`, `git restore`, `git reset`, `git checkout <ref> -- <path>`, or any other command that rewrites files there. Do not run the project's tests or code there either: a run writes coverage files, logs, and test-database rows. Read files, run read-only git commands, and report.
+>
+> **Reading a test can rule a dependency out, never in.** A test that never observes a value cannot depend on it, and reading settles that. A test that does observe it may still pass with the production code broken: a default, a setup record, a second code path, or a loose assertion can supply the same answer. A claim that a test does or does not depend on something it observes needs a run, not a read. **A doubt you reach by reading is a finding either way, never something to drop:** report it as confirmed when a run confirms it, and with `unverified:` in front when no run settled it.
+
+The ending for a lane that runs experiments:
+
+> **Your lane runs experiments, and the ordinary way is a throwaway worktree:**
+>
+> 1. Fingerprint the main checkout before anything else, with `main` set to its absolute path: `{ git -C "$main" status --porcelain --untracked-files=all; git -C "$main" diff HEAD; git -C "$main" ls-files -z --others --exclude-standard | xargs -0 git -C "$main" hash-object; } | git hash-object --stdin`
+> 2. Make the worktree outside the checkout: `scratch="$(mktemp -d "${TMPDIR:-/tmp}/gauntlet-experiment.XXXXXX")"`, then `git -C "$main" worktree add --detach "$scratch/tree" HEAD`. Link or copy into it the ignored files and dependency directories the project needs to boot. It holds `HEAD`: when a file you are testing differs in the main checkout, say so in the finding.
+> 3. Run the test there unchanged. It must pass. If it does not, or the project's tests run inside a container, there is no isolated run: skip to step 6 and report the finding as `unverified:`.
+> 4. Make the one change the claim is about, in the file under `$scratch/tree`: remove or alter the argument, line, or condition the test's description says it covers, and nothing else. A test that fails when something else breaks says nothing about that claim. Every edit and every command in an experiment names that absolute path: your shell's directory does not carry over between commands, and a relative path lands in the main checkout. Run only the test file that covers the changed line.
+> 5. Read the result. The test depends on the code only when the examples in question fail on their assertions. A load error, a setup error, or a failure somewhere else settles nothing: report `unverified:`.
+> 6. `git -C "$main" worktree remove --force "$scratch/tree"`, delete `$scratch`, and run step 1's command again. The two fingerprints must match; if they do not, say so in the first line of your report.
+>
+> Run one test file at a time, never two runs at once.
+
+The ending for every other lane:
+
+> **Your lane does not run experiments.** When a finding rests on a claim only a run can settle, report it with `unverified:` in front and name the experiment that would settle it: what to break, which test file to run, and what a failure would show. Never state it as settled, and never touch a file to find out.
+
+Which dispatch gets which:
+
+| Dispatch                                                                 | Block                                 |
+|--------------------------------------------------------------------------|---------------------------------------|
+| `rspec-quality`, in Phase 1 and as a Phase 5 lane                        | Both paragraphs, experiments ending   |
+| The Phase 4 agent, and each scoped bug hunt                              | Both paragraphs, experiments ending   |
+| Every other Phase 1 agent and Phase 5 code lane                          | Both paragraphs, the other ending     |
+| Phase 5's `prose` lane                                                   | The first paragraph only              |
+
+**Only one agent holding the experiments ending runs at a time.** Worktrees of one checkout may share its test database, so two experiment runs can collide. Each dispatch above sends at most one such agent; when more than one scoped bug hunt is owed, dispatch them one after another.
+
+### The main agent's experiments
+
+**The main agent runs its own experiments by steps 1 to 6 of the experiments ending, never in the working tree while a worktree can run.** That covers Phase 3's sort -- step 2, and any other check that changes a file to see what happens -- and light mode's inline audits. Run them one at a time, with no gate or coverage run in flight, and with the tree clean (`git status --porcelain` empty), so `HEAD` holds what is being tested.
+
+**There is no isolated run when the project's tests run inside a container, or when step 3's unchanged run does not pass.** A container that mounts the main checkout cannot reach a worktree elsewhere on disk. A sub-agent then reports `unverified:` and writes nothing. The main agent has two fallbacks, in this order:
+
+1. **A parallel checkout the developer has said is free for this run** -- a second full copy of the project with its own stack, as the parallel-checkouts skill (bundled in this plugin) sets up. With its tree clean, fetch this branch's `HEAD` into it (`git -C <checkout> fetch <main checkout path> HEAD`), check `FETCH_HEAD` out detached, run the experiment there, then restore its files and check out what it had before. Never take a parallel checkout the developer has not named: another session may be working in it.
+2. **Otherwise, in the working tree.** Only the main agent, only with the tree clean: take step 1's fingerprint, make the change, run the test, restore every changed file to exactly its prior content, and take the fingerprint again before anything else runs. The two must match. "When the suite gate runs" says why the gate's evidence then still stands.
+
+An experiment that cannot run by any of these settles nothing, and its finding goes to `[ask]` (see "When Phase 3 fixes").
 
 ---
 
@@ -59,9 +110,9 @@ The gauntlet decides the project's lint+test gate at three points: Phase 0 Step 
 
 **Evidence, and when it goes stale.** Evidence is either a gate result -- a run that reported pass or fail -- or a statement the developer volunteered, in this session and about this branch, that specs and lint pass. The skill's own premise that specs and lint pass is not that statement: it describes when to reach for the gauntlet, not a claim about the tree in front of you, so invoking the gauntlet is never itself the evidence. Both kinds are evidence about *the tree as it stood when they were obtained*, and both go stale by the same test, whichever branch is reading them.
 
-A piece of evidence holds until any file in the working tree is added, changed, or deleted -- tracked or not, staged or not, matching what the targeted-specs skill counts toward scope. Files the project ignores never count: a gate run writes coverage artifacts, logs, and scratch output as it goes, and counting those would make every result stale the instant it was produced. Four things are not changes for this purpose: committing content that has already been tested; a history rewrite that changed only commit messages, proven by an empty `git diff <old> <new>`; an experiment's edit (Phase 3's sort, step 2) that was restored to exactly its prior content before anything else ran; and writing the bookkeeping files this skill and the plan-issue skill maintain (the record file under `.claude/gauntlets/`, a plan file under `.claude/plans/`), which no suite exercises. Judge that by whether a suite or a project check could read the file, never by its extension -- in a repository whose deliverable is prose, a shipped markdown file is production code.
+A piece of evidence holds until any file in the working tree is added, changed, or deleted -- tracked or not, staged or not, matching what the targeted-specs skill counts toward scope. Files the project ignores never count: a gate run writes coverage artifacts, logs, and scratch output as it goes, and counting those would make every result stale the instant it was produced. Four things are not changes for this purpose: committing content that has already been tested; a history rewrite that changed only commit messages, proven by an empty `git diff <old> <new>`; an experiment's edit in the working tree (the last fallback in "The main agent's experiments") that was restored to exactly its prior content before anything else ran; and writing the bookkeeping files this skill and the plan-issue skill maintain (the record file under `.claude/gauntlets/`, a plan file under `.claude/plans/`), which no suite exercises. Judge that by whether a suite or a project check could read the file, never by its extension -- in a repository whose deliverable is prose, a shipped markdown file is production code.
 
-Evidence from another session, or from a sibling worktree, is not evidence here until it has been re-checked against the current tree by that same test.
+Evidence from another session, or from a sibling worktree, is not evidence here until it has been re-checked against the current tree by that same test. An experiment's throwaway worktree sits outside the checkout and changes no file in it, so it leaves the evidence standing.
 
 **Where to read it.** At Phase 0 Step 1 the evidence is what this session has seen. At the Phase 3 tail and afterwards, read it from the record file's header rather than from memory -- Phase 1 is the run's most compaction-prone stretch, and the header is written precisely so the decision survives it.
 
@@ -176,7 +227,7 @@ The Phase 3 tail decides whether a further coverage run happens, per its step 1,
 
 ### Light mode for small PRs
 
-If the diff is under ~50 lines across fewer than ~5 files, sub-agent dispatch overhead probably isn't worth it. Tell the user, then run the same checks (including `/code-review`) **sequentially in the main agent** without spawning sub-agents. Keep the same Phase 2 / Phase 3 structure (consolidate, then sort and fix, then batch the questions). Light mode does not change the Phase 4 decision (see "When Phase 4 runs"), and Phase 5 still dispatches its lanes as sub-agents.
+If the diff is under ~50 lines across fewer than ~5 files, sub-agent dispatch overhead probably isn't worth it. Tell the user, then run the same checks (including `/code-review`) **sequentially in the main agent** without spawning sub-agents. Keep the same Phase 2 / Phase 3 structure (consolidate, then sort and fix, then batch the questions). In light mode the main agent is the auditor, so "The main agent's experiments" governs its audits as it does the sort. Light mode does not change the Phase 4 decision (see "When Phase 4 runs"), and Phase 5 still dispatches its lanes as sub-agents.
 
 ---
 
@@ -190,7 +241,7 @@ Every sub-agent prompt MUST tell the agent to:
 
 1. Read the relevant CLAUDE.md(s) for project context and rules.
 2. Run `git diff main...HEAD` (and `--name-only` / `--stat` as helpful) to see exactly what changed.
-3. **Report only -- do not make code changes.** Fixes happen in Phase 3.
+3. **Report only, and never write to the working tree.** Fixes happen in Phase 3. Paste the no-write block here, word for word ("The no-write block"). **Only `rspec-quality` gets the experiments ending; every other Phase 1 agent gets the other ending.**
 4. Return findings in this exact format:
 
    ```markdown
@@ -201,6 +252,7 @@ Every sub-agent prompt MUST tell the agent to:
 
    ### should-fix
    - `path/to/file.rb:107` -- ...
+   - unverified: `path/to/file_spec.rb:8` -- a claim only a run can settle. Would settle it: what to break, which test file to run, what a failure would show.
 
    ### nit
    - `path/to/file.rb:88` -- ...
@@ -211,7 +263,7 @@ Every sub-agent prompt MUST tell the agent to:
 
 5. Stay in lane. The cruft agent doesn't comment on RSpec patterns; the rspec-quality agent doesn't comment on security; etc.
 
-The agent-specific briefs below are starting templates. Adjust wording to match the project's stack and conventions.
+The agent-specific briefs below are starting templates. Adjust wording to match the project's stack and conventions. Each ends "Report only": the no-write block from item 3 says what that means, and it goes into the prompt unadjusted.
 
 ### Agent: cruft
 
@@ -223,7 +275,7 @@ The agent-specific briefs below are starting templates. Adjust wording to match 
 > - Requires / imports added but unused.
 > - Routes, partials, helpers, JS modules, or assets added but unreferenced.
 >
-> Read `CLAUDE.md` first. Run `git diff main...HEAD --name-only` and `git diff main...HEAD` to scope. Report only -- do not edit. Use the standard findings format.
+> Read `CLAUDE.md` first. Run `git diff main...HEAD --name-only` and `git diff main...HEAD` to scope. Report only. Use the standard findings format.
 
 ### Agent: rspec-quality
 
@@ -299,7 +351,7 @@ The agent-specific briefs below are starting templates. Adjust wording to match 
 > - **Cross-tenant data leaks.** If the change introduces a new query, can a user of one tenant, account, or organization hit it for another's data?
 > - **Authentication bypass.** Any new endpoints that should require login but don't?
 >
-> Read `CLAUDE.md` first. Report only -- do not write fix code. The main agent sorts and acts on every finding, so report them all.
+> Read `CLAUDE.md` first. Report only. The main agent sorts and acts on every finding, so report them all.
 
 ---
 
@@ -323,10 +375,10 @@ When all sub-agents return, the main agent assembles **one** punch list:
 
 **The default is fix. A finding leaves the fix bucket only on one of the grounds below; severity, time, and tokens are never grounds.** A nit is fixed like a must-fix: many developers are exacting about idioms and quality, and a nit in lines the branch already touches is cheaper now than it will ever be again. What a run costs is settled in Phase 0, before any finding exists, and is never a reason to leave one unfixed. This subsection is the one home of what happens to a finding; other sections point here.
 
-**Sort.** **Every finding ends in exactly one of four buckets -- none is dropped -- and each is checked against the code before it is sorted.** Read the lines the finding names and the lines its claim rests on: an "unused" method gets a search for its callers, a "bypass" gets the line that bypasses. A finding that looks clear on paper is only clear once that check agrees with it. Then take the finding down this list and put it in the bucket of the first ground that matches, writing the ground next to it. A bucket with its reason is one the developer can overrule in a sentence; a bare one costs a round trip.
+**Sort.** **Every finding ends in exactly one of four buckets -- none is dropped -- and each is checked against the code before it is sorted.** Read the lines the finding names and the lines its claim rests on: an "unused" method gets a search for its callers, a "bypass" gets the line that bypasses. A finding that looks clear on paper is only clear once that check agrees with it. A check that changes a file to see what happens is an experiment, and "The main agent's experiments" governs it wherever in the sort it happens. Then take the finding down this list and put it in the bucket of the first ground that matches, writing the ground next to it. A bucket with its reason is one the developer can overrule in a sentence; a bare one costs a round trip.
 
 1. **Disproved -> `[disproved: <evidence>]`.** The code or a test shows the finding is wrong. State the evidence (`called at app/jobs/x.rb:19`). "Looks pre-existing" and "seems minor" are not disproof, and neither is another audit's "considered but ruled out" note: a finding one audit reports and another ruled out is step 2's case.
-2. **Audits disagree -> test, then sort again.** When one audit's finding contradicts another's "considered but ruled out", or two findings contradict each other, never pick the more confident report. Settle it with evidence: read the line both depend on, or run a cheap experiment -- usually a mutation, breaking the thing on purpose to see whether a spec fails. Restore every mutated file to exactly its prior content and confirm `git status` and `git diff` match what they showed before the experiment ("When the suite gate runs" says why that keeps its evidence standing). Step 2 has no bucket of its own: evidence against the finding makes it `[disproved: <evidence>]`, evidence for it sends it on to step 3, and evidence that settles nothing makes it `[ask]`.
+2. **Audits disagree, or a finding is `unverified:` -> test, then sort again.** When one audit's finding contradicts another's "considered but ruled out", two findings contradict each other, or an agent reported a finding as `unverified:`, never pick the more confident report and never sort an unverified claim as though it were settled. Settle it with evidence: read the line both depend on, or run a cheap experiment -- usually a mutation, breaking the thing on purpose to see whether a spec fails. The experiment runs in a throwaway worktree, never in the working tree while a worktree can run: "The main agent's experiments" has the steps and the fallbacks. Step 2 has no bucket of its own: evidence against the finding makes it `[disproved: <evidence>]`, evidence for it sends it on to step 3, and evidence that settles nothing makes it `[ask]`.
 3. **Outside the branch -> `[follow-up]`.** The finding sits in a file that is not in Step 2's `--name-only` list and the branch did not introduce it, or it is a refactor of code that predates the branch and would outgrow it. That list is frozen when Step 2 captures it: a fix that edits another file does not bring that file's findings in. Phase 5's scope is the exception (see "Scope: the fix diff"). Nits in untouched files go into **one** grouped draft, never a draft each. A bug the branch introduced is never follow-up, wherever it shows -- a PR owns the bugs it introduces.
 4. **A judgment the developer owns -> `[ask]`.** Only these: **a design or architecture tradeoff**; **a behavior change a user or stakeholder would notice** beyond what the branch set out to do, such as a changed URL or a different email -- fixing a bug so the branch does what it evidently set out to do is not one; **a new validation or constraint on an existing column**, which rows already in the database may fail; **a performance change** that needs measuring first; **a fix the size rule below sends here**; **an experiment in step 2 that settled nothing**.
 5. **Everything else -> `[fix]`.**
@@ -369,7 +421,7 @@ After the fix bucket is done -- or immediately, when it is empty -- this tail ru
 2. Report the PR size in lines changed across files -- insertions plus deletions from `git diff main...HEAD --shortstat`, excluding generated files such as lockfiles, schema dumps, and recorded cassettes -- and whether it is more than 400 lines, the easy-review threshold, or not. This is the number the `large` trigger reads.
 3. Decide whether Phase 4 runs, per "When Phase 4 runs" in Phase 4 below: write the record line, and when it runs, announce and dispatch it, then sort and fix its findings as "What to do with the findings" says before going on. That subsection owns the triggers; do not re-derive them here.
 4. Run Phase 5 ("Phase 5 -- Re-audit what the fixes changed"): write its decision line, dispatch its lanes, and sort and fix their findings before going on. That section owns when its code audits skip; do not re-derive it here.
-5. Send the batch ("When Phase 3 fixes"), ending with the close-out. This is the only step that sends it.
+5. Remove any experiment worktree a stopped agent left behind: for each path `git worktree list --porcelain` names that contains `gauntlet-experiment.`, run `git worktree remove --force <path>` and delete its scratch directory, then `git worktree prune`. Then send the batch ("When Phase 3 fixes"), ending with the close-out. This is the only step that sends it.
 
 ---
 
@@ -414,6 +466,8 @@ The mental shift from Phase 1 is significant: Phase 1 agents look in narrow lane
 ### Dispatch a fresh sub-agent
 
 Use `Agent` with `subagent_type: "general-purpose"`. Do NOT pass the Phase 1 reports (including /code-review's) or the consolidated findings file to this agent -- the value is fresh eyes. Anchoring it on prior findings narrows its search.
+
+**Paste the no-write block after the brief, word for word, with the experiments ending** ("The no-write block"). This agent runs as unwatched as a Phase 1 audit and hunts the kind of bug an experiment would confirm.
 
 ### Sub-agent brief
 
@@ -478,17 +532,19 @@ The fix diff is `git diff <baseline> HEAD`, where the baseline is the `Baseline:
 
 Apply Phase 0 Step 3's trimming table to the fix diff's file list, and add the `prose` lane, which is never skipped. The fix diff scopes the code lanes only: the `prose` lane reads every commit on the branch, `git log main..HEAD`, because a stale claim can sit in a commit Phase 1 already saw. A fix that changed only specs gets `cruft`, `rspec-quality`, and `prose`; one that changed a controller and its spec also gets `idioms`, `data-validation`, and `security`. A lane that runs reports style findings too, as its Phase 1 counterpart did.
 
-**Each lane is a fresh sub-agent, even in light mode**, dispatched in a single message: the session that wrote the fixes is the least independent reviewer of them. Give each code lane its Phase 1 brief with this substitution, stated in the prompt: "Your scope is the fix diff, `git diff <baseline> HEAD`, not the branch diff. Where the brief says `main...HEAD` or 'lines this branch adds', read the fix diff, and read 'existed on `main`' as 'existed at the baseline'. Use `git diff main...HEAD` only as context." The `security` lane skips `/security-review`, which reviews the whole branch and so repeats Phase 1; it runs only the brief's branch-specific checks over the fix diff. `/code-review` does not run again. Do not pass Phase 1's findings or the record file's findings to any lane.
+**Each lane is a fresh sub-agent, even in light mode**, dispatched in a single message: the session that wrote the fixes is the least independent reviewer of them. Give each code lane everything Phase 1 requires of a sub-agent prompt -- the numbered list, the no-write block with the ending its lane gets, and the lane's brief -- so a change to a Phase 1 brief or to the block reaches Phase 5 too. Add this substitution, stated in the prompt: "Your scope is the fix diff, `git diff <baseline> HEAD`, not the branch diff. Where the brief says `main...HEAD` or 'lines this branch adds', read the fix diff, and read 'existed on `main`' as 'existed at the baseline'. Use `git diff main...HEAD` only as context." The `security` lane skips `/security-review`, which reviews the whole branch and so repeats Phase 1; it runs only the brief's branch-specific checks over the fix diff. `/code-review` does not run again. Do not pass Phase 1's findings or the record file's findings to any lane.
 
 ### Agent: prose
 
-> Check the branch's prose against the code as it now stands. Report only -- do not edit, reword, or post anything.
+> Check the branch's prose against the code as it now stands. Report only -- do not reword or post anything.
 >
 > - **Commit bodies.** For every commit in `git log main..HEAD`, compare each claim in its body with the code: a stated status code, a named method, a described behavior. For every SHA a body cites, confirm `git rev-parse --verify <sha>^{commit}` succeeds and `git merge-base --is-ancestor <sha> HEAD` exits 0; a SHA that fails either no longer names this branch's history.
 > - **The pull request description**, when one exists and you can read it: the same comparison.
 > - **The follow-up drafts** under `## Follow-up drafts` in `.claude/gauntlets/<branch-name>-gauntlet.md`: does each still hold against the final findings, including the Phase 4 section? A later phase can overturn an earlier phase's suggestion.
 >
 > For each finding, name the commit SHA, the description, or the draft title. Use the standard findings format.
+
+Paste the no-write block's first paragraph after this brief ("The no-write block").
 
 ### Sorting and fixing Phase 5's findings
 
@@ -501,7 +557,7 @@ Prose findings have fixed buckets, because correcting prose rewrites history or 
 - **A wrong pull request description is `[ask]`**, with the corrected text in the batch: the description is text under the developer's name.
 - **A wrong follow-up draft is corrected in place** in the record file, since it has not been filed, under developer triage too: the correction publishes nothing, and filing still waits for the developer. Say in the batch what changed.
 
-**A scoped bug hunt for the riskiest Phase 5 fixes.** A Phase 5 fix to a must-fix finding, or one tagged `(guard rewrite)`, gets the Phase 4 sub-agent brief, dispatched fresh, with its scope narrowed to that fix's commit (`git show <sha>`). It runs without asking, like a fired Phase 4 trigger. Before dispatching, append `Phase 5 bug hunt: ran (<short sha>)`. Its findings go in the Phase 5 section, in a subsection named for that commit and written when the hunt returns, even when it found nothing, and are sorted and fixed the same way; its own fixes get the suite gate and nothing more. When the hunt returns after the batch was sent, as it does under developer triage, where Phase 5's fixes wait for the pick, its findings go in one last short batch, as a late Phase 4's do.
+**A scoped bug hunt for the riskiest Phase 5 fixes.** A Phase 5 fix to a must-fix finding, or one tagged `(guard rewrite)`, gets the Phase 4 sub-agent brief and the no-write block that goes with it, dispatched fresh, with its scope narrowed to that fix's commit (`git show <sha>`). When more than one hunt is owed, dispatch them one after another ("The no-write block" says why). It runs without asking, like a fired Phase 4 trigger. Before dispatching, append `Phase 5 bug hunt: ran (<short sha>)`. Its findings go in the Phase 5 section, in a subsection named for that commit and written when the hunt returns, even when it found nothing, and are sorted and fixed the same way; its own fixes get the suite gate and nothing more. When the hunt returns after the batch was sent, as it does under developer triage, where Phase 5's fixes wait for the pick, its findings go in one last short batch, as a late Phase 4's do.
 
 **Developer triage.** Under `Phase 3: developer triages`, Phase 5's findings are sorted and recorded, then presented in the batch for the developer's pick; none is fixed first.
 
