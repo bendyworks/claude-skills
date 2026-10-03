@@ -33,14 +33,19 @@ The order:
   the public interface. `private` followed by `attr_reader :name` is
   fine. A private class method goes in a `class << self` block with
   its own `private` section; `private` above `def self.name` does
-  nothing. **A project whose own style declares private methods
-  inline (`private def`), in its CLAUDE.md or its `.rubocop.yml`,
-  keeps that style: follow it, and do not convert its files.**
+  nothing, and `private_class_method :name` is the trailing form
+  again. **A project whose own style declares private methods inline
+  (`private def`), in its CLAUDE.md or its own `.rubocop.yml`, keeps
+  that style: follow it, and do not convert its files.** A setting
+  RuboCop wrote into a generated `.rubocop_todo.yml` is not a stated
+  style.
 - **A method you add is private unless something outside the class
   calls it.** Framework entry points (a controller action, a job's
   `perform`, a policy's `update?`) are called from outside and stay
   public. Making an existing method private is a separate decision:
-  its callers may be in views, other classes, or `send`.
+  its callers may be in views or other classes, or reach it through
+  `public_send`, `respond_to?`, or ActiveSupport's `try`, which turns
+  a call to a private method into a silent `nil`.
 - Spec files are outside this rule; `let` and example groups follow
   RSpec's own order.
 
@@ -57,8 +62,9 @@ half in the new order reads worse than either. The reorder commit:
 - lets a reviewer skip the moves and read the real change on its own.
 
 **Ask before reordering when the moves alone would carry the pull
-request past its size threshold, or when the change is a hotfix or a
-revert.**
+request past the size the team reviews comfortably (400 changed lines,
+where the team has no figure of its own), or when the change is a
+hotfix or a revert.**
 
 ## Let RuboCop hold the line
 
